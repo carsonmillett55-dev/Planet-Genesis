@@ -6997,6 +6997,7 @@
      actions beside it.
      ============================================================ */
   var selected = null;
+  var opWanted = false;   // the object box is open — see renderSelBar
   /* The PIECE under the cursor, as opposed to the whole object: the run
      of one material you could pull out on its own. LittleBigPlanet lets
      you address these separately even while they are welded into one
@@ -7020,6 +7021,7 @@
        open with nothing in it — which is exactly what happened. The guard
        is for boot: clearAllObjects runs before the box has been looked up. */
     if (objPanelEl) objPanelEl.hidden = true;
+    opWanted = false;
     if (!selected) return;
     selected = null;
   }
@@ -7104,8 +7106,13 @@
     row.appendChild(b);
     return b;
   }
+  /* Whether the box is wanted at all. Selecting something does not open it —
+     a left-click is for grabbing, moving and resizing, and the box getting
+     in the way of that every time was the complaint. Right-click opens it;
+     the close button or losing the selection shuts it. While it is open it
+     follows whatever is selected. */
   function renderSelBar(){
-    if (!selected || mode !== "build"){ objPanelEl.hidden = true; return; }
+    if (!selected || mode !== "build" || !opWanted){ objPanelEl.hidden = true; return; }
     if (objects.indexOf(selected) < 0){ clearSelection(); return; }
     var o = selected, group = selList(), many = group.length;
     var piece = (many === 1 && selectedRegion && selectedRegion.obj === o &&
@@ -7124,7 +7131,7 @@
     } else {
       info.innerHTML = "<b>" + escapeHtml(mats.join(", ")) + "</b> · " + escapeHtml(LAYER_NAMES[o.layer]) +
         (o.layer === MID_LAYER ? "" : " (decoration)") +
-        " · " + (o.forcedStatic ? "anchored" : "free to move") +
+        " · " + (o.forcedStatic ? "locked in place" : "free to move") +
         " · " + objCorners(o) + " corners";
     }
     var about = opSection(null); about.parentNode.insertBefore(info, about); about.remove();
@@ -7191,8 +7198,8 @@
     // Actions.
     var ac = opSection("Actions");
     opBtn(ac, "⧉ Duplicate", "Duplicate (Ctrl+D)", function(){ duplicateSelected(); });
-    opBtn(ac, o.forcedStatic ? "🔓 Let it fall" : "🔒 Anchor",
-      o.forcedStatic ? "Anchored in place — click to let it fall" : "Free to move — click to anchor it",
+    opBtn(ac, o.forcedStatic ? "🔒 Locked" : "🔓 Unlocked",
+      o.forcedStatic ? "Locked in place — click to let it move" : "Free to move — click to lock it in place",
       function(){ anchorSelected(); }, o.forcedStatic ? "on" : "");
     if (many === 1) opBtn(ac, "💾 Save", "Save to My Objects", function(){ saveObjectToMyObjects(o); });
     opBtn(ac, "🗑 Delete", many > 1 ? "Delete all " + many : "Delete the whole object — or double-click it, then Del",
@@ -7734,6 +7741,7 @@
      has already recorded which piece was under the cursor. */
   function openObjCtxMenu(clientX, clientY, obj){
     if (selList().indexOf(obj) < 0) selectObject(obj);
+    opWanted = true;
     renderSelBar();
   }
   function closeObjCtxMenu(){ renderSelBar(); }
@@ -7793,7 +7801,9 @@
       opSavePlacement();
     });
   });
-  document.getElementById("opClose").addEventListener("click", function(){ clearSelection(); });
+  document.getElementById("opClose").addEventListener("click", function(){
+    opWanted = false; objPanelEl.hidden = true;
+  });
   if (typeof ResizeObserver !== "undefined"){
     var opRO = new ResizeObserver(function(){ if (!objPanelEl.hidden && !opDrag) opSavePlacement(); });
     opRO.observe(objPanelEl);

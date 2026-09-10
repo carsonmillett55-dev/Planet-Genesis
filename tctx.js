@@ -105,19 +105,37 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('panning leaves it open', await open());
 
   console.log('');
-  console.log('== left-click opens it too ==');
+  console.log('== only the right button opens it ==');
   await makeAndOpen('wood');
+  ok('and it says what the thing is', /Timber|Wood/i.test(await title()), await title());
   await p.evaluate(() => window.__pg.deselect());
   await p.waitForTimeout(150);
   ok('deselecting closes it', !(await open()));
+  /* A left-click is for grabbing, moving and resizing. It selects, but the
+     box stays out of the way. */
   const lc = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+100, Y+70]);
   await p.mouse.click(lc.x, lc.y);
   await p.waitForTimeout(250);
-  ok('a plain left-click opens it', await open());
-  ok('and it says what the thing is', /Timber|Wood/i.test(await title()), await title());
+  ok('a left-click selects it', (await p.evaluate(() => window.__pg.selection())).length === 1);
+  ok('but does not open the box', !(await open()));
+  await p.mouse.click(lc.x, lc.y, { button:'right' });
+  await p.waitForTimeout(250);
+  ok('a right-click does', await open());
   await p.click('#opClose');
   await p.waitForTimeout(150);
   ok('the close button closes it', !(await open()));
+  ok('and keeps the selection, so you can still drag it', (await p.evaluate(() => window.__pg.selection())).length === 1);
+
+  console.log('');
+  console.log('== the lock says what it is ==');
+  await makeAndOpen('wood');
+  const lockText = () => p.evaluate(() => Array.from(document.querySelectorAll('#opBody button')).map(b => b.textContent).find(t => /Locked|Unlocked/.test(t)));
+  const l0 = await lockText();
+  ok('the lock shows the current state', /Locked|Unlocked/.test(l0 || ''), l0);
+  await p.evaluate(() => { const b = Array.from(document.querySelectorAll('#opBody button')).find(x => /Locked|Unlocked/.test(x.textContent)); b.click(); });
+  await p.waitForTimeout(200);
+  const l1 = await lockText();
+  ok('and flips when you click it', !!l1 && l1 !== l0, { l0, l1 });
 
   console.log('');
   console.log('== it survives being used ==');

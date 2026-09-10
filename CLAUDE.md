@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` | Playwright suites, 154 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` | Playwright suites, 159 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 154 checks + checkgeom, in order
+npm test                   # all 159 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -54,7 +54,7 @@ node tsel.js               # 39 — selection, marquee, group transforms, resize
 node tlayer.js             # 9  — layer accuracy and ranked picking
 node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
-node tctx.js               # 19 — the object box: opening, closing, moving, remembering
+node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 19 — the personal menu's sections, pages and gradient
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -210,10 +210,18 @@ called it, so it kept the name and changed its job). It replaced two things
 at once: the strip that followed the selection around and sat on top of it,
 and the right-click popup, which held half the same buttons.
 
-- **Left-click and right-click both open it.** Right-click just makes sure
-  the thing is selected; the caller has already recorded which piece was
-  under the cursor. `openObjCtxMenu` and `closeObjCtxMenu` survive as thin
+- **Only the right button opens it.** A left-click selects — it is for
+  grabbing, moving and resizing, and the box getting in the way of that on
+  every click was the complaint. `opWanted` is the box's own open/closed
+  state, separate from the selection: right-click sets it, the close button
+  and losing the selection clear it, and while it is open it follows
+  whatever is selected. Closing it keeps the selection, so you can still
+  drag the thing. `openObjCtxMenu` and `closeObjCtxMenu` survive as thin
   wrappers so nothing had to be rewired.
+- **The lock shows what it is, not what clicking will do.** "🔒 Locked" or
+  "🔓 Unlocked", highlighted when locked. Carson asked for this specifically;
+  a button that reads "Let it fall" on a locked object made you work out the
+  state from the action.
 - **Sections appear only when they apply** — no Light section on a plank, no
   This Piece section unless you clicked a real piece of something bigger.
   It re-renders from scratch on every change; it is small, and that is far
