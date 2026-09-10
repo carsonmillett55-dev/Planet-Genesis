@@ -24,16 +24,32 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
 | `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` | Playwright suites, 97 checks between them. |
+| `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
-| `teardown.html` | An architecture teardown of the project, written earlier. |
+| `teardown.html` | An architecture teardown of the project, written earlier. Predates the polygon rewrite — its "leave it alone" section describes the old dab model. |
+| `ROADMAP.md` | Carson's direction for the whole project. The goal all the work aims at. |
 
 ### Running the tests
 
+Once, to install the driver:
+
 ```
-python3 mkprev.py          # regenerate preview.html after ANY edit to the HTML
+npm install               # playwright-core only — no browser download
+```
+
+Then:
+
+```
+python mkprev.py           # regenerate preview.html after ANY edit to the HTML
+npm test                   # all 97 checks + checkgeom, in order
+npm run perf               # migration and frame time on level.json
+```
+
+Or one suite at a time:
+
+```
 node regress.js            # 22 checks — geometry, save/load, play mode
-node regress.js perf       # + migration and frame time on level.json
 node tsel.js               # 17 — selection, marquee, group transforms
 node tlayer.js             # 9  — layer accuracy and ranked picking
 node tmat.js               # 16 — materials, colours, glass, light
@@ -42,9 +58,19 @@ node tctx.js               # 13 — the right-click popit menu's lifetime
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
-The suites drive a local Chromium (`/opt/pw-browsers/chromium-1194/chrome-linux/chrome`,
-launched with `--no-sandbox`) against `file://preview.html`. Adjust that path
-for your machine.
+The suites run against `file://preview.html` in whatever Chrome or Chromium
+the machine already has. `tenv.js` finds it — the search order covers the
+Playwright Chromium on Linux, Chrome and Edge on Windows, and Chrome on
+macOS — so no suite hardcodes a path any more. Set `PG_CHROME` to override.
+
+`playwright-core` rather than `playwright` on purpose: it drives a browser
+you already have instead of downloading a private 130MB copy.
+
+**Tests that paint into a dynamic object must aim at where it *is*, not
+where it was painted.** Build mode runs physics, so anything not static has
+already fallen by the next drag. `tmat.js` reads the body position first;
+copy that pattern rather than a fixed offset, or the test passes only on a
+machine slow enough to hide the fall.
 
 **`preview.html` is generated and gitignored.** All test hooks live in
 `mkprev.py`, never appended ad hoc — and `window.__pg` must never reach
@@ -186,11 +212,30 @@ has to remember the menu exists.
 
 ## What's next
 
-Near-term, in Carson's order: custom drawn materials (the save schema already
-reserves `u:<id>` keys — needs a drawing surface, property sliders, naming,
-and embedding into levels), then layer peek, a much bigger world, sprint on
-shift, and a floppy swingable rope. After that: enemies and the LBP gadget
-family — creature eye, sensors, movers, emitters, buttons, levers.
+**[`ROADMAP.md`](ROADMAP.md) is the full picture** — Carson's direction for the
+whole project, captured 2026-09-10 and sorted by what each part depends on.
+Read it before planning anything larger than a bug fix.
+
+The short version. Near-term, cheap and self-contained: the bolt rework,
+region-delete (Delete should remove the selected material region, not the whole
+object), the fill tool, a 4x larger world, and the water/ice polish. Then the
+LBP gadget family — buttons, levers, player and water sensors, emitters, mover,
+world changer, creature eye — none of which exists yet, and which is the
+biggest jump in what a level can actually do.
+
+Also still wanted from the earlier list: custom drawn materials (the save
+schema already reserves `u:<id>` keys — needs a drawing surface, property
+sliders, naming, and embedding into levels), layer peek, and sprint on shift.
+
+The floppy swingable rope is **superseded**: the player mechanic is an
+LBP-style grab, designed for keyboard and mouse rather than a held shoulder
+button. Ropes as level objects are unaffected.
+
+Beyond that the project grows a hub world, several more creation surfaces
+(creatures, music, backgrounds, particles, a rollercoaster, a 2.5D mode), and
+an online platform with levels, friends, multiplayer, currency and a store.
+That last part needs a backend that does not exist; `ROADMAP.md` says what has
+to be decided before it is built.
 
 ## How Carson works
 

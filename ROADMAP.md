@@ -1,0 +1,417 @@
+# Planet Genesis — the roadmap
+
+Carson's direction for the project, captured 2026-09-10. This is the goal the
+work aims at; `CLAUDE.md` is how the code currently works. Nothing here is
+built yet unless it says so.
+
+Sorted by **what it depends on**, not by how much Carson wants it — because
+roughly half this list needs a backend that does not exist, and the other half
+does not. The parts that need nothing new should not wait on the parts that
+need everything.
+
+---
+
+## The shape of the whole thing
+
+Planet Genesis becomes LittleBigPlanet: a creative sandbox wrapped in a social
+platform. A persistent customisable hub world, a full gadget family so levels
+can actually *do* things, several more creation surfaces (creatures, music,
+backgrounds, particles, animated objects), and then an online layer — publish
+levels, find other people's, play together, trade, and sell what you make for
+in-game currency.
+
+The reference is always **actual LBP behaviour**, researched rather than
+approximated.
+
+---
+
+## Part A — Fixes and polish to what already exists
+
+No new architecture. These are things wrong or missing in systems already
+built, and they are the cheapest wins in the document.
+
+### Bolts (a rework, not a patch)
+
+Carson flagged bolts twice, independently. Current problems:
+
+- Cannot be visually placed on the front-most layer.
+- Cannot really be locked onto the back layer.
+- Need to work in **build mode when unpaused**.
+- **Motor bolts should not be loose** — only loose bolts should be loose.
+- Speed adjustment moves **out of world settings** and onto the bolt:
+  right-click a bolt for its own menu. Carson explicitly does not want this in
+  the global menu.
+
+Treat as one coherent rework of how bolts are placed, drawn, layered and
+configured, rather than a series of spot fixes.
+
+### Delete should remove the region, not the object
+
+Selecting an object and pressing Delete currently removes the whole thing.
+Carson's example: a line of sponge drawn through a big wooden circle. Delete
+should remove **only the sponge region** — which today is only possible via the
+cut feature.
+
+To delete the whole object: double-click, or click-and-drag to select all of it.
+
+The region model already in the code (`obj.pieces`) supports this directly.
+
+### Other polish
+
+- **Water material** needs work and polish.
+- **Ice must get slipperier on a slope.**
+- **Level size at least 4x larger** than now — as large as possible.
+- **Replace "rope grab" with a proper LBP-style grab.** See below — this
+  absorbed the old "floppy swingable rope" item.
+- **Temporarily hide an object in a layer**, the way LBP does.
+- **Double jump toggle** in world settings.
+- **Inventory and popit menu** should match LBP's menus as closely as possible,
+  functionally and visually.
+
+Carried over from the earlier near-term list in `CLAUDE.md`, still wanted:
+
+- **Layer peek** — related to, but not the same as, temporarily hiding an
+  object in a layer.
+- **Sprint on shift.**
+
+### The grab (supersedes the floppy rope)
+
+Decided 2026-09-10. **The floppy swingable rope is not a player mechanic.**
+Carson dropped it in favour of doing LBP's grab properly:
+
+> "I'd prefer the player to be able to just grab, and make the mechanic as
+> similar to LBP as possible, but with computer controls in mind rather than
+> controller."
+
+So: the player grabs grabbable material and swings from it, the way LBP does —
+that *is* the swinging mechanic, rather than a separate rope item. The design
+work is in the **input mapping**, since LBP's grab is a held shoulder button
+(R1) and this is keyboard and mouse. A held key with a clear visual affordance
+for what is grabbable, and swing physics that feel like LBP's, are the two
+things to get right.
+
+Whether ropes remain as *level objects* is untouched by this — only the player
+mechanic changed.
+
+### Fill tool
+
+A bucket, inside material paint mode. Draw a weird closed outline in wood, fill
+the interior with any material. The boolean geometry already supports this; it
+needs the tool and the flood-region logic.
+
+---
+
+## Part B — The LBP gadget family
+
+Self-contained, offline, and the biggest single jump in what levels can *be*.
+Nothing here needs a backend.
+
+**None of it exists yet** — verified: `emitter` in the code today is a material
+flag meaning "emits light", not a gadget.
+
+Carson's instruction for the whole family: research the real LBP system and
+implement it, including connected systems, rather than approximating.
+
+| gadget | behaviour |
+| --- | --- |
+| **Buttons** | LBP behaviour. Activator. |
+| **Levers** | LBP behaviour. Activator. |
+| **Player sensors** | Activates motor bolts and other tools. Works like LBP. |
+| **Water sensors** | LBP behaviour. |
+| **Emitters** | Research the LBP emitter system specifically — it is deeper than it looks. |
+| **World changer** | Driven by activators (sensors, buttons). Adjusts world lighting, world water level, etc. |
+| **Mover** | See below. |
+| **Creature eye** | See below. |
+
+### Mover
+
+Place it on an object. Placing opens a mode where you draw a line; the object
+follows that line and stops at the end.
+
+- Default look: an **arrow**.
+- Two modes: travel once and stop, or **bounce back and forth**.
+- The bounce line is **orange with an arrow on both ends** — visually distinct
+  from the one-way green line.
+- Adjustable speed.
+- Can be activated by a player sensor or other tools.
+
+### Creature eye
+
+Drop it onto an object you built and the object becomes a creature.
+
+- The eye visibly follows the player.
+- The object follows the player on the **left/right axis only** by default.
+- Toggle **all directions** and it floats toward the player freely.
+- Adjustable speed and other creature properties.
+- Toggle: **"creature dies when stepped on"** — yes/no.
+
+Carson explicitly grants liberty on the details here: make it feel like LBP.
+
+### Gadget visibility
+
+Every tool needs an **"invisible in play mode"** option. Reference how LBP
+gadgets handle this and implement the pertinent behaviour.
+
+---
+
+## Part C — New creation surfaces
+
+Each is a new authoring mode. They share a pattern already proven twice in this
+codebase (the character creator, the level editor): **draw it, name it, save
+it, reuse it.**
+
+### Custom drawn materials
+
+Carried over from the earlier near-term list, and the closest thing to a
+started feature: **the save schema already reserves `u:<id>` keys.** Needs a
+drawing surface, property sliders, naming, and embedding into levels so a
+level carries its own custom materials.
+
+### Create a creature
+
+Draw and animate a creature the way you draw and animate a character. Simple or
+animated. Adjustable hitbox. Save custom creatures. Carries the same settings as
+the creature eye ("dies when stepped on", etc).
+
+### Animated object
+
+Draw an animated object with either a **custom hand-drawn hitbox** or **no
+collision at all**.
+
+### Rollercoaster
+
+A track **material**, not a gadget:
+
+- **Fixed brush size** — deliberately not adjustable. Grey.
+- Creates track wherever you draw the line.
+- **Passes through all blocks** — geometry does not stop the coaster.
+- The coaster **stops at the end of the line you drew.**
+- Default coaster is **one seat**; up to **12**, edited by right-clicking the
+  front seat.
+- Right-clicking the front seat also offers **customise coaster look**: draw
+  your own seat within a bounded range above the track, and the design
+  **duplicates across all rear seats**.
+- Spacing and coupling must actually work. Think through the pitfalls of this
+  system before building it — Carson called this out specifically.
+
+### Music creation
+
+A simple music tab where you **draw the music the way you draw materials.**
+Piano, drums, guitar, bass.
+
+### Backgrounds
+
+Create and save custom level backgrounds in a paint mode. Eventually sellable.
+
+### Custom particles
+
+Author your own particle effects.
+
+### Character improvements
+
+- **Crouch**, animatable for custom characters.
+- **Slide** — crouch while running to slide a little. Animatable.
+- **Custom hand-drawn hitboxes** for characters, potentially **size-changing**
+  so a crouch can have a shorter box.
+
+### 2.5D create mode
+
+A whole second mode:
+
+- Top-down view. WASD moves up/down/left/right.
+- The character **looks at the cursor**.
+- Same material editing and geometry as the side-on mode.
+- Needs its own character creation and animation options that make sense for a
+  top-down view.
+
+---
+
+## Part D — The shell: hub world, menus, level plumbing
+
+The frame the game lives in. Mostly offline; the menu tabs that need a backend
+are marked.
+
+### Main menu
+
+Tabs:
+
+- **My World** — see below.
+- **Level Finder** — needs backend.
+- **Friends** — needs backend.
+- **Shop** — needs backend.
+
+A **Loot Boxes** tab was in the original list and is parked; see "Parked" at
+the end. Leave room for it in the menu layout rather than designing it out.
+
+### My World
+
+A persistent, customisable hub where all your level creation lives.
+
+- Like a level, but **no start and no finish.**
+- You walk around in it.
+- Customisable through a **paintbrush-style customiser**, the same way
+  characters and levels are.
+
+### Level doors
+
+In the inventory's **Tools tab**, a **"level door"**.
+
+- Place it in My World, then right-click for options including **"create
+  level"**.
+- Creating a level makes a door appear for it.
+- Before entering, choose level options — **"small, medium or large characters
+  only?"** and other pertinent creation settings. All toggleable later.
+- Customising the door's own appearance comes later.
+
+### Portals
+
+String levels together — walk through a portal to arrive in another level, like
+LBP. The use case Carson named: one level too big for a single world, split
+into parts.
+
+---
+
+## Part E — The online platform
+
+**Everything here needs a backend that does not exist yet.** Today levels have
+no owner, no id and no thumbnail; saves go to a `db` capability or
+localStorage; characters and My Objects are localStorage-only. See the hazards
+in `CLAUDE.md` and the storage section of `teardown.html`.
+
+Not a reason to skip it — a reason to build the account and storage layer once,
+deliberately, before the features that assume it.
+
+### Level Finder
+
+Reference the LBP online system throughout.
+
+- Search bar.
+- Popular levels displayed.
+- **Difficulty voting 1–10, available after beating the level.**
+- **Like / dislike, available after merely playing** — you do not have to beat
+  it.
+- Submit your own levels for review.
+
+### Moderation
+
+Level submissions and store submissions are **reviewed by Carson** for
+appropriateness before going live.
+
+### Friends and social
+
+- Friends list.
+- **Email-style messaging system.**
+- **Chat box, bottom left.**
+- **Invite friends to help you build a level.**
+- **Invite friends to play a level with you.**
+
+### Multiplayer
+
+Host servers. Multiple people playing at once. Ideally **massive lobbies or
+play sessions.**
+
+### Currency
+
+**Coins.** Purchasable **only with real money**, in the shop — deliberately, to
+create scarcity and demand.
+
+### Trading
+
+- Trade **character skins and objects** with other people.
+- Offer coins for them.
+
+(Card trading is parked along with loot boxes — see below.)
+
+### The store
+
+People sell what they make, priced in coins they set themselves:
+
+- Objects, music, characters, backgrounds, levels, creatures.
+- Submissions **reviewed by Carson**.
+- Buyers must be able to **test a character before buying** and see its possible
+  animations.
+- Listings must state **whether the character is animated or not.**
+
+---
+
+## Things to decide before Part E is built
+
+Flagged because they change the architecture, not because they are objections.
+
+1. **Selling coins for real money to a young audience carries obligations**
+   even without loot boxes — refunds, parental consent in some places, and
+   clear pricing. Much lighter than the randomised-reward case, but it is the
+   reason the currency should be designed as a normal storefront purchase
+   rather than something reachable by accident mid-game.
+2. **Manual review by one person does not scale.** Completely right for the
+   first few hundred submissions, the bottleneck after that. Worth designing
+   the queue so other reviewers can be added without a rewrite.
+3. **Multiplayer is the single largest technical item here.** Matter.js is not
+   deterministic across machines, so synchronised physics needs either an
+   authoritative host or state reconciliation. This decision shapes the netcode
+   and should not be made late.
+4. **Selling user-made content means handling other people's money** — payouts,
+   chargebacks, tax. Worth knowing whether sellers cash out or whether coins
+   stay inside the economy.
+5. **The three open questions from `teardown.html`** are still unanswered and
+   gate the ordering of this whole document: how far away is "other people play
+   this"; is this staying an Artifact or becoming a real site; enemies before
+   or after publishing.
+
+---
+
+## Suggested order
+
+Carson's call, but this is the dependency-honest reading:
+
+1. **Part A** — cheap, self-contained, makes what people already use feel
+   better. Bolts and region-delete first.
+2. **Part B** — the gadget family. Biggest gameplay return per unit of work,
+   needs no new infrastructure, turns static scenes into levels.
+3. **Parts C and D** — more to create, and somewhere to keep it.
+4. **The storage and account layer** — built once, deliberately.
+5. **Part E** — on top of that layer.
+
+Enemies (Part B's creature eye plus creature creation) landing before publishing
+matches the instinct already recorded in `teardown.html`: a discovery page full
+of empty levels is worse than no discovery page.
+
+---
+
+## Parked
+
+Not cancelled — set aside, with the reasoning kept so the decision does not
+have to be made twice.
+
+### Loot boxes and trading cards
+
+Parked 2026-09-10. Carson: "no need to think about loot boxes right now."
+
+The original design: boxes bought with coins, containing custom trading cards
+with Pokémon-style rarity tiers, drawn by Carson, needing an authoring path for
+him to draw and add them to the pool. Card trading was part of the same system.
+
+**Currency and the store are not parked** — Carson's read is that "a currency
+and store where people can share stuff is smart," and that part stands on its
+own. It is only the randomised-reward layer that is set aside.
+
+Worth knowing if it comes back: paid loot boxes are banned outright in some
+countries and require odds disclosure in others, with the rules tightest
+exactly where the audience skews young. That is a design constraint to plan
+around from the start, not a bolt-on.
+
+### The floppy swingable rope
+
+Superseded 2026-09-10 by the LBP-style grab — see Part A. Not a player
+mechanic any more.
+
+---
+
+## Already noted as done or partly done
+
+Carson's note: "some of these have been added already." Verified against the
+code at capture time — bolts, checkpoints, water, glass, light with real
+shadows, rope/grapple, particles, three depth layers, the material system with
+28 colours, and the character creator all exist. The gadget family, creature
+system, music, backgrounds, rollercoaster, portals, crouch/slide, fill tool,
+2.5D mode and the entire online platform do not.
