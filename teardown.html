@@ -1,0 +1,595 @@
+<title>Planet Genesis Teardown</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Public+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --ground:#FBFAF7;
+    --surface:#FFFFFF;
+    --sunk:#F3F1EA;
+    --ink:#22201C;
+    --muted:#6B665C;
+    --faint:#8C877B;
+    --rule:#E3DFD5;
+    --accent:#9A6E0B;
+    --accent-soft:#F5E9C8;
+    --crit:#A8322C;
+    --crit-soft:#F7E4E2;
+    --watch:#9A6E0B;
+    --watch-soft:#F7EED6;
+    --keep:#33684A;
+    --keep-soft:#E2EFE6;
+    --shadow:0 1px 2px rgba(34,32,28,.05), 0 8px 24px -12px rgba(34,32,28,.18);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#171612;
+      --surface:#1F1D18;
+      --sunk:#262319;
+      --ink:#EFEBE1;
+      --muted:#A29C8E;
+      --faint:#877F70;
+      --rule:#332F27;
+      --accent:#E0B455;
+      --accent-soft:#3A2F14;
+      --crit:#E8837C;
+      --crit-soft:#3A1F1D;
+      --watch:#E0B455;
+      --watch-soft:#33290F;
+      --keep:#7FC095;
+      --keep-soft:#1D2E22;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#171612;
+    --surface:#1F1D18;
+    --sunk:#262319;
+    --ink:#EFEBE1;
+    --muted:#A29C8E;
+    --faint:#877F70;
+    --rule:#332F27;
+    --accent:#E0B455;
+    --accent-soft:#3A2F14;
+    --crit:#E8837C;
+    --crit-soft:#3A1F1D;
+    --watch:#E0B455;
+    --watch-soft:#33290F;
+    --keep:#7FC095;
+    --keep-soft:#1D2E22;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+
+  *{ box-sizing:border-box; }
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font-family:'Public Sans', system-ui, -apple-system, sans-serif;
+    font-size:16.5px;
+    line-height:1.62;
+    margin:0;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page{
+    max-width:1080px;
+    margin:0 auto;
+    padding:3.5rem 1.5rem 6rem;
+    display:flex;
+    flex-direction:column;
+    gap:3.25rem;
+  }
+  .col{ max-width:68ch; }
+
+  h1,h2,h3{ font-family:'Fraunces', Georgia, serif; text-wrap:balance; margin:0; font-weight:600; }
+  h1{ font-size:clamp(2.1rem,4.6vw,3.1rem); line-height:1.06; letter-spacing:-.018em; font-weight:700; }
+  h2{ font-size:clamp(1.35rem,2.4vw,1.72rem); line-height:1.2; letter-spacing:-.01em; }
+  h3{ font-size:1.06rem; line-height:1.35; }
+  p{ margin:0 0 1rem; }
+  p:last-child{ margin-bottom:0; }
+  a{ color:var(--accent); }
+
+  .eyebrow{
+    font-size:.72rem; font-weight:600; letter-spacing:.13em; text-transform:uppercase;
+    color:var(--faint); font-family:'Public Sans',sans-serif;
+  }
+  .lede{ font-size:1.16rem; color:var(--muted); line-height:1.55; }
+  code, .num{ font-family:'JetBrains Mono', ui-monospace, monospace; font-variant-numeric:tabular-nums; }
+  code{ font-size:.87em; background:var(--sunk); padding:.1em .35em; border-radius:3px; }
+
+  /* ---- header ---- */
+  header{ display:flex; flex-direction:column; gap:1.1rem; }
+  .meta{
+    display:flex; flex-wrap:wrap; gap:.5rem 1.75rem;
+    padding-top:1.1rem; border-top:1px solid var(--rule);
+    font-size:.83rem; color:var(--faint);
+  }
+  .meta b{ color:var(--muted); font-weight:500; }
+
+  /* ---- section scaffolding ---- */
+  section{ display:flex; flex-direction:column; gap:1.15rem; }
+  .sechead{ display:flex; flex-direction:column; gap:.35rem; }
+
+  /* ---- verdict block ---- */
+  .verdict{
+    background:var(--surface); border:1px solid var(--rule); border-radius:10px;
+    padding:1.6rem 1.75rem; box-shadow:var(--shadow);
+    display:flex; flex-direction:column; gap:.9rem;
+    max-width:74ch;
+  }
+  .verdict p{ margin:0; }
+
+  /* ---- findings ---- */
+  .findings{ display:flex; flex-direction:column; gap:1.6rem; }
+  .finding{ display:flex; flex-direction:column; gap:.5rem; max-width:72ch; }
+  .fhead{ display:flex; align-items:baseline; gap:.7rem; flex-wrap:wrap; }
+  .fhead h3{ border-bottom:2px solid currentColor; padding-bottom:.12rem; }
+  .chip{
+    font-size:.66rem; font-weight:600; letter-spacing:.1em; text-transform:uppercase;
+    padding:.2rem .5rem; border-radius:3px; white-space:nowrap; flex:0 0 auto;
+  }
+  .crit .chip{ background:var(--crit-soft); color:var(--crit); }
+  .crit h3{ color:var(--crit); }
+  .watch .chip{ background:var(--watch-soft); color:var(--watch); }
+  .watch h3{ color:var(--watch); }
+  .keep .chip{ background:var(--keep-soft); color:var(--keep); }
+  .keep h3{ color:var(--keep); }
+  .finding p{ margin:0; }
+  .fix{ font-size:.94rem; color:var(--muted); }
+  .fix b{ color:var(--ink); font-weight:600; }
+
+  /* ---- data ---- */
+  .scroll{ overflow-x:auto; }
+  table{ border-collapse:collapse; width:100%; min-width:520px; font-size:.92rem; }
+  th{
+    text-align:left; font-size:.7rem; font-weight:600; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--faint); padding:0 1rem .5rem 0; border-bottom:1px solid var(--rule); white-space:nowrap;
+  }
+  td{ padding:.62rem 1rem .62rem 0; border-bottom:1px solid var(--rule); vertical-align:top; }
+  td.n{ font-family:'JetBrains Mono',monospace; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  tr:last-child td{ border-bottom:none; }
+  .hot{ color:var(--crit); font-weight:500; }
+
+  figure{ margin:0; display:flex; flex-direction:column; gap:.7rem; }
+  figcaption{ font-size:.85rem; color:var(--faint); max-width:64ch; }
+  .chartwrap{
+    background:var(--surface); border:1px solid var(--rule); border-radius:10px; padding:1.1rem .9rem .6rem;
+    overflow-x:auto;
+  }
+  svg{ display:block; width:100%; height:auto; min-width:520px; }
+
+  /* ---- roadmap ---- */
+  .phases{ display:flex; flex-direction:column; gap:0; }
+  .phase{
+    display:grid; grid-template-columns:8.5rem 1fr; gap:1.5rem;
+    padding:1.35rem 0; border-top:1px solid var(--rule);
+  }
+  .phase:last-child{ border-bottom:1px solid var(--rule); }
+  .ptag{ display:flex; flex-direction:column; gap:.2rem; }
+  .ptag .n{ font-size:.72rem; font-weight:600; letter-spacing:.11em; text-transform:uppercase; color:var(--accent); }
+  .ptag .when{ font-size:.78rem; color:var(--faint); }
+  .pbody{ display:flex; flex-direction:column; gap:.55rem; }
+  .pbody h3{ font-size:1.02rem; }
+  .pbody ul{ margin:0; padding-left:1.05rem; display:flex; flex-direction:column; gap:.3rem; font-size:.94rem; color:var(--muted); }
+  .pbody li b{ color:var(--ink); font-weight:500; }
+  @media(max-width:620px){
+    .phase{ grid-template-columns:1fr; gap:.65rem; }
+  }
+
+  ul.plain{ margin:0; padding-left:1.05rem; display:flex; flex-direction:column; gap:.42rem; }
+  ul.plain li b{ font-weight:600; }
+
+  .askbox{
+    background:var(--accent-soft); border-radius:10px; padding:1.5rem 1.75rem;
+    display:flex; flex-direction:column; gap:.9rem;
+  }
+  .askbox h2{ font-size:1.3rem; }
+  .askbox ol{ margin:0; padding-left:1.2rem; display:flex; flex-direction:column; gap:.7rem; }
+  .askbox li b{ font-weight:600; }
+
+  :focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+</style>
+
+<div class="page">
+
+  <header>
+    <div class="eyebrow">Engineering assessment · Planet Genesis</div>
+    <h1>What's actually under the hood</h1>
+    <p class="lede col">A read of the whole codebase, with the performance claims measured against your real level rather than guessed at. One finding explains the lag you're feeling, and one architectural decision determines whether this can become a platform.</p>
+    <div class="meta">
+      <span><b>Reviewed</b> 4 September 2026</span>
+      <span><b>Source</b> 1 file · 270,770 bytes · ~4,400 lines</span>
+      <span><b>Test level</b> yours — 5 objects, 1,802 dabs</span>
+      <span><b>Runtime</b> Matter.js 0.19 · Canvas 2D · Artifact <code>db</code></span>
+    </div>
+  </header>
+
+  <section>
+    <div class="verdict">
+      <p><b>The prototype is in better shape than its history suggests.</b> The core representation is unusual and it is the right unusual — it is what makes the game look hand-drawn rather than assembled from stamps. The rendering layer is genuinely well optimised. The physics quirks that took real work to find (Matter's <code>_original</code> mass trap, the <code>group:0</code> collision-filter bug, the <code>setParts</code> double-shift) are all correctly worked around and commented. I would not rewrite any of it.</p>
+      <p><b>The lag is one function.</b> Every brush dab you paint into an existing shape rebuilds that entire shape's physics body from scratch. On your level's largest object that costs <span class="num">26&nbsp;ms</span> per dab — one and a half frames, for one dab. It gets worse the more you build, which is exactly backwards for a game about building.</p>
+      <p><b>The thing that will bite hardest later is saving.</b> Every save creates a brand-new document instead of updating one — you already have two copies of the same level in the database, twelve seconds apart. There is no owner on a level, no version, no thumbnail, and levels are stored as one opaque JSON blob that will hit a hard size ceiling at roughly 11,000 dabs.</p>
+      <p><b>Nothing here is exploitable today</b>, because there are no other users. Almost all of it is blocking before there are.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead col">
+      <div class="eyebrow">How it works</div>
+      <h2>Everything follows from the dab</h2>
+    </div>
+    <div class="col">
+      <p>There is one architectural idea in this codebase and the rest is consequence. When you paint, the brush lays down small circles, squares or diamonds — <em>dabs</em>. Every dab is a real Matter.js body. All the dabs you paint in one continuous region are welded into a single compound body, an <em>object</em>. Painting near an existing object grows that object instead of starting a new one; that's the fusing you asked for, and it's why a level tends to be a handful of enormous objects rather than many small ones. Your level is 5 objects and 1,802 dabs; the largest single object holds 1,172 of them.</p>
+      <p>Rendering never draws dabs individually. Every dab in an object is traced into one path and filled once, so overlaps paint once and the silhouette reads as a single hand-drawn blob with no seams. Those paths are cached in the body's own coordinate frame and only rebuilt when the shape actually changes, so drawing your whole level costs <span class="num">0.03&nbsp;ms</span>. That part is done properly and is not a concern.</p>
+      <p>The rest is layered on top: three depth layers with their own collision filters (only the middle one is interactive), a 16-pixel cellular water grid that falls, spreads and pools, density-based buoyancy that both kinds of water feed into, and a character system that stores drawings as normalised brush strokes rather than pixels.</p>
+      <p><b>The tension worth naming now:</b> LittleBigPlanet stores a shape as a polygon with a handful of corners. Planet Genesis stores the same shape as a thousand circles. That choice buys the hand-drawn look and pays for it in physics cost, save size, and rebuild time — all three of the problems below are the same choice seen from different angles.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead col">
+      <div class="eyebrow">The lag</div>
+      <h2>Why building gets slower the more you build</h2>
+    </div>
+    <div class="col">
+      <p>Adding a dab to an object calls <code>rebuildCompound()</code>, which discards the compound body and constructs a new one from every part — recomputing centroid, area, inertia and bounds, and touching the physics broadphase twice. That is the correct workaround for a real Matter bug, and it is fine when an object has thirty dabs. It is not fine at a thousand.</p>
+    </div>
+
+    <figure>
+      <div class="chartwrap">
+        <svg viewBox="0 0 720 300" role="img" aria-label="Cost of one rebuildCompound call against object size, crossing the 60fps frame budget at about 600 dabs.">
+          <!-- grid -->
+          <g stroke="var(--rule)" stroke-width="1">
+            <line x1="56" y1="250" x2="690" y2="250"/>
+            <line x1="56" y1="30" x2="56" y2="250"/>
+          </g>
+          <g font-family="JetBrains Mono, monospace" font-size="10" fill="var(--faint)">
+            <text x="48" y="253" text-anchor="end">0</text>
+            <text x="48" y="185" text-anchor="end">20</text>
+            <text x="48" y="122" text-anchor="end">40</text>
+            <text x="48" y="59" text-anchor="end">60</text>
+            <text x="92" y="268" text-anchor="middle">50</text>
+            <text x="205" y="268" text-anchor="middle">100</text>
+            <text x="317" y="268" text-anchor="middle">200</text>
+            <text x="429" y="268" text-anchor="middle">400</text>
+            <text x="542" y="268" text-anchor="middle">800</text>
+            <text x="654" y="268" text-anchor="middle">1600</text>
+          </g>
+          <text x="373" y="288" text-anchor="middle" font-family="Public Sans, sans-serif" font-size="10.5" fill="var(--faint)" letter-spacing="1.2">DABS IN THE OBJECT</text>
+          <text x="14" y="140" text-anchor="middle" font-family="Public Sans, sans-serif" font-size="10.5" fill="var(--faint)" letter-spacing="1.2" transform="rotate(-90 14 140)">MILLISECONDS</text>
+
+          <!-- frame budget -->
+          <line x1="56" y1="197.8" x2="690" y2="197.8" stroke="var(--crit)" stroke-width="1.4" stroke-dasharray="5 4" opacity=".75"/>
+          <text x="686" y="192" text-anchor="end" font-family="Public Sans, sans-serif" font-size="10.5" fill="var(--crit)">16.6 ms — one frame at 60fps</text>
+
+          <!-- area + curve -->
+          <path d="M92.1 247.3 L204.5 243.2 L316.8 233.0 L429.1 220.3 L541.5 180.5 L653.9 49.0 L653.9 250 L92.1 250 Z"
+                fill="var(--accent)" opacity=".10"/>
+          <path d="M92.1 247.3 L204.5 243.2 L316.8 233.0 L429.1 220.3 L541.5 180.5 L653.9 49.0"
+                fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+
+          <!-- crossing -->
+          <circle cx="494.9" cy="197.8" r="4" fill="var(--crit)"/>
+          <text x="486" y="215" text-anchor="end" font-family="Public Sans, sans-serif" font-size="11" fill="var(--crit)" font-weight="600">~600 dabs</text>
+
+          <!-- measured points -->
+          <g fill="var(--accent)">
+            <circle cx="92.1" cy="247.3" r="3.2"/>
+            <circle cx="204.5" cy="243.2" r="3.2"/>
+            <circle cx="316.8" cy="233.0" r="3.2"/>
+            <circle cx="429.1" cy="220.3" r="3.2"/>
+            <circle cx="541.5" cy="180.5" r="3.2"/>
+            <circle cx="653.9" cy="49.0" r="4.6"/>
+          </g>
+          <text x="646" y="42" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink)" font-weight="500">64.0 ms</text>
+          <text x="534" y="172" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--muted)">22.1</text>
+        </svg>
+      </div>
+      <figcaption>Measured in this session, six object sizes, five runs each. Horizontal axis is logarithmic because I sampled by doubling. Past roughly 600 dabs in one object, a single brush stroke costs more than a whole frame — and a stroke is a hundred of them.</figcaption>
+    </figure>
+
+    <div class="col">
+      <p>Because the object grows as you paint into it, a long stroke pays a rising cost per dab: the total work over one stroke grows with the square of its length. Erasing does the same thing — every pointer move rebuilds every object the eraser touched. Your largest object is already at <span class="num">26&nbsp;ms</span> a dab.</p>
+      <p><b>The fix is small and low-risk:</b> don't rebuild per dab. Accumulate the dabs for the whole stroke and rebuild once when you release the mouse — which is exactly what the drag-out shape tool already does, and why shapes feel instant while freehand doesn't. The shape stays frozen mid-stroke anyway (that's the <code>drawing</code> flag), so nothing needs correct physics until the stroke ends. This is a contained change to <code>addPartToObject</code>, <code>paintAt</code> and <code>eraseAt</code>, and I would want to do it before anything else.</p>
+      <p>Removing the rewind timeline just now also helped more than it looks: it was taking a full snapshot of every dab in the level 6.7 times a second, forever, in the background.</p>
+    </div>
+
+    <figure>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr><th>Where the time goes</th><th>Cost on your level</th><th>How often</th><th>Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Rebuild an object's physics body</td><td class="n hot">26.1 ms</td><td>every painted dab</td><td class="hot">the problem</td></tr>
+            <tr><td>Write the 15-second autosave</td><td class="n">1.83 ms</td><td>every 15 s, blocking</td><td>a visible hitch</td></tr>
+            <tr><td>Serialise the level</td><td class="n">0.92 ms → 140 KB</td><td>save + autosave</td><td>fine</td></tr>
+            <tr><td>Rebuild the water collision grid</td><td class="n">0.42 ms</td><td>up to 3× per frame</td><td>watch it</td></tr>
+            <tr><td>Snapshot for undo</td><td class="n">0.20 ms → 140 KB</td><td>every edit</td><td>fine, but 40 kept</td></tr>
+            <tr><td>Draw every object</td><td class="n">0.03 ms</td><td>every frame</td><td>excellent</td></tr>
+            <tr><td>Draw the parallax backdrop</td><td class="n">0.015 ms</td><td>every frame</td><td>excellent</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption>Undo keeps 40 snapshots at 140 KB each — about 5.6 MB of retained objects on a level this size. Survivable, but it scales with level size and is worth bounding by bytes rather than by count.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sechead col">
+      <div class="eyebrow">Health audit</div>
+      <h2>Critical</h2>
+      <p class="lede">Things that can lose work, corrupt state, or make the game unrecoverable.</p>
+    </div>
+    <div class="findings">
+
+      <div class="finding crit">
+        <div class="fhead"><h3>Every save creates a new level</h3><span class="chip">Data</span></div>
+        <p><code>doSave()</code> calls <code>db.collection("levels").add(...)</code>. There is no update path. Press save twice and you have two levels. Your database currently holds two 165 KB documents twelve seconds apart, both called "Untitled Level", both the same build — I pulled them to measure with.</p>
+        <p class="fix"><b>Fix:</b> give a level an id on first save and <code>set()</code> that document thereafter; "Save a copy" becomes an explicit action. Small change, and it has to happen before the level list becomes unusable.</p>
+      </div>
+
+      <div class="finding crit">
+        <div class="fhead"><h3>A thrown error kills the game permanently</h3><span class="chip">Recovery</span></div>
+        <p>The render loop reschedules itself on its last line. If anything above that line throws — a malformed level, an edge case in the water grid, a null body — the loop is never scheduled again and the game freezes with no error and no way back except a reload, losing anything since the last autosave.</p>
+        <p class="fix"><b>Fix:</b> wrap the frame body in try/catch and always reschedule; surface the error once instead of dying. Ten lines.</p>
+      </div>
+
+      <div class="finding crit">
+        <div class="fhead"><h3>Loaded levels are trusted completely</h3><span class="chip">Robustness</span></div>
+        <p><code>loadLevelData()</code> takes <code>x</code>, <code>y</code>, <code>r</code>, <code>shape</code> and a material name straight from JSON into body construction. An unknown material throws on the first property read. A radius of <code>NaN</code> or <code>1e9</code> produces a broken body. A level claiming 500,000 dabs hangs the tab on load with no escape. Today this only matters if a save is corrupted; the moment anyone can hand you a level, it is the primary attack surface.</p>
+        <p class="fix"><b>Fix:</b> one validation function between JSON and the world — clamp numbers, reject unknown materials, cap total dabs, and fail with a readable message instead of a stack trace.</p>
+      </div>
+
+      <div class="finding crit">
+        <div class="fhead"><h3>Levels have no owner and no identity</h3><span class="chip">Architecture</span></div>
+        <p>A saved document is exactly <code>{ name, updatedAt, payload }</code>. No id, no author, no version, no thumbnail, no published flag, no play count. The <code>levels</code> collection is shared by everyone who can open the artifact, so the moment you share it, all saves land in one bucket and anyone can delete anyone's work.</p>
+        <p class="fix"><b>Fix:</b> extend the document shape now, while there are two rows to migrate instead of two thousand. Cheap today, painful later.</p>
+      </div>
+
+      <div class="finding crit">
+        <div class="fhead"><h3>The level format has a hard ceiling</h3><span class="chip">Scale</span></div>
+        <p>Levels are stored as one JSON string of every dab — about 78 bytes each. Document stores of this kind cap a document at 1 MB, which puts the ceiling at roughly <b>11,000 dabs</b>. You are at 1,802 and your level is not large. Someone who enjoys the brush will hit that wall, and they will hit it as a failed save.</p>
+        <p class="fix"><b>Fix, in order:</b> compact the encoding (a dab is five numbers, not five JSON keys — that alone is a 5–10× reduction), then split large levels across documents, then enforce a budget with a visible meter so it's never a surprise.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead col"><h2>Worth watching</h2>
+      <p class="lede">Not breaking anything yet. Each one gets harder to fix the longer it waits.</p>
+    </div>
+    <div class="findings">
+
+      <div class="finding watch">
+        <div class="fhead"><h3>The object cap is on the wrong axis</h3><span class="chip">Limits</span></div>
+        <p><code>PLACED_CAP</code> limits the level to 1,500 <em>objects</em>. But fusing means an entire level can be three objects and fifty thousand dabs, so the cap never fires while the actual cost driver is unbounded. Cost tracks dabs, so the budget should too.</p>
+      </div>
+
+      <div class="finding watch">
+        <div class="fhead"><h3>Characters and saved objects don't leave the browser</h3><span class="chip">Sync</span></div>
+        <p>Levels sync to the cloud; My Characters, My Objects, keybinds and brush settings live only in <code>localStorage</code>. Same device, same browser, or they're gone. Players will notice this immediately and read it as data loss — because it is.</p>
+      </div>
+
+      <div class="finding watch">
+        <div class="fhead"><h3>The autosave blocks the main thread</h3><span class="chip">Performance</span></div>
+        <p>Every 15 seconds the game serialises the whole level and writes it to <code>localStorage</code> synchronously — about 2.8 ms combined on your level, scaling with size. It's a small stutter now and a large one on a big level. Skip the write when nothing changed, and move it off the interactive path.</p>
+      </div>
+
+      <div class="finding watch">
+        <div class="fhead"><h3>The water grid is rebuilt from every dab, every step</h3><span class="chip">Performance</span></div>
+        <p><code>rebuildWaterSolid()</code> re-stamps every mid-layer dab into a 16-pixel grid up to three times per frame whenever any water exists. It's 0.42 ms on your level and it scales with dab count. It only needs redoing when something actually moved — the <code>geomRev</code> counter that already invalidates the render cache would do the same job here.</p>
+      </div>
+
+      <div class="finding watch">
+        <div class="fhead"><h3>No level format versioning discipline</h3><span class="chip">Compatibility</span></div>
+        <p><code>version: 2</code> exists and is checked, which is good instinct. But an older client meeting a v3 level falls through to the legacy branch and silently loads an empty world. Unknown versions should refuse loudly.</p>
+      </div>
+
+      <div class="finding watch">
+        <div class="fhead"><h3>The creation tools assume a mouse</h3><span class="chip">Reach</span></div>
+        <p>Pointer events mean touch mostly works, but there's no pinch-zoom, no touch equivalent of middle-drag, the personal menu is a fixed 26rem, and the character studio is a three-column full-screen layout that will be unusable on a phone. For a browser game where creation is the point, this decides how many people can create at all.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead col"><h2>Leave it alone</h2>
+      <p class="lede">Working systems whose imperfections don't justify the risk. I'd defend each of these.</p>
+    </div>
+    <div class="findings">
+      <div class="finding keep">
+        <div class="fhead"><h3>The dab model and union-path rendering</h3><span class="chip">Identity</span></div>
+        <p>This is the game. It's why a shape looks drawn rather than placed, and it can't be replaced with polygons without losing that. The costs it imposes are real and addressable without touching the idea.</p>
+      </div>
+      <div class="finding keep">
+        <div class="fhead"><h3>The cached Path2D renderer</h3><span class="chip">Performance</span></div>
+        <p>Per-object paths built once in the body's own frame, invalidated by an explicit revision counter. Correct, fast, and the reason a 1,800-dab level draws in 0.03 ms.</p>
+      </div>
+      <div class="finding keep">
+        <div class="fhead"><h3>The Matter.js workarounds</h3><span class="chip">Hard-won</span></div>
+        <p>The static-body mass trap, the collision-filter <code>group:0</code> bug, the <code>setParts</code> double-shift, forces versus direct velocity damping in water. Each cost real debugging, each is commented with the reasoning. Touch them only with a failing test in hand.</p>
+      </div>
+      <div class="finding keep">
+        <div class="fhead"><h3>The character art representation</h3><span class="chip">Foundation</span></div>
+        <p>Drawings are lists of normalised brush strokes, resolution-independent, rasterised once and cached. This is already the right shape for everything you eventually want characters to do. Details below.</p>
+      </div>
+      <div class="finding keep">
+        <div class="fhead"><h3>The water simulation</h3><span class="chip">Working</span></div>
+        <p>A real cellular fluid model with compression and pressure, plus density-based buoyancy that both water types share. Expensive but correct, and correctness here was hard to reach.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead col">
+      <div class="eyebrow">The strategic question</div>
+      <h2>Can this become a platform?</h2>
+    </div>
+    <div class="col">
+      <p>The game code can. The backend cannot, and it isn't close.</p>
+      <p>The artifact <code>db</code> is a document store the browser writes to directly. There is no server, so there is nowhere to put anything that must be true regardless of what a client claims. That rules out honest play counts, enforced ownership, rate limits, moderation, search ranking, and featured curation — a client can forge all of them. It is a fine place to keep your own levels. It is not a place to run a community.</p>
+      <p><b>So there is a fork ahead:</b> at some point Planet Genesis stops being an artifact and becomes a web app with a real backend. That's not a rewrite of the game — it's one file with no framework, and it reaches persistence through about six functions. The move I'd make now, cheaply, is to put a thin <b>storage layer</b> in front of those six: <code>saveLevel</code>, <code>loadLevel</code>, <code>listLevels</code>, <code>deleteLevel</code>, and the same for characters. Everything else in the game calls that instead of touching <code>db</code> or <code>localStorage</code> directly. Then swapping the artifact store for a real API is one file, not a hunt.</p>
+      <p>That single change also fixes the character-sync problem, makes level ids natural, and gives thumbnails and metadata an obvious home. It's a couple of hours and it's the highest-leverage thing available.</p>
+      <p><b>The deeper move, when the time comes:</b> separate what you <em>draw</em> from what you <em>simulate</em>. Keep dabs for rendering — they're cheap and cached and they're the look. But run the physics on a simplified outline of the same shape: tens of convex polygons instead of thousands of circles. Same appearance, a fraction of the physics cost, a fraction of the save size, and <code>rebuildCompound</code> stops being the bottleneck. It's a real project, not a weekend — convex decomposition of arbitrary blobs is fiddly and collision feel will shift slightly — but it's the one change that lifts every ceiling at once. I'd hold it until after the storage layer and the stroke-batching fix, and only if levels keep growing.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead col">
+      <div class="eyebrow">Creation</div>
+      <h2>The editor, and what's actually missing</h2>
+    </div>
+    <div class="col">
+      <p>Against your list, the editor already has: drawing and placing, moving, rotating, copy/paste (duplicate), undo/redo, three layers, terrain, physics objects, hazards, collectibles, spawn points, checkpoints, decorations, backgrounds, saving, and instant playtesting. That is most of it, and the loop already closes.</p>
+      <p>What's genuinely absent, in the order I'd add it:</p>
+      <ul class="plain">
+        <li><b>Test from here.</b> Play should start at the camera, not the spawn flag. When you're building the end of a level, walking there every time is the single biggest tax on the create-test-edit loop, and this is a twenty-line change.</li>
+        <li><b>Publish as distinct from save.</b> Right now they're the same act. Publishing should be the moment a thumbnail is captured, a version is frozen, and the level becomes visible to others.</li>
+        <li><b>Enemies.</b> There are hazards, but nothing that moves and threatens. This is the largest gameplay gap against LittleBigPlanet and the thing most likely to make levels feel like levels.</li>
+        <li><b>Triggers and simple logic.</b> Motor bolts are the first primitive. A button, a sensor, and a "when X then Y" link would open the door to the contraption-building that LBP levels are actually made of.</li>
+        <li><b>Scaling.</b> Rotate and flip exist; resizing an object doesn't, and the dab model makes it awkward — you'd rescale every dab's position and radius. Worth doing, worth costing properly first.</li>
+        <li><b>Doors and portals.</b> Cheap, and they change level structure more than their cost suggests.</li>
+      </ul>
+      <p style="margin-top:1rem">I would not add all of these. Test-from-here and publish are small and unlock the loop. Enemies and triggers are the real content work.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead col">
+      <div class="eyebrow">The differentiator</div>
+      <h2>Draw something, make it a game object</h2>
+    </div>
+    <div class="col">
+      <p>You asked whether this fits the architecture. It fits better than you'd expect — the two halves already exist and have never been introduced.</p>
+      <p>The character studio already turns freehand strokes into art. The shape tool already fills an arbitrary region with dabs by testing points against a mask: that's what <code>insideShape</code> does for a rectangle, ellipse or triangle. Swap that mask for a hand-drawn outline and you have "draw a shape, get a physical object" with no new architecture at all — you'd rasterise the drawn stroke to an offscreen canvas, read it back as a coverage mask, and run the same lattice fill inside it.</p>
+      <p>That gives you drawn platforms and drawn terrain almost immediately. Drawn enemies need the enemy system to exist first. Drawn decorations are nearly free — the decoration layers already ignore physics, so a drawn decoration is just a cached image on a layer.</p>
+      <p>My recommendation: don't build it yet, but when you do the enemy system and the publish flow, keep the seam in mind — an object should be able to come from a stroke source, not only from the brush.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead col">
+      <div class="eyebrow">Characters</div>
+      <h2>The representation is already right</h2>
+    </div>
+    <div class="col">
+      <p>A character is <code>{ mode, color, size, frameCounts, sprites, rig, anchors }</code>, where every drawing is a list of strokes in 0–1 coordinates. That means it renders crisply at any size, serialises to compact JSON, survives a round trip through the clipboard, and can be edited without ever being resampled. Whoever chose that chose well, and it's the right base for body/head/eyes/hair/clothing as separate drawn parts later — the rig mode is already that idea with four parts.</p>
+      <p>Three things it needs before characters can be shared:</p>
+      <ul class="plain">
+        <li><b>It has to leave the browser.</b> Same storage layer as levels.</li>
+        <li><b>It needs a size budget.</b> Strokes are unbounded today; a character with a million points is a browser hang, and it will happen by accident before anyone does it on purpose.</li>
+        <li><b>It needs an id and an author</b>, so a level can reference the character it was built around and a profile can list what someone has made.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead col">
+      <div class="eyebrow">Security</div>
+      <h2>Nothing exploitable today. Most of it blocking before launch.</h2>
+    </div>
+    <div class="col">
+      <p>I want to be precise rather than alarming: there is no server, no accounts, and no other users, so there is currently almost no attack surface. Everything below is about the moment that changes.</p>
+      <ul class="plain">
+        <li><b>Handled already:</b> level names are escaped before going into the load list, which is the one obvious XSS path in the current code. Toasts use text nodes. There is no <code>eval</code>, no <code>innerHTML</code> on user data, and no file upload.</li>
+        <li><b>The main surface is level data itself.</b> Hostile levels won't try to run code — they'll try to make your client do something catastrophic with numbers. Huge radii, NaN coordinates, absurd dab counts, deeply nested water arrays. Validation on load is the single most important control, and it belongs in the game, not the server, because the client is what gets hurt.</li>
+        <li><b>Client-authored anything is a claim, not a fact.</b> Play counts, likes, level sizes and author names written by the browser can all be forged. When these matter, they have to be written by a server the player can't reach directly.</li>
+        <li><b>Ownership is unenforced.</b> Shared collection, no owner field, so delete is available to anyone. This is the first thing a real backend must fix.</li>
+        <li><b>No rate limiting, no reporting, no moderation queue.</b> All three are launch requirements, not nice-to-haves, and the reporting path should exist before the first stranger plays a level.</li>
+        <li><b>Levels as denial-of-service.</b> Someone will publish a level engineered to freeze other people's browsers, for fun. Dab budgets, load-time validation, and a hard cap enforced at publish are the defence.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead col">
+      <div class="eyebrow">Roadmap</div>
+      <h2>Prototype to public alpha</h2>
+      <p class="lede">Reordered from your phases to match what's actually true here — the stability work is smaller than you'd expect and the backend work is larger.</p>
+    </div>
+    <div class="phases">
+
+      <div class="phase">
+        <div class="ptag"><span class="n">Now</span><span class="when">days</span></div>
+        <div class="pbody">
+          <h3>Stop it being slow, stop it losing work</h3>
+          <ul>
+            <li><b>Batch the stroke rebuild</b> — one physics rebuild per stroke instead of per dab. This is the lag.</li>
+            <li><b>Save updates instead of duplicating</b>, and levels get an id.</li>
+            <li><b>The render loop can't die</b> — try/catch and always reschedule.</li>
+            <li><b>Validate levels on load</b> — clamp, reject, cap, fail readably.</li>
+            <li><b>Quiet the autosave</b> — skip unchanged, get it off the interactive path.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="ptag"><span class="n">Next</span><span class="when">1–2 weeks</span></div>
+        <div class="pbody">
+          <h3>The storage layer and the level format</h3>
+          <ul>
+            <li><b>One storage module</b> every save and load goes through, for levels and characters alike.</li>
+            <li><b>Level format v3</b>: id, author, version, timestamps, thumbnail, tags, published flag, stats — even where nothing reads them yet.</li>
+            <li><b>Compact the dab encoding.</b> Five numbers, not five JSON keys; 5–10× smaller saves and faster loads.</li>
+            <li><b>Budget by dabs, not objects</b>, with a visible meter so the ceiling is never a surprise.</li>
+            <li><b>Characters sync</b> like levels do.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="ptag"><span class="n">Then</span><span class="when">2–4 weeks</span></div>
+        <div class="pbody">
+          <h3>Close the creation loop</h3>
+          <ul>
+            <li><b>Test from here</b> — play from the camera, not the spawn.</li>
+            <li><b>Publish as its own action</b>, with a thumbnail captured at that moment.</li>
+            <li><b>Enemies</b> — the biggest missing piece of the game itself.</li>
+            <li><b>A first trigger</b>: button, sensor, and a link between them.</li>
+            <li><b>Make the tools work on a tablet</b>, at minimum.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="ptag"><span class="n">Fork</span><span class="when">the big one</span></div>
+        <div class="pbody">
+          <h3>A real backend, and the social loop</h3>
+          <ul>
+            <li><b>Accounts and enforced ownership.</b> Everything social depends on this and nothing else can start first.</li>
+            <li><b>Server-authored facts</b>: play counts, likes, publish state.</li>
+            <li><b>Discovery</b>: newest, popular, tags, search, featured.</li>
+            <li><b>Creator profiles and following.</b></li>
+            <li><b>Reporting and a moderation queue</b>, live before the first stranger plays.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="ptag"><span class="n">Alpha</span><span class="when">before strangers</span></div>
+        <div class="pbody">
+          <h3>Hardening</h3>
+          <ul>
+            <li><b>Rate limiting and abuse controls.</b></li>
+            <li><b>Error reporting</b> — you need to see crashes you didn't cause.</li>
+            <li><b>Browser and device testing</b>, low-end included.</li>
+            <li><b>Backups and a restore path</b> for user levels. People will lose things.</li>
+            <li><b>Audio, VFX and loading polish</b> — the parts that make it feel finished.</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <div class="askbox col">
+    <h2>Four decisions I need from you</h2>
+    <ol>
+      <li><b>Do I start with the lag fix?</b> It's the smallest change with the biggest felt improvement, and it's contained. My recommendation is yes, immediately.</li>
+      <li><b>How far away is "other people play this"?</b> Months changes almost nothing about the order above. Weeks means the backend fork moves up and the editor work waits.</li>
+      <li><b>Is this staying an Artifact for now?</b> I'd keep it here through the next two phases — the constraint is useful and the game code stays portable either way. But I want to know if you're already picturing a real site.</li>
+      <li><b>Enemies before or after publishing?</b> Publishing makes the loop social. Enemies make the levels worth playing. I lean enemies first, because a discovery page full of levels with nothing in them is worse than no discovery page.</li>
+    </ol>
+  </div>
+
+</div>
