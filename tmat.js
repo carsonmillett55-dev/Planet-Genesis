@@ -112,8 +112,22 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(d => window.__pg.load(d), data);
   await p.waitForTimeout(350);
   const after = await mine();
-  ok('same materials come back', JSON.stringify(before.map(o=>o.pieces)) === JSON.stringify(after.map(o=>o.pieces)),
-     {before:before.map(o=>o.pieces), after:after.map(o=>o.pieces)});
+  /* Compare the materials, which is what this check is about, not the exact
+     corner counts. The plank is dynamic and is still turning as it falls, so
+     a rebuild between the serialize and the reading can bake in a fraction of
+     a degree of rotation and clean one near-collinear corner away. That is
+     the geometry behaving correctly; asserting on it made this fail about one
+     run in three. Corner counts are still checked, with room for exactly that
+     to happen. */
+  const matsOf = (list) => list.map(o => o.pieces.map(s => s.slice(0, s.lastIndexOf(':'))));
+  const vertsOf = (list) => list.map(o => o.pieces.map(s => parseInt(s.slice(s.lastIndexOf(':')+1), 10)));
+  ok('same materials come back', JSON.stringify(matsOf(before)) === JSON.stringify(matsOf(after)),
+     {before:matsOf(before), after:matsOf(after)});
+  const vb = JSON.stringify(vertsOf(before)), va = vertsOf(after);
+  ok('and the same shapes, give or take a cleaned corner',
+     vertsOf(before).length === va.length &&
+     vertsOf(before).every((o,i) => o.length === va[i].length && o.every((n,j) => Math.abs(n - va[i][j]) <= 2)),
+     {before:vb, after:JSON.stringify(va)});
   ok('world light comes back', Math.abs(await p.evaluate(()=>window.__pg.worldLight()) - 0.4) < 0.001);
 
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');

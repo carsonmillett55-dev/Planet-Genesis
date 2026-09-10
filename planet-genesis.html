@@ -950,11 +950,11 @@
   }
   #scoreHud[hidden]{ display:none !important; }
 
-  /* ---------- personal menu: LBP-style popup box that hovers near
+  /* ---------- personal menu: a popup box that hovers near
      the player, opened with E. Tabs down the side, content on the
      right. Replaces every on-screen button the old build had. ---------- */
-  /* The popit's own colours live on the element as --pop-a/--pop-b so the
-     Costume > Your Popit page can rewrite them at runtime, and everything
+  /* The menu's own colours live on the element as --pop-a/--pop-b so the
+     Character > Menu Colour page can rewrite them at runtime, and everything
      inside picks the change up for free. */
   #personalMenu{
     position:absolute; z-index:25;
@@ -993,16 +993,16 @@
   }
   #pmPages button.active{ background:var(--stitch); border-color:var(--ink); }
   #pmBody{ flex:1; min-width:0; padding:.7rem; overflow-y:auto; display:flex; flex-direction:column; gap:.6rem; }
-  /* Gradient pickers on the Your Popit page. */
-  .popitPresets{ display:flex; gap:.35rem; flex-wrap:wrap; }
-  .popitPresets button{
+  /* Gradient pickers on the Menu Colour page. */
+  .gradPresets{ display:flex; gap:.35rem; flex-wrap:wrap; }
+  .gradPresets button{
     width:2.4rem; height:2.4rem; border-radius:9px; cursor:pointer;
     border:2px solid var(--ink);
   }
-  .popitPresets button.active{ border-color:var(--yellow); box-shadow:0 0 0 2px var(--yellow-dark); }
-  .popitPickers{ display:flex; gap:.6rem; }
-  .popitPickers label{ flex:1; display:flex; flex-direction:column; gap:.2rem; font-size:.74rem; }
-  .popitPickers input[type="color"]{ width:100%; height:2rem; border:2px solid var(--ink); border-radius:8px; background:none; cursor:pointer; }
+  .gradPresets button.active{ border-color:var(--yellow); box-shadow:0 0 0 2px var(--yellow-dark); }
+  .gradPickers{ display:flex; gap:.6rem; }
+  .gradPickers label{ flex:1; display:flex; flex-direction:column; gap:.2rem; font-size:.74rem; }
+  .gradPickers input[type="color"]{ width:100%; height:2rem; border:2px solid var(--ink); border-radius:8px; background:none; cursor:pointer; }
   #pmBody h3{ font-family:'Patrick Hand',cursive; margin:0; font-size:1.1rem; color:var(--ink); }
   /* Ghost buttons are paper-coloured by default, which is invisible on
      any of the paper-coloured panels — restate them in ink there. */
@@ -5353,7 +5353,7 @@
   var pmBagsEl = document.getElementById("pmBags");
   var pmPagesEl = document.getElementById("pmPages");
   var pmBodyEl = document.getElementById("pmBody");
-  var pmOpen = false, pmActiveBag = null, pmActivePage = null;
+  var pmOpen = false, pmActiveSection = null, pmActivePage = null;
   var pmEditState = "idle", pmEditFrame = 0, pmPaintColor = CHAR_PALETTE[0];
   var pmRigPart = "head";
 
@@ -5368,14 +5368,14 @@
   }
   function closePersonalMenu(){ if (pmOpen) sfx("close"); pmOpen = false; personalMenuEl.hidden = true; }
 
-  /* ---- The popit's own colours -------------------------------------
-     Your popit is yours, so its gradient is a personal setting rather than
+  /* ---- The menu's own colours --------------------------------------
+     The menu is yours, so its gradient is a personal setting rather than
      a level one: it lives in localStorage next to the character, not in the
      save file. The two colours and the angle are written onto the element
      as CSS variables, so the stylesheet keeps ownership of how they are
      used and nothing here has to know the layout. */
-  var POPIT_PRESETS = [
-    { id:"sackcloth", a:"#D9B57F", b:"#B8935B", ang:150 },
+  var MENU_GRADIENTS = [
+    { id:"default", a:"#D9B57F", b:"#B8935B", ang:150 },
     { id:"bubblegum", a:"#F49AC1", b:"#C2185B", ang:150 },
     { id:"sherbet",   a:"#FFD36E", b:"#F2760B", ang:150 },
     { id:"lagoon",    a:"#7FD4D9", b:"#2A7B8C", ang:150 },
@@ -5384,67 +5384,67 @@
     { id:"midnight",  a:"#6E6A93", b:"#2B2740", ang:150 },
     { id:"cherry",    a:"#FF8A7A", b:"#B3261E", ang:150 }
   ];
-  var popitStyle = { a:"#D9B57F", b:"#B8935B", ang:150 };
+  var menuGradient = { a:"#D9B57F", b:"#B8935B", ang:150 };
   try {
-    var savedPopit = JSON.parse(localStorage.getItem("pg_popit") || "null");
-    if (savedPopit && /^#[0-9a-f]{6}$/i.test(savedPopit.a) && /^#[0-9a-f]{6}$/i.test(savedPopit.b)){
-      popitStyle = { a:savedPopit.a, b:savedPopit.b, ang:+savedPopit.ang || 0 };
+    var savedGradient = JSON.parse(localStorage.getItem("pg_menu_gradient") || "null");
+    if (savedGradient && /^#[0-9a-f]{6}$/i.test(savedGradient.a) && /^#[0-9a-f]{6}$/i.test(savedGradient.b)){
+      menuGradient = { a:savedGradient.a, b:savedGradient.b, ang:+savedGradient.ang || 0 };
     }
   } catch(e){}
-  function applyPopitStyle(){
-    personalMenuEl.style.setProperty("--pop-a", popitStyle.a);
-    personalMenuEl.style.setProperty("--pop-b", popitStyle.b);
-    personalMenuEl.style.setProperty("--pop-ang", popitStyle.ang + "deg");
-    try { localStorage.setItem("pg_popit", JSON.stringify(popitStyle)); } catch(e){}
+  function applyMenuGradient(){
+    personalMenuEl.style.setProperty("--pop-a", menuGradient.a);
+    personalMenuEl.style.setProperty("--pop-b", menuGradient.b);
+    personalMenuEl.style.setProperty("--pop-ang", menuGradient.ang + "deg");
+    try { localStorage.setItem("pg_menu_gradient", JSON.stringify(menuGradient)); } catch(e){}
   }
-  function popitCss(g){ return "linear-gradient(" + g.ang + "deg, " + g.a + ", " + g.b + ")"; }
-  function renderPopitTab(el){
-    var h = document.createElement("h3"); h.textContent = "Your Popit"; el.appendChild(h);
+  function gradientCss(g){ return "linear-gradient(" + g.ang + "deg, " + g.a + ", " + g.b + ")"; }
+  function renderMenuColourTab(el){
+    var h = document.createElement("h3"); h.textContent = "Menu Colour"; el.appendChild(h);
 
-    var presets = document.createElement("div"); presets.className = "popitPresets";
-    POPIT_PRESETS.forEach(function(g){
+    var presets = document.createElement("div"); presets.className = "gradPresets";
+    MENU_GRADIENTS.forEach(function(g){
       var b = document.createElement("button");
-      b.style.background = popitCss(g);
+      b.style.background = gradientCss(g);
       b.title = g.id;
-      if (g.a.toLowerCase() === popitStyle.a.toLowerCase() && g.b.toLowerCase() === popitStyle.b.toLowerCase()) b.className = "active";
+      if (g.a.toLowerCase() === menuGradient.a.toLowerCase() && g.b.toLowerCase() === menuGradient.b.toLowerCase()) b.className = "active";
       b.addEventListener("click", function(){
-        popitStyle.a = g.a; popitStyle.b = g.b;
-        applyPopitStyle(); renderPersonalMenu(); sfx("tick");
+        menuGradient.a = g.a; menuGradient.b = g.b;
+        applyMenuGradient(); renderPersonalMenu(); sfx("tick");
       });
       presets.appendChild(b);
     });
     el.appendChild(presets);
 
-    var pick = document.createElement("div"); pick.className = "popitPickers";
+    var pick = document.createElement("div"); pick.className = "gradPickers";
     [["Top colour","a"],["Bottom colour","b"]].forEach(function(pair){
       var lab = document.createElement("label");
       var txt = document.createElement("span"); txt.textContent = pair[0];
-      var inp = document.createElement("input"); inp.type = "color"; inp.value = popitStyle[pair[1]];
+      var inp = document.createElement("input"); inp.type = "color"; inp.value = menuGradient[pair[1]];
       /* "input" rather than "change" so dragging around the colour wheel
-         recolours the popit live — you are looking at the thing you are
-         editing, which is the whole point of it being your popit. */
+         recolours the menu live — you are looking at the thing you are
+         editing, which is the whole point of it being yours. */
       inp.addEventListener("input", function(){
-        popitStyle[pair[1]] = inp.value;
-        applyPopitStyle();
+        menuGradient[pair[1]] = inp.value;
+        applyMenuGradient();
       });
       lab.appendChild(txt); lab.appendChild(inp);
       pick.appendChild(lab);
     });
     el.appendChild(pick);
 
-    el.appendChild(sliderRow("Gradient angle", popitStyle.ang, 0, 350, 10, function(v){
-      popitStyle.ang = v; applyPopitStyle();
+    el.appendChild(sliderRow("Gradient angle", menuGradient.ang, 0, 350, 10, function(v){
+      menuGradient.ang = v; applyMenuGradient();
     }, function(v){ return Math.round(v) + "°"; }));
 
     var reset = document.createElement("button");
-    reset.className = "btn ghost"; reset.textContent = "Back to sackcloth";
+    reset.className = "btn ghost"; reset.textContent = "Back to default";
     reset.addEventListener("click", function(){
-      popitStyle = { a:"#D9B57F", b:"#B8935B", ang:150 };
-      applyPopitStyle(); renderPersonalMenu(); sfx("tick");
+      menuGradient = { a:"#D9B57F", b:"#B8935B", ang:150 };
+      applyMenuGradient(); renderPersonalMenu(); sfx("tick");
     });
     el.appendChild(reset);
   }
-  applyPopitStyle();
+  applyMenuGradient();
   function updatePersonalMenuPos(){
     if (!pmOpen || !player) return;
     var s = worldToScreen(player.position.x, player.position.y);
@@ -5455,38 +5455,38 @@
     personalMenuEl.style.left = left + "px";
     personalMenuEl.style.top = top + "px";
   }
-  function pmBags(){ return mode === "build" ? PM_BAGS_BUILD : PM_BAGS_PLAY; }
-  function pmBagById(id){
+  function menuSections(){ return mode === "build" ? MENU_SECTIONS_BUILD : MENU_SECTIONS_PLAY; }
+  function menuSectionById(id){
     var found = null;
-    pmBags().forEach(function(b){ if (b.id === id && b.pages) found = b; });
+    menuSections().forEach(function(b){ if (b.id === id && b.pages) found = b; });
     return found;
   }
   /* Keep the open bag and page pointing at something that exists. Switching
      between Build and Play changes which bags are on offer, so a bag that
      was open in one mode may be gone in the other. */
   function pmNormaliseTab(){
-    var bag = pmBagById(pmActiveBag);
+    var bag = menuSectionById(pmActiveSection);
     if (!bag){
-      bag = pmBags().filter(function(b){ return b.pages; })[0];
-      pmActiveBag = bag ? bag.id : null;
+      bag = menuSections().filter(function(b){ return b.pages; })[0];
+      pmActiveSection = bag ? bag.id : null;
     }
     if (!bag) return;
     if (!bag.pages.some(function(pg){ return pg.id === pmActivePage; })) pmActivePage = bag.pages[0].id;
   }
   function renderPersonalMenu(){
     pmNormaliseTab();
-    var bags = pmBags(), bag = pmBagById(pmActiveBag);
+    var bags = menuSections(), bag = menuSectionById(pmActiveSection);
     pmBagsEl.innerHTML = "";
     bags.forEach(function(bg){
       var b = document.createElement("button");
       var ic = document.createElement("span"); ic.className = "bagIcon"; ic.textContent = bg.icon;
       var lb = document.createElement("span"); lb.textContent = bg.label;
       b.appendChild(ic); b.appendChild(lb);
-      b.title = bg.label + (bg.action ? "" : " Bag");
-      if (!bg.action && bg.id === pmActiveBag) b.className = "active";
+      b.title = bg.label;
+      if (!bg.action && bg.id === pmActiveSection) b.className = "active";
       b.addEventListener("click", function(){
         if (bg.action){ bg.run(); return; }
-        pmActiveBag = bg.id; pmActivePage = null; renderPersonalMenu();
+        pmActiveSection = bg.id; pmActivePage = null; renderPersonalMenu();
       });
       pmBagsEl.appendChild(b);
     });
@@ -6339,41 +6339,40 @@
     }
   }
 
-  /* LBP2's popit, as it actually is: bags across the top, pages inside each
-     bag. Goodies Bag holds what you build the world out of; Tools Bag holds
-     what you build behaviour out of; Global Stuff is the level itself.
-     LBP2's own page lists are longer than ours — Goodies also has Objects,
-     Community Objects and Hearted; Tools has Gadgets, Music, Backgrounds and
-     the rest — so the empty slots are where the roadmap's gadget family,
-     music tab and backgrounds land. Adding one is a line in this table.
+  /* The menu: sections across the top, pages inside each one. Build holds
+     what you make the world out of; Tools holds what you make behaviour out
+     of; World is the level itself.
 
-     The Popit Cursor is first and is an action rather than a page, because
-     in LBP it is a tool you pick up and then use on the level, not something
-     you read. */
-  var PM_BAGS_BUILD = [
-    { id:"cursor", icon:"👆", label:"Popit Cursor", action:true,
-      run:function(){ pickTool("move", "Popit Cursor"); closePersonalMenu(); } },
-    { id:"goodies", icon:"🎒", label:"Goodies", pages:[
+     There is deliberate room in here. Build will also want saved and shared
+     objects; Tools will want gadgets, music and backgrounds. Those are the
+     empty slots, and adding one is a line in this table.
+
+     Select is first and is an action rather than a page, because it is a
+     tool you pick up and then use on the level, not something you read. */
+  var MENU_SECTIONS_BUILD = [
+    { id:"cursor", icon:"👆", label:"Select", action:true,
+      run:function(){ pickTool("move", "Select"); closePersonalMenu(); } },
+    { id:"build", icon:"🎒", label:"Build", pages:[
       { id:"materials", label:"Materials", render:renderMaterialsTab },
       { id:"myobjects", label:"My Objects", render:renderMyObjectsTab }
     ]},
     { id:"toolsbag", icon:"🧰", label:"Tools", pages:[
       { id:"functions", label:"Functions", render:renderToolsTab }
     ]},
-    { id:"global", icon:"🌍", label:"Global", pages:[
+    { id:"world", icon:"🌍", label:"World", pages:[
       { id:"world", label:"World Settings", render:renderWorldSettingsTab }
     ]},
-    { id:"costume", icon:"🧑", label:"Costume", pages:[
-      { id:"character", label:"Character", render:renderCharacterTab },
-      { id:"popit", label:"Your Popit", render:renderPopitTab }
+    { id:"character", icon:"🧑", label:"Character", pages:[
+      { id:"appearance", label:"Appearance", render:renderCharacterTab },
+      { id:"menucolour", label:"Menu Colour", render:renderMenuColourTab }
     ]},
     { id:"resetpos", icon:"⤾", label:"Reset", action:true,
       run:function(){ resetCharacterPosition(); closePersonalMenu(); } }
   ];
-  var PM_BAGS_PLAY = [
-    { id:"costume", icon:"🧑", label:"Costume", pages:[
-      { id:"character", label:"Character", render:renderCharacterTab },
-      { id:"popit", label:"Your Popit", render:renderPopitTab }
+  var MENU_SECTIONS_PLAY = [
+    { id:"character", icon:"🧑", label:"Character", pages:[
+      { id:"appearance", label:"Appearance", render:renderCharacterTab },
+      { id:"menucolour", label:"Menu Colour", render:renderMenuColourTab }
     ]}
   ];
 
@@ -7665,7 +7664,7 @@
         /* With a material picked, the right button CUTS — LBP's Triangle.
            Click to punch the brush's own shape out of whatever is under
            it, or drag to shave an edge; in a drag-out shape mode you drag
-           out the hole instead. Every other tool keeps the popit menu. */
+           out the hole instead. Every other tool keeps the right-click menu. */
         if (matOf(currentTool)){
           e.preventDefault();
           canvas.setPointerCapture(e.pointerId);

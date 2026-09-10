@@ -96,15 +96,19 @@ mechanic changed.
 
 ### The build UI rework — LBP2, in progress
 
-**Stage 1 done (2026-09-10):** the popit is rebuilt on LBP2's structure —
-bags across the top (Popit Cursor, Goodies, Tools, Global, Costume), pages
-inside each, and a gradient you choose yourself under Costume > Your Popit
-with eight presets, two colour pickers and an angle. Covered by `tpop.js`.
+**Stage 1 done (2026-09-10):** the menu is rebuilt on LBP2's structure —
+sections across the top, pages inside each — and a gradient you choose
+yourself under Character > Menu Colour, with eight presets, both colours and
+an angle. Covered by `tmenu.js`.
 
-**Still to do:** the Popit Cursor's own powers — grab, move, resize,
-duplicate, delete, detach — which is where LBP keeps resizing. Then
-sub-categories inside Materials, then transforms as keybinds, then dropping
-the floating selection bar.
+**The structure is LBP2's; the words are not.** Carson: drop the LBP
+vocabulary. Select, Build, Tools, World, Character — no popit, no goodies, no
+costume. Applies to anything user-facing from here on.
+
+**Still to do:** Select's own powers — grab, move, resize, duplicate, delete,
+detach — which is where LBP keeps resizing. Then sub-categories inside
+Materials, then transforms as keybinds, then dropping the floating selection
+bar.
 
 ### The build UI rework — original note
 
