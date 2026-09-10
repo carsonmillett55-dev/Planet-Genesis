@@ -105,10 +105,11 @@ an angle. Covered by `tmenu.js`.
 vocabulary. Select, Build, Tools, World, Character — no popit, no goodies, no
 costume. Applies to anything user-facing from here on.
 
-**Still to do:** Select's own powers — grab, move, resize, duplicate, delete,
-detach — which is where LBP keeps resizing. Then sub-categories inside
-Materials, then transforms as keybinds, then dropping the floating selection
-bar.
+**Stage 2 done (2026-09-10):** resize, via corner handles on the selection.
+Grab, move, duplicate and delete were already there.
+
+**Still to do:** detach, sub-categories inside Materials, transforms as
+keybinds, and dropping the floating selection bar.
 
 ### The build UI rework — original note
 
@@ -128,7 +129,7 @@ size and position.** This is closer to LBP's popit than a floating toolbar is.
 rather than buttons. The rebindable-controls system already exists, so they
 should go through it rather than being hardcoded.
 
-### Resize what you have made — LBP style
+### Resize what you have made — DONE
 
 Carson: "the ability to resize the stuff you make like LBP would be super
 important too."
@@ -137,7 +138,11 @@ Grab a selected object and scale it, the way LBP does. `pgScale` already
 exists in the geometry core, and scaling moves corners without adding any, so
 the geometry and the corner budget are not the hard part.
 
-The parts that need thought:
+Built 2026-09-10: corner handles on the selection, scaling about the opposite
+corner, uniform only. Covered by `tsel.js`. All four of the things below were
+handled — see the Resizing section of `CLAUDE.md`.
+
+The parts that needed thought:
 
 - **A minimum size.** Scaled far enough down, convex physics parts go
   degenerate and collision gets unreliable.

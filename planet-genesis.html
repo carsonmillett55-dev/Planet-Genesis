@@ -5170,6 +5170,7 @@
     // selection landing on the wrong thing.
     drawDragHighlight();
     drawSelectionOutline();
+    drawResizePreview();
     drawStrokePreview();
     drawShapePreview();
     drawMarquee();
@@ -7188,6 +7189,152 @@
       ctx.lineTo(c[0], c[1] + c[3]*k);
       ctx.stroke();
     });
+    /* Solid knobs on the corners, so it reads as something you can pull
+       rather than a decoration. Sized in screen pixels, so they stay
+       grabbable however far out you are zoomed. */
+    var hr = 5.5/camScale;
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#FFF6D8"; ctx.strokeStyle = "#2B1B12"; ctx.lineWidth = 2/camScale;
+    (resizeCorners() || []).forEach(function(c){
+      ctx.beginPath();
+      ctx.rect(c.x - hr, c.y - hr, hr*2, hr*2);
+      ctx.fill(); ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  /* ---- Resizing ------------------------------------------------------
+
+     Scaling in world space and rebuilding, the same shape of operation as
+     flipObjectAbout: pieces out to world, transform, clean, hand back with a
+     zero frame because the geometry is already where it belongs.
+
+     Corner count does not change when you scale, so the corner budget and
+     the physics decomposition cost stay put. What does change:
+
+       - too small and the convex parts go degenerate and things start
+         falling through each other, so there is a floor;
+       - too large and the object crosses the size where it stops being
+         cached as a bitmap and gets slower to draw, so there is a ceiling;
+       - anything bolted to it has anchors that were positions ON it, and
+         those have to move too or the joint drifts off the thing it was
+         pinned to.
+
+     The drag itself only previews. Rebuilding geometry and physics on every
+     mouse move would be wasteful when the only thing that matters is where
+     you let go. */
+  var RESIZE_MIN_PX = 14;
+  var RESIZE_MAX_PX = 4200;
+
+  function boltsTouching(list){
+    return bolts.filter(function(b){ return list.indexOf(b.objA) >= 0 || list.indexOf(b.objB) >= 0; });
+  }
+  /* Recompute both ends from the bolt's world point. Cheaper to reason about
+     than trying to transform the local offsets: whatever the bodies did, the
+     bolt is still meant to be at that spot in the world. */
+  function refreshBoltAnchors(b){
+    if (!b.constraint) return;
+    if (b.objA && b.constraint.bodyA) b.constraint.pointA = toBodyLocal(b.objA.body, b.point);
+    if (b.objB && b.constraint.bodyB) b.constraint.pointB = toBodyLocal(b.objB.body, b.point);
+  }
+  function scaleObjectAbout(o, cx, cy, k){
+    var pieces = o.pieces.map(function(pc){
+      var w = objToWorld(o, pc.poly);
+      var sc = pgScale(w, k, k, cx, cy);
+      return { m: pc.m, poly: pgClean(sc, GEOM_TOL) };
+    }).filter(function(pc){ return pc.poly.length; });
+    if (!pieces.length) return false;
+    o.pieces = pieces;
+    rebuildFromPieces(o, { a: 0, x: 0, y: 0 });
+    afterObjectEdit(o);
+    return true;
+  }
+  /* What the drag is allowed to do, given what is selected. Worked out from
+     the selection's own box so a group scales as the thing you built. */
+  function clampResize(k, box){
+    var w = box.max.x - box.min.x, h = box.max.y - box.min.y;
+    var small = Math.max(1, Math.min(w, h)), big = Math.max(w, h);
+    if (small * k < RESIZE_MIN_PX) k = RESIZE_MIN_PX / small;
+    if (big * k > RESIZE_MAX_PX) k = RESIZE_MAX_PX / big;
+    return Math.max(0.02, k);
+  }
+  function scaleSelected(k, pivot){
+    var list = selList();
+    if (!list.length) return;
+    if (Math.abs(k - 1) < 0.001) return;
+    pushUndo(list.length > 1 ? ("resizing " + list.length + " objects") : "resize");
+    var touched = boltsTouching(list);
+    list.forEach(function(o){ scaleObjectAbout(o, pivot.x, pivot.y, k); });
+    /* A bolt between two selected objects moves with them; one anchored to
+       something outside the selection stays where it was, because the other
+       end did not move. */
+    touched.forEach(function(b){
+      if (list.indexOf(b.objA) >= 0 && list.indexOf(b.objB) >= 0){
+        b.point = { x: pivot.x + (b.point.x - pivot.x)*k, y: pivot.y + (b.point.y - pivot.y)*k };
+      }
+      refreshBoltAnchors(b);
+    });
+    renderSelBar();
+    sfx("glue");
+  }
+
+  /* Corner handles. The drag scales about the OPPOSITE corner, so the corner
+     you are not holding stays put — which is what makes it feel like pulling
+     the shape bigger rather than watching it drift. */
+  var resizing = null;
+  function resizeCorners(){
+    var sb = selectionBounds();
+    if (!sb) return null;
+    return [
+      { id:"nw", x:sb.minX-5, y:sb.minY-5, ox:sb.maxX+5, oy:sb.maxY+5 },
+      { id:"ne", x:sb.maxX+5, y:sb.minY-5, ox:sb.minX-5, oy:sb.maxY+5 },
+      { id:"sw", x:sb.minX-5, y:sb.maxY+5, ox:sb.maxX+5, oy:sb.minY-5 },
+      { id:"se", x:sb.maxX+5, y:sb.maxY+5, ox:sb.minX-5, oy:sb.minY-5 }
+    ];
+  }
+  function resizeHandleAt(pt){
+    if (mode !== "build" || currentTool !== "move" || !selected) return null;
+    var cs = resizeCorners();
+    if (!cs) return null;
+    var r = 11 / camScale, best = null, bd = r;
+    cs.forEach(function(c){
+      var d = Math.hypot(pt.x - c.x, pt.y - c.y);
+      if (d <= bd){ bd = d; best = c; }
+    });
+    return best;
+  }
+  function beginResize(pt, corner){
+    var sb = selectionBounds();
+    resizing = {
+      corner: corner,
+      pivot: { x: corner.ox, y: corner.oy },
+      box: { min:{x:sb.minX,y:sb.minY}, max:{x:sb.maxX,y:sb.maxY} },
+      d0: Math.max(1, Math.hypot(corner.x - corner.ox, corner.y - corner.oy)),
+      k: 1
+    };
+  }
+  function updateResize(pt){
+    if (!resizing) return;
+    var d = Math.hypot(pt.x - resizing.pivot.x, pt.y - resizing.pivot.y);
+    resizing.k = clampResize(d / resizing.d0, resizing.box);
+  }
+  function commitResize(){
+    if (!resizing) return;
+    var k = resizing.k, pivot = resizing.pivot;
+    resizing = null;
+    scaleSelected(k, pivot);
+  }
+  function drawResizePreview(){
+    if (!resizing) return;
+    var b = resizing.box, k = resizing.k, p = resizing.pivot;
+    var x1 = p.x + (b.min.x - p.x)*k, y1 = p.y + (b.min.y - p.y)*k;
+    var x2 = p.x + (b.max.x - p.x)*k, y2 = p.y + (b.max.y - p.y)*k;
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.strokeStyle = "#FFF6D8"; ctx.lineWidth = 2.4/camScale;
+    ctx.setLineDash([8/camScale, 5/camScale]);
+    ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+    ctx.setLineDash([]);
     ctx.restore();
   }
 
@@ -7355,6 +7502,13 @@
      Shift adds to (or removes from) what's selected instead. */
   function beginDrag(rawPt, additive){
     var pt = rawPt;
+    /* A resize handle wins over everything, including the object under it —
+       the handles sit on the selection's edge, which is usually on top of
+       the thing you are resizing. */
+    if (!additive){
+      var handle = resizeHandleAt(pt);
+      if (handle){ dragging = null; beginResize(pt, handle); return; }
+    }
     if (goalPoint && dist(goalPoint, pt) < 34){ dragging = { type:"goal" }; clearSelection(); return; }
     for (var i = checkpoints.length - 1; i >= 0; i--){
       if (dist(checkpoints[i], pt) < 34){ dragging = { type:"checkpoint", index:i }; clearSelection(); return; }
@@ -7740,6 +7894,7 @@
     if (camPan){ movePan(e); return; }
     if (mode !== "build") return;
     var pt = screenToWorld(e.clientX, e.clientY);
+    if (resizing){ updateResize(pt); return; }
     if (shapeDrag){ shapeDrag.b = snapPt(pt); shapeDrag.square = e.shiftKey; return; }
     if (marquee){ marquee.b = pt; return; }
     if (currentTool === "move"){
@@ -7770,6 +7925,7 @@
   ["pointerup","pointercancel","pointerleave"].forEach(function(ev){
     canvas.addEventListener(ev, function(){
       endPan();
+      if (resizing) commitResize();
       if (marquee) commitMarquee();
       if (shapeDrag){
         pushUndo(shapeDrag.erase ? "cutting a hole"

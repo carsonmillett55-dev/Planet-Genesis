@@ -141,7 +141,129 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const n1 = (await stats()).length;
   ok('double-click then Del removes the whole thing', n1 === n0 - 1, { n0, n1 });
 
-  console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
-  console.log('errors:', errs.length ? errs.slice(0,6).join('\n') : 'none');
+
+  console.log('');
+  console.log('== resize by the corner handles ==');
+  await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setStick(false); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
+  await p.waitForTimeout(150);
+  await tool('wood', 1);
+  await drag([[X, Y],[X+200, Y+140]]);
+  await p.evaluate(()=>window.__pg.setTool('move'));
+  /* Find it by being the smallest thing in the world rather than by id: undo
+     rebuilds objects and hands them new ones. */
+  const small = async () => (await stats()).slice().sort((a,b)=>a.area-b.area)[0];
+  /* Select and anchor it so it stops falling and the handles stay where they
+     were read. select() takes the object, not its id, so this happens inside
+     the page. */
+  const grabIt = () => p.evaluate(() => {
+    const os = window.__pg.objects().slice().sort((a,b)=>window.__pg.G.pgArea(a.pieces[0].poly)-window.__pg.G.pgArea(b.pieces[0].poly));
+    const o = os[0];
+    window.__pg.select(o);
+    if (!o.forcedStatic) window.__pg.anchor();
+    return o.id;
+  });
+  const rid = await grabIt();
+  await p.waitForTimeout(300);
+  const bx0 = await p.evaluate(q => window.__pg.bounds(q), rid);
+  const first = await small();
+  const a0 = first.area, corn0 = first.corners;
+  const hFrom = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [bx0.x2+5, bx0.y2+5]);
+  const hTo = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y),
+    [bx0.x-5 + (bx0.x2-bx0.x+10)*1.6, bx0.y-5 + (bx0.y2-bx0.y+10)*1.6]);
+  await p.mouse.move(hFrom.x, hFrom.y); await p.mouse.down();
+  await p.mouse.move(hTo.x, hTo.y, { steps: 10 });
+  await p.mouse.up();
+  await p.waitForTimeout(500);
+  /* Same object, same id — resizing rebuilds its geometry but does not
+     replace it. Do not go looking for "the smallest thing" here: once it has
+     been scaled up it is no longer the smallest. */
+  const after1 = (await stats()).filter(o => o.id === rid)[0];
+  const bx1 = await p.evaluate(q => window.__pg.bounds(q), rid);
+  const w0 = bx0.x2-bx0.x, w1 = bx1 ? bx1.x2-bx1.x : 0;
+  console.log('   width', w0.toFixed(1), '->', w1.toFixed(1), '  area', a0, '->', after1.area, '  corners', corn0, '->', after1.corners);
+  ok('dragging the handle makes it bigger', w1 > w0 * 1.25, { w0, w1 });
+  ok('the opposite corner stays put', !!bx1 && Math.abs(bx1.x - bx0.x) < 12 && Math.abs(bx1.y - bx0.y) < 12, { bx0, bx1 });
+  ok('scaling adds no corners', after1.corners <= corn0, { before: corn0, after: after1.corners });
+  ok('area grows with the square of the scale',
+     Math.abs(after1.area / a0 - (w1/w0)*(w1/w0)) < 0.25 * (w1/w0)*(w1/w0),
+     { areaK: after1.area/a0, wK: w1/w0 });
+
+  await p.evaluate(()=>window.__pg.undo());
+  await p.waitForTimeout(500);
+  /* Undo rebuilds objects with fresh ids, so find it by where it is instead. */
+  const cx0 = (bx0.x + bx0.x2)/2, cy0 = (bx0.y + bx0.y2)/2;
+  const back = (await stats()).slice().sort((u,v) =>
+    Math.hypot(u.pos.x-cx0, u.pos.y-cy0) - Math.hypot(v.pos.x-cx0, v.pos.y-cy0))[0];
+  ok('undo puts the size back', Math.abs(back.area - a0) / a0 < 0.12, { a0, back: back.area });
+
+  console.log('');
+  console.log('== it will not let you shrink it to nothing ==');
+  const rid2 = await grabIt();
+  await p.waitForTimeout(250);
+  const bx3 = await p.evaluate(q => window.__pg.bounds(q), rid2);
+  const gFrom = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [bx3.x2+5, bx3.y2+5]);
+  const gTo = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [bx3.x-4, bx3.y-4]);
+  await p.mouse.move(gFrom.x, gFrom.y); await p.mouse.down();
+  await p.mouse.move(gTo.x, gTo.y, { steps: 10 });
+  await p.mouse.up();
+  await p.waitForTimeout(500);
+  const bx4 = await p.evaluate(q => window.__pg.bounds(q), rid2);
+  ok('it stops at a usable minimum', !!bx4 && (bx4.x2-bx4.x) >= 10, bx4 && (bx4.x2-bx4.x));
+
+  console.log('');
+  console.log('== a bolt stays on what it was pinned to ==');
+  await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setStick(false); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
+  await p.waitForTimeout(150);
+  await tool('wood', 1);
+  /* Two rects with a small gap. Touching ones would weld into a single
+     object and a bolt needs two things to join — but the gap has to stay
+     tight, because placeBoltAt measures to each part's centre and gives up
+     past 90px. */
+  await drag([[X, Y],[X+100, Y+100]]);
+  await p.evaluate(()=>window.__pg.deselect());
+  await drag([[X+140, Y],[X+240, Y+100]]);
+  await p.evaluate(()=>window.__pg.deselect());
+  await p.waitForTimeout(250);
+  // Hold them still, then bolt between them at wherever they actually are.
+  await p.evaluate(() => window.__pg.objects().forEach(o => {
+    if (!o.body.isStatic){ window.__pg.select(o); window.__pg.anchor(); }
+  }));
+  await p.evaluate(()=>window.__pg.deselect());
+  await p.waitForTimeout(250);
+  const pair = (await stats()).slice().sort((u,v)=>u.pos.x-v.pos.x).filter(o=>o.pos.y < 2340);
+  ok('two separate objects to bolt', pair.length === 2, pair.map(o=>o.id));
+  const midX = (pair[0].pos.x + pair[1].pos.x)/2, midY = (pair[0].pos.y + pair[1].pos.y)/2;
+  const nBolts = await p.evaluate(([x,y]) => window.__pg.boltAt(x,y), [midX, midY]);
+  ok('a bolt got placed', nBolts === 1, nBolts);
+  const b0 = (await p.evaluate(()=>window.__pg.bolts()))[0];
+
+  const leftId = pair[0].id;
+  // Handles only exist under the move tool, and painting left it on wood.
+  await p.evaluate(()=>window.__pg.setTool('move'));
+  await p.evaluate(q => { const o = window.__pg.objects().find(z=>z.id===q); window.__pg.select(o); }, leftId);
+  await p.waitForTimeout(200);
+  const lb = await p.evaluate(q => window.__pg.bounds(q), leftId);
+  const f1 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [lb.x2+5, lb.y2+5]);
+  const t1 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y),
+    [lb.x-5 + (lb.x2-lb.x+10)*1.5, lb.y-5 + (lb.y2-lb.y+10)*1.5]);
+  await p.mouse.move(f1.x, f1.y); await p.mouse.down();
+  await p.mouse.move(t1.x, t1.y, { steps: 10 });
+  await p.mouse.up();
+  await p.waitForTimeout(600);
+  const b1 = (await p.evaluate(()=>window.__pg.bolts()))[0];
+  const lb2 = await p.evaluate(q => window.__pg.bounds(q), leftId);
+  console.log('   bolt', JSON.stringify(b0), '->', JSON.stringify(b1));
+  ok('the bolt survives the resize', !!b1, b1);
+  /* Only one end was resized, so the bolt holds its place in the world and
+     the object grows around it — that keeps the joint valid on both bodies,
+     which a bolt that jumped would not. */
+  ok('and is still on the object it was pinned to',
+     !!b1 && !!lb2 && b1.x >= lb2.x - 8 && b1.x <= lb2.x2 + 8 && b1.y >= lb2.y - 8 && b1.y <= lb2.y2 + 8,
+     { bolt: b1, box: lb2 });
+
+  console.log('');
+  console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
+  console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();
+  process.exit(fail || errs.length ? 1 : 0);
 })();
