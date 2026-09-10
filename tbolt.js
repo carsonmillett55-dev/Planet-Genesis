@@ -152,6 +152,37 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('within the angle it was given', mx < 50 && mn > -50, { mx, mn });
 
   console.log('');
+  console.log('== a fresh motor is not frantic ==');
+  const gm = await postAndArm('motorbolt');
+  ok('the default is a lazy 11 rpm or so', gm.speed > 0.015 && gm.speed < 0.03, gm.speed);
+
+  console.log('');
+  console.log('== angle limits are a hard stop ==');
+  const lb = await postAndArm('bolt');
+  await p.evaluate(id => window.__pg.boltSet(id, { tightness: 0, limit: true, minA: -25, maxA: 25 }), lb.id);
+  await p.evaluate(() => window.__pg.paused(false));
+  await p.waitForTimeout(1200);
+  const lim = await rel(lb.id);
+  ok('the arm drops to the limit and no further', Math.abs(lim) > 15 && Math.abs(lim) < 32, lim);
+  const lb2 = await postAndArm('bolt');
+  await p.evaluate(id => window.__pg.boltSet(id, { tightness: 0, limit: false }), lb2.id);
+  await p.evaluate(() => window.__pg.paused(false));
+  await p.waitForTimeout(1200);
+  const free = await rel(lb2.id);
+  ok('without limits the same arm swings well past it', Math.abs(free) > 33, free);
+
+  console.log('');
+  console.log('== visible in play is remembered ==');
+  const vb = await postAndArm('bolt');
+  await p.evaluate(id => window.__pg.boltSet(id, { visible: false, limit: true, minA: -40, maxA: 60 }), vb.id);
+  const vd = await p.evaluate(() => window.__pg.serialize('v'));
+  ok('the save carries visibility and the limits', vd.bolts[0].visible === false && vd.bolts[0].limit === true && vd.bolts[0].minA === -40 && vd.bolts[0].maxA === 60, vd.bolts[0]);
+  await p.evaluate(d => window.__pg.load(d), vd);
+  await p.waitForTimeout(300);
+  const vb2 = (await boltsNow())[0];
+  ok('and they come back', vb2.visible === false && vb2.limit === true && vb2.minA === -40 && vb2.maxA === 60, vb2);
+
+  console.log('');
   console.log('== the box ==');
   const b3 = await postAndArm('bolt');
   await p.evaluate(() => window.__pg.setTool('move'));
@@ -171,10 +202,10 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('and the bolt is now a motor', (await boltsNow())[0].kind === 'motor', (await boltsNow())[0]);
   await p.evaluate(() => {
     const r = Array.from(document.querySelectorAll('#opBody input[type=range]')).pop();
-    r.value = 0.2; r.dispatchEvent(new Event('input', { bubbles:true }));
+    r.value = 0.1; r.dispatchEvent(new Event('input', { bubbles:true }));
   });
   await p.waitForTimeout(150);
-  ok('the speed slider sets this bolt\'s own speed', Math.abs((await boltsNow())[0].speed - 0.2) < 0.001, (await boltsNow())[0].speed);
+  ok('the speed slider sets this bolt\'s own speed', Math.abs((await boltsNow())[0].speed - 0.1) < 0.001, (await boltsNow())[0].speed);
   await p.evaluate(() => { Array.from(document.querySelectorAll('#opBody button')).find(x => /Wobble bolt/.test(x.textContent)).click(); });
   await p.waitForTimeout(200);
   ok('switching to Wobble shows swing and timing', await p.evaluate(() => /swing/i.test(document.getElementById('opBody').innerText) && /timing/i.test(document.getElementById('opBody').innerText)));

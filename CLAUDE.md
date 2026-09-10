@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` | Playwright suites, 204 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` | Playwright suites, 209 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 204 checks + checkgeom, in order
+npm test                   # all 209 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -56,7 +56,7 @@ node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 19 — the personal menu's sections, pages and gradient
-node tbolt.js              # 41 — bolts: through the layers, four kinds, the box, the ghost, save/load
+node tbolt.js              # 46 — bolts: through the layers, four kinds, limits, the box, the ghost, save/load
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -286,8 +286,8 @@ with its own settings in the object box. The kind can also be changed there.
 
 | kind | what it is | settings |
 | --- | --- | --- |
-| **Bolt** | a pivot | tightness — rotational friction, 0 free, 1 very stiff. Not a weld. |
-| **Sprung bolt** | a pivot that springs back to the angle it was placed at | strength (the spring), tightness, "set rest angle to now" |
+| **Bolt** | a pivot | tightness — rotational friction, 0 free, 1 very stiff. Not a weld. Optional angle limits. |
+| **Sprung bolt** | a pivot that springs back to the angle it was placed at | strength (the spring), tightness, "set rest angle to now", optional angle limits |
 | **Motor bolt** | drives what is attached round | speed, direction |
 | **Wobble bolt** | swings to an angle either side of where it was placed and back | angle each way, seconds per swing, direction |
 
@@ -316,6 +316,19 @@ Two physics-engine facts shaped the rest, both **measured, not assumed**:
   moves the body in a circle by itself and the joint only corrects gravity.
   Not `Body.rotate`: with `updateVelocity` it sets `positionPrev` to the old
   position and the Verlet step moves the body a second time.
+
+**Angle limits** (`limit`, `minA`, `maxA`, degrees either side of rest) are a
+hard stop: past the edge the free body is turned back to it about the pivot
+with `Body.rotate` *without* `updateVelocity` — so `positionPrev` moves with
+the body and the Verlet step does not move it a second time — and any spin
+still heading out is killed. While the bolt is selected, `drawBoltLimitArc`
+draws the allowed swing as a wedge about the pivot, as LBP does.
+
+**A fresh motor is `BOLT_DEFAULT_SPEED = 0.02`**, about 11 rpm. New bolts do
+not inherit `worldSettings.motorSpeed`; that value exists only so old levels
+load at the pace they had. Speed reads in rpm in the box.
+
+**`visible`** — every bolt has "Visible in Play". Hidden bolts still work.
 
 Motors and wobbles run whenever the world runs — Build unpaused or Play.
 Sprung bolts pull toward their rest angle each step; tightness pulls each free

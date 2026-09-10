@@ -37,7 +37,7 @@ HOOK = """
     detachRegion: function(){ detachSelectedRegion(); },
     bolts: function(){ return bolts.map(function(b){ var wp = boltWorldPoint(b); return { id:b.id, x:Math.round(wp.x), y:Math.round(wp.y),
       a:b.objA?b.objA.id:null, b:b.objB?b.objB.id:null, mode:b.mode, layer:b.layer, speed:b.speed, tightness:b.tightness,
-      kind:b.kind, dir:b.dir, strength:b.strength, angle:b.angle, period:b.period }; }); },
+      kind:b.kind, dir:b.dir, strength:b.strength, angle:b.angle, period:b.period, visible:b.visible, limit:b.limit, minA:b.minA, maxA:b.maxA }; }); },
     flip: function(){ flipSelected(); },
     boltAt: function(x,y){ var bl = placeBoltAt({x:x,y:y}); return bolts.length; },
     boltSet: function(id, props){ var b = bolts.filter(function(q){ return q.id===id; })[0]; if (!b) return false;

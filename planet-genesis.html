@@ -2591,7 +2591,11 @@
   var BOLT_KINDS = ["bolt","sprung","motor","wobble"];
   var BOLT_KIND_LABEL = { bolt:"Bolt", sprung:"Sprung bolt", motor:"Motor bolt", wobble:"Wobble bolt" };
   var BOLT_TOOL_KIND = { bolt:"bolt", sprungbolt:"sprung", motorbolt:"motor", wobblebolt:"wobble" };
-  var BOLT_DEFAULT_SPEED = 0.06;
+  /* rad per step. 0.02 is about 11 rpm — a lazy windmill, which is what a
+     fresh motor should feel like. The old 0.06 was 34 rpm and Carson's first
+     reaction was that it was far too fast. Old levels keep their own speed. */
+  var BOLT_DEFAULT_SPEED = 0.02;
+  function rpm(w){ return Math.round(Math.abs(w) * 60 * 60 / (Math.PI*2)); }
   function isBoltTool(){ return !!BOLT_TOOL_KIND[currentTool]; }
   function boltIsMotor(b){ return b.kind === "motor"; }
   function boltDir(b){ return b.dir === -1 ? -1 : 1; }
@@ -2614,7 +2618,11 @@
     if (!b.kind) b.kind = boltKindFromMode(b.mode);
     if (b.dir == null) b.dir = b.mode === "ccw" ? -1 : 1;
     if (b.tightness == null) b.tightness = b.mode === "loose" ? 0.05 : 0.85;
-    if (b.speed == null) b.speed = worldSettings.motorSpeed || BOLT_DEFAULT_SPEED;
+    if (b.speed == null) b.speed = BOLT_DEFAULT_SPEED;   // old levels pass their world speed in explicitly
+    if (b.visible == null) b.visible = true;
+    if (b.limit == null) b.limit = false;
+    if (b.minA == null) b.minA = -90;
+    if (b.maxA == null) b.maxA = 90;
     if (b.strength == null) b.strength = 0.6;
     if (b.angle == null) b.angle = 45;
     if (b.period == null) b.period = 2;
@@ -2641,6 +2649,10 @@
                  angle: extra.angle != null ? +extra.angle : null,
                  period: extra.period != null ? +extra.period : null,
                  rest: extra.rest != null ? +extra.rest : (objA.body.angle - objB.body.angle),
+                 visible: extra.visible != null ? !!extra.visible : null,
+                 limit: extra.limit != null ? !!extra.limit : null,
+                 minA: extra.minA != null ? +extra.minA : null,
+                 maxA: extra.maxA != null ? +extra.maxA : null,
                  t: 0 };
     applyBoltMode(bolt);
     bolts.push(bolt);
@@ -2739,6 +2751,19 @@
         }
         // rotational friction: pull the free spin toward the pivot's
         w += (other.angularVelocity - w) * kF;
+        /* Angle limits are a hard stop: past the edge, turn the free body
+           back to it about the pivot and kill any spin still heading out.
+           Body.rotate WITHOUT updateVelocity moves positionPrev with the
+           body, so the Verlet step does not move it a second time. */
+        if (b.limit){
+          var r = relAngle(b), lo = b.minA * Math.PI/180, hi = b.maxA * Math.PI/180, over = 0;
+          if (r < lo) over = lo - r; else if (r > hi) over = hi - r;
+          if (over){
+            Body.rotate(target, sign * over, boltAnchorOn(b, other));
+            var outward = (r < lo) ? (sign * w < 0) : (sign * w > 0);
+            if (outward) w = other.angularVelocity;
+          }
+        }
         Body.setAngularVelocity(target, w);
       }
     }
@@ -3966,7 +3991,7 @@
       var wp = boltWorldPoint(b);
       return { a: objIndex[b.objA.id], b: objIndex[b.objB.id], x:wp.x, y:wp.y, tight:b.tight, mode:b.mode,
                layer:b.layer, tightness:b.tightness, speed:b.speed, kind:b.kind, dir:b.dir,
-               strength:b.strength, angle:b.angle, period:b.period, rest:b.rest };
+               strength:b.strength, angle:b.angle, period:b.period, rest:b.rest, visible:b.visible, limit:b.limit, minA:b.minA, maxA:b.maxA };
     });
     return {
       objects: objSnaps, bolts: boltSnaps,
@@ -3995,7 +4020,7 @@
       var oa = newObjs[bs.a], ob = newObjs[bs.b];
       if (oa && ob) addBolt(oa, ob, { x:bs.x, y:bs.y }, bs.mode || (bs.tight ? "tight" : "loose"),
                             { layer:bs.layer, tightness:bs.tightness, speed:bs.speed, kind:bs.kind, dir:bs.dir,
-                              strength:bs.strength, angle:bs.angle, period:bs.period, rest:bs.rest });
+                              strength:bs.strength, angle:bs.angle, period:bs.period, rest:bs.rest, visible:bs.visible, limit:bs.limit, minA:bs.minA, maxA:bs.maxA });
     });
     checkpoints = snap.checkpoints.map(function(c){ return { x:c.x, y:c.y, reached:false }; });
     goalPoint = snap.goal ? { x:snap.goal.x, y:snap.goal.y } : null;
@@ -4813,13 +4838,39 @@
   }
   /* Bolts draw with their layer, right after it, so a bolt on the Front
      layer sits on top of Front objects instead of under them. */
+  /* The allowed swing, as LBP draws it: a wedge about the pivot from the
+     lower limit to the upper, and a line where the arm is now. Angles are
+     relative to the rest pose, so the wedge is placed off the free body's
+     current direction minus its current relative angle. */
+  function drawBoltLimitArc(b){
+    var c = b.constraint, A = c.bodyA, B = c.bodyB;
+    var target = !A.isStatic ? A : (!B.isStatic ? B : A);
+    var other = target === A ? B : A, sign = target === A ? 1 : -1;
+    var pv = boltAnchorOn(b, other);
+    var dNow = Math.atan2(target.position.y - pv.y, target.position.x - pv.x);
+    var rest = dNow - sign * relAngle(b);
+    var a0 = rest + sign * b.minA * Math.PI/180, a1 = rest + sign * b.maxA * Math.PI/180;
+    var R = 84 / camScale;
+    ctx.save();
+    ctx.translate(pv.x - boltWorldPoint(b).x, pv.y - boltWorldPoint(b).y);
+    ctx.beginPath(); ctx.moveTo(0, 0);
+    ctx.arc(0, 0, R, Math.min(a0, a1), Math.max(a0, a1));
+    ctx.closePath();
+    ctx.fillStyle = "rgba(242,183,5,0.26)"; ctx.fill();
+    ctx.lineWidth = 2.5/camScale; ctx.strokeStyle = "#F2B705"; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(dNow)*R*1.08, Math.sin(dNow)*R*1.08);
+    ctx.lineWidth = 3/camScale; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+    ctx.restore();
+  }
   function drawBolts(layer){
     var now = performance.now()/1000;
     bolts.forEach(function(b){
       if (b.layer !== layer) return;
+      if (mode === "play" && b.visible === false) return;
       var p = boltWorldPoint(b);
       ctx.save();
       ctx.translate(p.x, p.y);
+      if (b === selectedBolt && mode === "build" && b.limit && b.kind !== "motor" && b.kind !== "wobble") drawBoltLimitArc(b);
       if (b === selectedBolt && mode === "build"){
         ctx.beginPath(); ctx.arc(0, 0, 17, 0, Math.PI*2);
         ctx.lineWidth = 3/camScale; ctx.strokeStyle = "#F2B705";
@@ -7397,8 +7448,8 @@
       opBtn(dr, "↺ Anticlockwise", "", function(){ pushUndo("changing a bolt"); b.dir = -1; applyBoltMode(b); renderSelBar(); sfx("tick"); }, boltDir(b) === -1 ? "on" : "");
     }
     if (b.kind === "motor"){
-      slider(opSection("Speed"), "Speed", b.speed, 0.005, 0.3, 0.005, function(v){ b.speed = v; },
-        function(v){ return Math.round(v / BOLT_DEFAULT_SPEED * 100) + "%"; }, "changing a motor's speed");
+      slider(opSection("Speed"), "Speed", b.speed, 0.002, 0.12, 0.002, function(v){ b.speed = v; },
+        function(v){ return rpm(v) + " rpm"; }, "changing a motor's speed");
     }
     if (b.kind === "wobble"){
       slider(opSection("Swing"), "Angle each way", b.angle, 5, 180, 5, function(v){ b.angle = v; },
@@ -7415,7 +7466,21 @@
     }
     if (b.kind !== "motor" && b.kind !== "wobble"){
       slider(opSection("Tightness"), "Tightness", b.tightness, 0, 1, 0.05, function(v){ setBoltTightness(b, v); }, tightFmt, "changing a bolt's tightness");
+      var lim = opSection("Angle limits");
+      opBtn(lim, b.limit ? "◔ Limited" : "○ Free to turn", b.limit ? "It can only turn between the two angles below" : "It can turn all the way round",
+        function(){ pushUndo("changing a bolt's limits"); b.limit = !b.limit; renderSelBar(); sfx("tick"); }, b.limit ? "on" : "");
+      if (b.limit){
+        slider(lim, "Lower limit", b.minA, -180, 0, 5, function(v){ b.minA = Math.min(v, b.maxA); },
+          function(v){ return Math.round(v) + "°"; }, "changing a bolt's limits");
+        slider(lim, "Upper limit", b.maxA, 0, 180, 5, function(v){ b.maxA = Math.max(v, b.minA); },
+          function(v){ return Math.round(v) + "°"; }, "changing a bolt's limits");
+      }
     }
+
+    var vis = opSection("In play");
+    opBtn(vis, b.visible === false ? "🙈 Hidden in Play" : "👁 Visible in Play",
+      b.visible === false ? "Not drawn while playing — it still works" : "Drawn while playing",
+      function(){ pushUndo("changing a bolt"); b.visible = b.visible === false; renderSelBar(); sfx("tick"); }, b.visible === false ? "" : "on");
 
     var ac = opSection("Actions");
     opBtn(ac, "🗑 Remove bolt", "Take the bolt out (Del) — the two come apart", function(){ deleteSelectedBolt(); }, "red wide");
@@ -8683,7 +8748,7 @@
     var boltSnaps = bolts.map(function(b){ var wp = boltWorldPoint(b);
       return { a:objIndex[b.objA.id], b:objIndex[b.objB.id], x:wp.x, y:wp.y, tight:b.tight, mode:b.mode,
                layer:b.layer, tightness:b.tightness, speed:b.speed, kind:b.kind, dir:b.dir,
-               strength:b.strength, angle:b.angle, period:b.period, rest:b.rest }; });
+               strength:b.strength, angle:b.angle, period:b.period, rest:b.rest, visible:b.visible, limit:b.limit, minA:b.minA, maxA:b.maxA }; });
     return {
       name: name, updatedAt: Date.now(), version: 4,
       checkpoints: checkpoints.map(function(c){ return { x:c.x, y:c.y }; }),
@@ -8716,7 +8781,7 @@
         var oa = newObjs[bs.a], ob = newObjs[bs.b];
         if (oa && ob) addBolt(oa, ob, { x:+bs.x||0, y:+bs.y||0 }, bs.mode || (bs.tight ? "tight" : "loose"),
                               { layer:bs.layer, tightness:bs.tightness, speed: bs.speed != null ? bs.speed : oldSpeed,
-                                kind:bs.kind, dir:bs.dir, strength:bs.strength, angle:bs.angle, period:bs.period, rest:bs.rest });
+                                kind:bs.kind, dir:bs.dir, strength:bs.strength, angle:bs.angle, period:bs.period, rest:bs.rest, visible:bs.visible, limit:bs.limit, minA:bs.minA, maxA:bs.maxA });
       });
       if (data.world){
         worldSettings.gravity = data.world.gravity != null ? data.world.gravity : 1;
