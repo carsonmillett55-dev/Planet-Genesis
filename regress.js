@@ -130,6 +130,87 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(()=>window.__pg.setMode('build')); await p.waitForTimeout(600);
   ok('build mode restores the level', (await stats()).length === beforePlay, (await stats()).length);
 
+  console.log('\n== a thrown frame does not kill the loop ==');
+  await reset();
+  /* Break something only the renderer reads. drawObject calls objectPaths,
+     which walks obj.pieces, while the physics step works off body and parts
+     — so this throws on the draw path without also breaking the Matter
+     beforeUpdate handler, which would muddy what the check is proving.
+     The throw lands inside drawFrame's own save(), so the canvas unwind is
+     exercised too, not just the reschedule. */
+  const brokeIt = await p.evaluate(() => {
+    const os = window.__pg.objects();
+    if (!os.length) return false;
+    window.__pgHeld = os[0].pieces;
+    window.__pgRev = os[0].geomRev || 0;
+    os[0].pieces = null;
+    /* objectPaths caches on geomRev, so corrupting pieces alone changes
+       nothing — the cached paths are handed back and the frame draws fine.
+       Bumping the revision forces the miss that reaches the bad data. */
+    os[0].geomRev = (os[0].geomRev || 0) + 1;
+    return true;
+  });
+  ok('there was something to break', brokeIt);
+  await p.waitForTimeout(300);
+  await p.evaluate(() => { const os = window.__pg.objects(); if (window.__pgHeld && os[0]){ os[0].pieces = window.__pgHeld; os[0].geomRev = window.__pgRev; } });
+  await p.waitForTimeout(300);
+  /* If the loop had died on that frame the canvas would be frozen on its
+     last good one, so a world-light change could never reach the screen.
+     brightest() scans the whole canvas, so it does not depend on picking a
+     lucky pixel. */
+  const lum = () => p.evaluate(() => window.__pg.brightest().lum);
+  const lumBefore = await lum();
+  await p.evaluate(() => window.__pg.worldLight(0.05));
+  /* Poll instead of sleeping. A fixed wait is a coin flip on a loaded
+     machine — this check failed roughly one run in nine that way, which is
+     worse than not having it. */
+  let lumAfter = lumBefore;
+  for (let i = 0; i < 30 && lumAfter === lumBefore; i++){ await p.waitForTimeout(100); lumAfter = await lum(); }
+  ok('the loop survived and the canvas still updates', lumBefore !== lumAfter, { lumBefore, lumAfter });
+  await p.evaluate(() => window.__pg.worldLight(1));
+  await p.waitForTimeout(300);
+  /* Those console errors were this test's doing. The run fails on any
+     unexpected console error, so drop the ones we asked for. */
+  for (let i = errs.length - 1; i >= 0; i--){
+    if (/frame failed to draw|further frame errors/.test(errs[i])) errs.splice(i, 1);
+  }
+
+  console.log('\n== saving twice updates one level, not two ==');
+  await p.evaluate(() => { localStorage.removeItem('pg_local_levels'); localStorage.removeItem('pg_level_id'); });
+  await reset();
+  const ctrlS = async () => { await p.keyboard.down('Control'); await p.keyboard.press('KeyS'); await p.keyboard.up('Control'); };
+  const stored = () => p.evaluate(() => JSON.parse(localStorage.getItem('pg_local_levels') || '[]'));
+  const storedCount = async () => (await stored()).length;
+  /* Wait for the write to actually land rather than guessing at a delay.
+     Saving is a promise chain, so the store is not updated by the time the
+     keystroke returns. */
+  const settleTo = async (want) => { for (let i = 0; i < 30; i++){ if (await storedCount() === want) return want; await p.waitForTimeout(100); } return storedCount(); };
+  const newestStamp = async () => { const l = await stored(); return l.length ? ((l[0].data && l[0].data.updatedAt) || 0) : 0; };
+
+  await ctrlS();
+  ok('the first save stores the level', (await settleTo(1)) === 1, await storedCount());
+  /* For the second save, waiting on the count proves nothing — it is already
+     1 and would pass instantly whether or not the save happened. Wait for
+     the stored timestamp to move, which means the write landed, THEN count. */
+  const stamp1 = await newestStamp();
+  await ctrlS();
+  for (let i = 0; i < 30; i++){ if (await newestStamp() !== stamp1) break; await p.waitForTimeout(100); }
+  const afterTwo = await storedCount();
+  ok('the second save updates it instead of adding a copy', afterTwo === 1, afterTwo);
+  ok('and the session remembers which level it is editing',
+     await p.evaluate(() => { const j = JSON.parse(localStorage.getItem('pg_level_id') || 'null'); return !!(j && j.local); }));
+  /* A brand new level must drop that identity, or its first save would
+     overwrite whatever was open before it. */
+  await p.keyboard.down('Control'); await p.keyboard.press('KeyN'); await p.keyboard.up('Control');
+  await p.waitForTimeout(200);
+  await p.click('#confirmYes');
+  await p.waitForTimeout(400);
+  ok('starting a new level forgets the old one',
+     await p.evaluate(() => { const j = JSON.parse(localStorage.getItem('pg_level_id') || 'null'); return !j || (!j.local && !j.cloud); }),
+     await p.evaluate(() => localStorage.getItem('pg_level_id')));
+  await ctrlS();
+  ok('and saving it stores a second level rather than overwriting the first', (await settleTo(2)) === 2, await storedCount());
+
   if (process.argv[2] === 'perf'){
     console.log('\n== migration + frame time on the real level ==');
     const lv = JSON.parse(JSON.parse(fs.readFileSync(__dirname+'/level.json','utf8')).payload);

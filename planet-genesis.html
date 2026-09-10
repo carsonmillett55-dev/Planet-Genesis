@@ -5049,7 +5049,7 @@
       if (o.layer === l && onScreen(o)) drawObject(o);
     }
   }
-  function render(now){
+  function drawFrame(now){
     var frameK = Math.max(0.2, Math.min(3, (now - lastFrameT)/16.666));
     lastFrameT = now;
     // Safety net: nothing should leave a rebuild batch open across a
@@ -5106,6 +5106,48 @@
     updatePersonalMenuPos();
     updateSelBarPos();
     pruneObjCtxMenu();
+  }
+  /* One bad frame used to kill the game permanently: requestAnimationFrame
+     was the last statement inside the frame body, so anything that threw
+     skipped the reschedule and left the page a still image until reload.
+     The reschedule now lives outside the try, and always runs.
+
+     Unwinding the canvas matters as much as catching. drawFrame opens a
+     save() and closes it at the bottom, and the draw calls in between nest
+     their own; throwing halfway leaves entries on the state stack, and the
+     next frame pushes more on top — the transform drifts and every
+     subsequent frame is wrong. restore() on an empty stack is defined as a
+     no-op, so unwinding generously costs nothing and the explicit reset
+     afterwards puts the context back to a known base.
+
+     This is a catch-all on purpose, the same way pruneObjCtxMenu is: no
+     future drawing code has to remember the loop must survive it. */
+  var renderFails = 0, renderFailsLogged = 0, renderFailToldUser = false;
+  function render(now){
+    try {
+      drawFrame(now);
+      renderFails = 0;
+    } catch (e){
+      renderFails++;
+      try {
+        for (var i = 0; i < 64; i++) ctx.restore();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = "source-over";
+      } catch (e2){ /* nothing left to salvage; still reschedule below */ }
+      /* Loud for the first few, then quiet. A fault that repeats every frame
+         would otherwise bury the console at sixty lines a second, which
+         hides the first error — the only one that says where it started. */
+      if (renderFailsLogged < 3){
+        renderFailsLogged++;
+        console.error("Planet Genesis: a frame failed to draw and was skipped.", e);
+        if (renderFailsLogged === 3) console.error("Planet Genesis: further frame errors will not be logged.");
+      }
+      if (!renderFailToldUser){
+        renderFailToldUser = true;
+        try { showToast("Something went wrong drawing that frame — the game kept going."); } catch (e3){}
+      }
+    }
     requestAnimationFrame(render);
   }
   requestAnimationFrame(render);
@@ -7937,10 +7979,53 @@
     try { return JSON.parse(localStorage.getItem("pg_local_levels") || "[]"); }
     catch(e){ return []; }
   }
+  /* Which stored level this session is editing.
+
+     Save used to call .add() unconditionally, so every press wrote a whole
+     new ~165KB document and the level list filled up with copies of one
+     level. Holding the id lets a save UPDATE what it saved last time.
+
+     Two ids rather than one because the cloud and the device are separate
+     stores, and a cloud save that fails falls back to the device: that is a
+     fallback copy, not a change of identity, so the next save must still try
+     the cloud. Null on either side means "not written there yet".
+
+     Persisted alongside the autosave, or a reload would forget which
+     document it was editing and the very next save would duplicate again —
+     which is most of the original bug back. */
+  var cloudLevelId = null, localLevelId = null;
+  function rememberLevelIds(){
+    try { localStorage.setItem("pg_level_id", JSON.stringify({ cloud: cloudLevelId, local: localLevelId })); }
+    catch(e){}
+  }
+  function setLevelIds(cloud, local){
+    cloudLevelId = cloud || null;
+    localLevelId = local || null;
+    rememberLevelIds();
+  }
+  function forgetLevelIfDeleted(id){
+    if (id && (id === cloudLevelId || id === localLevelId)){
+      if (id === cloudLevelId) cloudLevelId = null;
+      if (id === localLevelId) localLevelId = null;
+      rememberLevelIds();
+    }
+  }
+
   function saveLocalLevel(data){
-    var list = localLevels();
-    list.unshift({ id: "local_"+Date.now(), data: data });
+    var list = localLevels(), i;
+    if (localLevelId){
+      for (i = 0; i < list.length; i++){
+        if (list[i].id === localLevelId){
+          list[i] = { id: localLevelId, data: data };
+          localStorage.setItem("pg_local_levels", JSON.stringify(list.slice(0,30)));
+          return;
+        }
+      }
+    }
+    localLevelId = "local_" + Date.now();
+    list.unshift({ id: localLevelId, data: data });
     localStorage.setItem("pg_local_levels", JSON.stringify(list.slice(0,30)));
+    rememberLevelIds();
   }
 
   function doSave(){
@@ -7950,9 +8035,20 @@
     sfx("save");
     dbPromise.then(function(db){
       if (db){
-        db.collection("levels").add({ name: data.name, updatedAt: data.updatedAt, payload: JSON.stringify(data) })
-          .then(function(){ showToast("Saved '"+name+"' to the cloud ☁"); })
-          .catch(function(){ saveLocalLevel(data); showToast("Cloud save failed — saved on this device instead."); });
+        var rec = { name: data.name, updatedAt: data.updatedAt, payload: JSON.stringify(data) };
+        var saved = function(){ showToast("Saved '"+name+"' to the cloud ☁"); };
+        var fellBack = function(){ saveLocalLevel(data); showToast("Cloud save failed — saved on this device instead."); };
+        if (cloudLevelId){
+          /* set(), not update(): the record is the whole level, and if the
+             document has gone (deleted on another device) this recreates it
+             rather than failing. */
+          db.collection("levels").doc(cloudLevelId).set(rec).then(saved).catch(fellBack);
+        } else {
+          db.collection("levels").add(rec).then(function(ref){
+            if (ref && ref.id){ cloudLevelId = ref.id; rememberLevelIds(); }
+            saved();
+          }).catch(fellBack);
+        }
       } else {
         saveLocalLevel(data);
         showToast("Saved '"+name+"' on this device.");
@@ -7963,6 +8059,9 @@
     askConfirm("Start a brand new level? Unsaved changes will be lost.", function(){
       starterLevel();
       document.getElementById("levelNameInput").value = "Untitled Level";
+      /* A new level is not the old one — drop the ids or the first save
+         would overwrite whatever was last open. */
+      setLevelIds(null, null);
       showToast("New level started.");
       buildFrozen = snapshotFull();
     });
@@ -8015,6 +8114,9 @@
     el.querySelector(".btn.small:not(.red)").addEventListener("click", function(){
       var data = row.cloud ? JSON.parse(row.payload) : row.raw;
       loadLevelData(data);
+      /* From here on this session is editing THAT stored level, so saving
+         updates it in place instead of leaving a copy behind. */
+      setLevelIds(row.cloud ? row.id : null, row.cloud ? null : row.id);
       document.getElementById("levelNameInput").value = data.name || "Untitled Level";
       loadOverlay.hidden = true;
       setMode("build");
@@ -8023,6 +8125,9 @@
     });
     el.querySelector(".btn.red").addEventListener("click", function(){
       askConfirm("Delete '"+(row.name||"this level")+"'?", function(){
+        /* If this session was editing what just got deleted, stop pointing at
+           it — otherwise the next save would silently resurrect it. */
+        forgetLevelIfDeleted(row.id);
         if (row.cloud){
           dbPromise.then(function(db){
             if (db) db.collection("levels").doc(row.id).delete().then(renderLevelList);
@@ -8052,6 +8157,12 @@
   }, 15000);
 
   (function restoreAutosave(){
+    /* Pick the level identity back up before anything can save, so a reload
+       carries on editing the same document instead of forking a copy. */
+    try {
+      var ids = JSON.parse(localStorage.getItem("pg_level_id") || "null");
+      if (ids){ cloudLevelId = ids.cloud || null; localLevelId = ids.local || null; }
+    } catch(e){}
     try {
       var raw = localStorage.getItem("pg_autosave");
       if (raw){

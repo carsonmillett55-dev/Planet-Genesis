@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` | Playwright suites, 97 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` | Playwright suites, 104 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,14 +42,14 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 97 checks + checkgeom, in order
+npm test                   # all 104 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
 Or one suite at a time:
 
 ```
-node regress.js            # 22 checks — geometry, save/load, play mode
+node regress.js            # 29 — geometry, save/load, play mode, loop and save safety
 node tsel.js               # 17 — selection, marquee, group transforms
 node tlayer.js             # 9  — layer accuracy and ranked picking
 node tmat.js               # 16 — materials, colours, glass, light
@@ -156,6 +156,21 @@ intended and matches LBP.
 
 ## Rendering
 
+- **The frame is split in two: `drawFrame()` draws, `render()` wraps it.**
+  `requestAnimationFrame` used to be the last statement inside the frame body,
+  so anything that threw skipped the reschedule and left the page a still
+  image until reload. The reschedule now lives outside the try and always
+  runs. **Do not move it back inside, and do not let `drawFrame` become the
+  thing rAF calls.**
+- The catch also **unwinds the canvas**, which matters as much as catching.
+  `drawFrame` opens a `save()` and closes it at the bottom, with nested
+  save/restore in between; throwing halfway leaves entries on the state stack
+  and the next frame pushes more on top, so the transform drifts and every
+  later frame is wrong. `restore()` on an empty stack is a defined no-op, so
+  unwinding generously is free.
+- Frame errors are logged three times and then go quiet. A fault that repeats
+  every frame would otherwise bury the console at sixty lines a second, which
+  hides the first error — the only one that says where it started.
 - One `Path2D` per material region. Passes run **per region** — fill, then a
   clipped two-band bevel, then ink — so a later region covers an earlier one's
   outline. Drawing all the ink after all the fills puts a hole's outline on top
@@ -196,17 +211,39 @@ has to remember the menu exists.
 
 ---
 
+## Saving
+
+`doSave()` used to call `.add()` every time, so each press wrote a whole new
+~165KB document and the level list filled with copies of one level.
+
+The session now holds **two ids** — `cloudLevelId` and `localLevelId` — and a
+save updates the document it wrote last time. Two rather than one because the
+cloud and the device are separate stores and a failed cloud save falls back to
+the device: that is a fallback *copy*, not a change of identity, so the next
+save must still try the cloud.
+
+The ids are persisted in `pg_level_id` next to the autosave. Without that, a
+reload would forget which document it was editing and the next save would fork
+a copy — which is most of the original bug back.
+
+Anything that changes which level is open must set them: loading a row sets
+one and clears the other, `doNew()` clears both, and deleting the open level
+clears whichever matched. `regress.js` covers all four paths.
+
 ## Known hazards
 
 - 🔴 **`geom.js` is duplicated.** The standalone file and the copy inlined in
   the HTML are kept in sync by hand. `node checkgeom.js` catches drift; a real
   build step would retire the problem. Until then, edit one and copy it over.
-- 🔴 **`doSave()` uses `.add()`**, so every save creates a *duplicate* document
-  rather than updating the existing one. Two 165KB duplicates already exist.
-- 🔴 **A thrown error kills the render loop permanently.** One bad frame and the
-  game is a still image until reload. It needs a try/catch that survives.
+- 🔴 **A thrown error in a Matter event handler is still unprotected.** The
+  render loop is now guarded, but the `beforeUpdate` buoyancy handler is not,
+  and it walks every object every physics step. Found while testing the render
+  fix: nulling a body made it throw uncaught, from the Runner rather than from
+  the frame. Whether that stops Matter's Runner outright was not established —
+  worth knowing before something in there can throw for real.
 - 🟠 **Autosave writes ~140KB synchronously every 15 seconds.**
-- 🟠 Levels have no owner, id, or thumbnail.
+- 🟠 Levels have no owner or thumbnail. They *do* now have an id — see
+  **Saving** — but nothing ties one to a person.
 - 🟠 Characters and My Objects are localStorage-only.
 - 🟠 408KB in one file is at the edge of comfortable.
 
