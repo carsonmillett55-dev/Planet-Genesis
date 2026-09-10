@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` | Playwright suites, 106 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` | Playwright suites, 111 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 106 checks + checkgeom, in order
+npm test                   # all 111 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -50,7 +50,7 @@ Or one suite at a time:
 
 ```
 node regress.js            # 31 — geometry, save/load, play mode, loop and save safety
-node tsel.js               # 17 — selection, marquee, group transforms
+node tsel.js               # 22 — selection, marquee, group transforms
 node tlayer.js             # 9  — layer accuracy and ranked picking
 node tmat.js               # 16 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
@@ -225,6 +225,23 @@ a clean stop, because it looks like a hang rather than a crash.
 `onStep()` catches, so a failing handler loses only its own work for that one
 step; the other handlers and the physics itself carry on. Errors log three
 times and then go quiet, same as the frame loop.
+
+## Selection, and what Del means
+
+Clicking with the Move tool records **which piece** you clicked, in
+`selectedRegion`. Del acts on that piece, not the whole object — draw a bar of
+sponge through a wooden circle, click the sponge, press Del, and the circle
+stays. Before this, Del took the object and cutting was the only way to remove
+one piece.
+
+The whole object is one gesture away: **double-click**, or rubber-band it.
+Both leave `selectedRegion` null, and every path that acts on a selection
+already falls back to the whole object when no region is held — so the
+double-click handler only has to clear the region, and anything added later
+inherits the behaviour without knowing about it.
+
+`regionIsWhole()` keeps a one-material object behaving as it always did, since
+there the piece and the object are the same thing.
 
 ## Saving
 

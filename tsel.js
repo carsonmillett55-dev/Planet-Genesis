@@ -96,6 +96,51 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const c1 = await p.evaluate(()=>window.__pg.cam());
   ok('right-drag on empty space moves the camera', Math.abs(c1.x - c0.x) > 20 || Math.abs(c1.y - c0.y) > 20, {c0, c1});
 
+  console.log('\n== Del takes the piece you clicked, not the whole object ==');
+  // A bar of sponge painted through a block of wood: one object, two pieces.
+  await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setStick(true); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
+  await p.waitForTimeout(150);
+  await tool('wood', 1);
+  await drag([[X, Y],[X+260, Y+160]]);
+  await p.evaluate(()=>window.__pg.deselect());
+  await tool('sponge', 1);
+  await drag([[X+40, Y+60],[X+220, Y+100]]);
+  await p.evaluate(()=>window.__pg.deselect());
+  const twoPiece = (await stats()).filter(o => o.pieces.length === 2)[0];
+  ok('wood and sponge welded into one object', !!twoPiece, (await stats()).map(o=>o.pieces));
+
+  const clickAt = async (wx, wy) => { const s = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [wx,wy]);
+    await p.mouse.click(s.x, s.y); await p.waitForTimeout(200); };
+  await p.evaluate(() => window.__pg.setTool('move'));
+  await clickAt(X+130, Y+80);                      // on the sponge bar
+  const nBefore = (await stats()).length;
+  await p.keyboard.press('Delete');
+  await p.waitForTimeout(350);
+  const nowStats = await stats();
+  const survivor = nowStats.filter(o => o.pieces.some(q => q.indexOf('wood') === 0))[0];
+  ok('the object is still there', nowStats.length === nBefore, { nBefore, now: nowStats.length });
+  ok('the sponge piece is gone', !!survivor && !survivor.pieces.some(q => q.indexOf('sponge') === 0), survivor && survivor.pieces);
+  ok('and the wood it was drawn through is not', !!survivor, nowStats.map(o=>o.pieces));
+
+  console.log('\n== double-click takes the whole object ==');
+  await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
+  await p.waitForTimeout(150);
+  await tool('wood', 1);
+  await drag([[X, Y],[X+260, Y+160]]);
+  await p.evaluate(()=>window.__pg.deselect());
+  await tool('sponge', 1);
+  await drag([[X+40, Y+60],[X+220, Y+100]]);
+  await p.evaluate(()=>window.__pg.deselect());
+  await p.evaluate(() => window.__pg.setTool('move'));
+  const n0 = (await stats()).length;
+  const s2 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+130, Y+80]);
+  await p.mouse.dblclick(s2.x, s2.y);
+  await p.waitForTimeout(250);
+  await p.keyboard.press('Delete');
+  await p.waitForTimeout(350);
+  const n1 = (await stats()).length;
+  ok('double-click then Del removes the whole thing', n1 === n0 - 1, { n0, n1 });
+
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join('\n') : 'none');
   await b.close();

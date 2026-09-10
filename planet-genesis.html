@@ -1465,7 +1465,7 @@
     ["bubble","💠","Bubble","Collectible score bubbles. Grab several in a quick chain for a combo multiplier."],
     ["goal","🏆","Goal","Reach it in Play mode to complete the level."],
     ["cut","✂","Right-click to cut","With a material picked, the RIGHT mouse button cuts instead of painting — LittleBigPlanet's Triangle. Click to punch the brush's own shape clean out of whatever is under it, or drag to shave an edge; in a drag-out shape mode, right-drag to cut that rectangle, ellipse or triangle out instead. It only touches the layer you're building on, so it can't eat the decoration behind your work. Cut all the way through and the two halves become separate objects."],
-    ["hole","◎","Holes","Paint one material inside another and it carves a socket for itself. Delete that inner piece — right-click it with the Move tool, then hit the ✂ on its bar — and you're left with a real hole in the outer shape, edges and all."],
+    ["hole","◎","Holes","Paint one material inside another and it carves a socket for itself. Delete that inner piece — click it with the Move tool and press Del — and you're left with a real hole in the outer shape, edges and all."],
     ["erase","🧹","Erase","Cuts painted material away — click or drag over what you want gone and it takes exactly the shape you swept, down to the pixel. Cut a shape clean in half and the two halves become separate objects. Mops up water too. Lives on the Materials tab."],
     ["undo","↶","Undo & Redo","Ctrl+Z takes back your last edit — a stroke, a shape, a move, a rotation, a glue, a delete — however long ago you made it, and the toast tells you exactly what it undid. Ctrl+Y puts it back. Forty steps deep, and the ↶ ↷ buttons top right do the same thing."],
     ["camera","🔍","Camera","Scroll to zoom in and out around your cursor; middle-drag, or right-drag empty space with the Move tool, to look around the level. Press C or the ⦿ chip to snap the camera back to your character."],
@@ -3488,7 +3488,25 @@
       return;
     }
     if ((e.code === "Delete" || e.code === "Backspace") && selected && mode === "build" && !e.repeat){
-      e.preventDefault(); deleteSelected(); return;
+      e.preventDefault();
+      /* Del removes the PIECE you clicked, not the whole object — draw a
+         line of sponge through a wooden circle and Del takes the sponge,
+         leaving the circle. Taking the whole object off a single click was
+         the wrong default: the piece is what you were pointing at, and
+         cutting was the only way to get rid of one before this.
+
+         The whole object is still one gesture away — double-click it, or
+         rubber-band it — and both of those leave selectedRegion null, which
+         is exactly the condition below. regionIsWhole keeps a one-material
+         object behaving as it always did, since there the piece and the
+         object are the same thing. */
+      if (selList().length === 1 && selectedRegion && selectedRegion.obj === selected &&
+          regionValid(selectedRegion) && !regionIsWhole(selectedRegion)){
+        deleteSelectedRegion();
+      } else {
+        deleteSelected();
+      }
+      return;
     }
     if (isAction("left", e.code)) input.left = true;
     if (isAction("right", e.code)) input.right = true;
@@ -6910,11 +6928,11 @@
      // something bigger — otherwise it is just the object again.
     if (many === 1 && selectedRegion && selectedRegion.obj === o && regionValid(selectedRegion) && !regionIsWhole(selectedRegion)){
       selBarEl.appendChild(selBtn("✂", "Delete just this " + matOf(selectedRegion.materialId).label +
-        " piece — whatever it was holding together may come apart",
+        " piece (Del) — whatever it was holding together may come apart",
         function(){ deleteSelectedRegion(); }));
     }
     selBarEl.appendChild(selBtn("💾", "Save to My Objects", function(){ saveObjectToMyObjects(o); }));
-    selBarEl.appendChild(selBtn("🗑", "Delete the whole object (Del)", function(){ deleteSelected(); }));
+    selBarEl.appendChild(selBtn("🗑", "Delete the whole object — or double-click it first, then Del", function(){ deleteSelected(); }));
     selBarEl.hidden = false;
     updateSelBarPos();
   }
@@ -7570,6 +7588,21 @@
     }
     else if (painting){ paintAt(pt); }
   });
+  /* Double-click means "I mean the whole thing, not the piece I am pointing
+     at". Dropping the region is the entire job: every path that acts on a
+     selection already falls back to the whole object when there is no region
+     held, so Del, the selection bar and anything added later all follow from
+     this one line without needing to know about it. */
+  canvas.addEventListener("dblclick", function(e){
+    if (mode !== "build" || currentTool !== "move") return;
+    var pt = screenToWorld(e.clientX, e.clientY);
+    var hit = objectAt(pt.x, pt.y);
+    if (!hit) return;
+    if (selList().indexOf(hit.obj) < 0) selectObject(hit.obj);
+    selectedRegion = null;
+    renderSelBar();
+    showToast("Whole object selected.");
+  });
   canvas.addEventListener("pointerleave", function(){ hoverObj = null; });
   ["pointerup","pointercancel","pointerleave"].forEach(function(ev){
     canvas.addEventListener(ev, function(){
@@ -7784,7 +7817,7 @@
       "<div><b>Pan the view</b> middle-drag, or drag empty space with the Move tool</div>",
       "<div><b>Pick up a material</b> Alt + click it</div>",
       "<div><b>Undo / Redo</b> Ctrl+Z, Ctrl+Y</div>",
-      "<div><b>Duplicate / Delete</b> Ctrl+D, Del (on the selected object)</div>",
+      "<div><b>Duplicate / Delete</b> Ctrl+D, Del. Del takes the piece you clicked; double-click first to take the whole object.</div>",
       "<div><b>Pick a material</b> 1–9 (Build)</div>",
       "<div><b>Grapple rope</b> hold Right-click (Play)</div>",
       "<div><b>Bolt settings</b> right-click a bolt to cycle Tight → Loose → Motor</div>",

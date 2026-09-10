@@ -45,7 +45,7 @@ Carson flagged bolts twice, independently. Current problems:
 Treat as one coherent rework of how bolts are placed, drawn, layered and
 configured, rather than a series of spot fixes.
 
-### Delete should remove the region, not the object
+### Delete should remove the region, not the object — DONE
 
 Selecting an object and pressing Delete currently removes the whole thing.
 Carson's example: a line of sponge drawn through a big wooden circle. Delete
@@ -54,7 +54,8 @@ cut feature.
 
 To delete the whole object: double-click, or click-and-drag to select all of it.
 
-The region model already in the code (`obj.pieces`) supports this directly.
+Built. Del acts on the piece you clicked; double-click or rubber-band takes
+the whole object. Covered by `tsel.js`.
 
 ### Other polish
 
