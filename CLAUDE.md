@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` | Playwright suites, 104 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` | Playwright suites, 106 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,14 +42,14 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 104 checks + checkgeom, in order
+npm test                   # all 106 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
 Or one suite at a time:
 
 ```
-node regress.js            # 29 — geometry, save/load, play mode, loop and save safety
+node regress.js            # 31 — geometry, save/load, play mode, loop and save safety
 node tsel.js               # 17 — selection, marquee, group transforms
 node tlayer.js             # 9  — layer accuracy and ranked picking
 node tmat.js               # 16 — materials, colours, glass, light
@@ -211,6 +211,21 @@ has to remember the menu exists.
 
 ---
 
+## The physics step
+
+All eight physics handlers register through **`onStep()`**, never
+`Events.on(engine, ...)` directly. Add a new one the same way.
+
+A throw inside a handler aborts the whole step, and the runner keeps calling
+it — so the world stops moving while the page burns CPU throwing over a
+hundred times a second. That was measured, not assumed: breaking one object
+froze every other object solid and threw 145 times in 1.2 seconds. Worse than
+a clean stop, because it looks like a hang rather than a crash.
+
+`onStep()` catches, so a failing handler loses only its own work for that one
+step; the other handlers and the physics itself carry on. Errors log three
+times and then go quiet, same as the frame loop.
+
 ## Saving
 
 `doSave()` used to call `.add()` every time, so each press wrote a whole new
@@ -235,12 +250,6 @@ clears whichever matched. `regress.js` covers all four paths.
 - 🔴 **`geom.js` is duplicated.** The standalone file and the copy inlined in
   the HTML are kept in sync by hand. `node checkgeom.js` catches drift; a real
   build step would retire the problem. Until then, edit one and copy it over.
-- 🔴 **A thrown error in a Matter event handler is still unprotected.** The
-  render loop is now guarded, but the `beforeUpdate` buoyancy handler is not,
-  and it walks every object every physics step. Found while testing the render
-  fix: nulling a body made it throw uncaught, from the Runner rather than from
-  the frame. Whether that stops Matter's Runner outright was not established —
-  worth knowing before something in there can throw for real.
 - 🟠 **Autosave writes ~140KB synchronously every 15 seconds.**
 - 🟠 Levels have no owner or thumbnail. They *do* now have an id — see
   **Saving** — but nothing ties one to a person.
@@ -276,10 +285,22 @@ to be decided before it is built.
 
 ## How Carson works
 
-He directs the design; the code is mine. He wants a senior developer, not an
-order-taker: **push back before implementing something that creates technical
-debt.** Slow and solid beats fast and fragile. Preserve working systems, and
-don't rewrite things for cleanliness. The target is LBP's actual behaviour —
-when in doubt, research what LBP really did rather than approximating it.
+He is the creative director. He directs the design; the code, and the
+engineering judgement behind it, are mine.
+
+**Standing authority: fix what is broken, unstable, or a threat to the
+project without asking first.** Keeping it stable is the job, not a favour to
+ask permission for. Design decisions are still his.
+
+He wants a senior developer, not an order-taker: **push back before
+implementing something that creates technical debt.** Slow and solid beats
+fast and fragile. Preserve working systems, and don't rewrite things for
+cleanliness. The target is LBP's actual behaviour — when in doubt, research
+what LBP really did rather than approximating it.
+
+**Write to him in plain language.** He does not read code and does not want
+jargon; explaining in engineering terms wastes his time. Say what changed and
+what it means for the game. Keep the technical detail in this file and in
+commit messages, where it belongs.
 
 "We have all the time in the world."

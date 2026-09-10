@@ -1916,6 +1916,31 @@
   var runner = Runner.create();
   Runner.run(runner, engine);
 
+  /* Every physics-step handler goes through this.
+
+     A throw inside one aborts the whole step, and the runner keeps calling
+     it: the world stops moving while the page burns CPU throwing over a
+     hundred times a second. Measured, not assumed — breaking one object
+     froze every other object solid and threw 145 times in 1.2 seconds.
+
+     Same catch-all reasoning as render(): no future handler has to remember
+     that the world must survive it. A handler that throws loses its own work
+     for that one step; every other handler, and the physics itself, carries
+     on. Register with onStep(), never Events.on(engine, ...) directly. */
+  var physFails = 0;
+  function onStep(evt, fn){
+    Events.on(engine, evt, function(ev){
+      try { fn(ev); }
+      catch (e){
+        if (physFails < 3){
+          physFails++;
+          console.error("Planet Genesis: a physics handler failed and that step was skipped.", e);
+          if (physFails === 3) console.error("Planet Genesis: further physics handler errors will not be logged.");
+        }
+      }
+    });
+  }
+
   var wallOpts = { isStatic:true, friction:0.6, render:{visible:false} };
   var walls = [
     Bodies.rectangle(WORLD_W/2, -20, WORLD_W+80, 40, wallOpts),
@@ -2503,7 +2528,7 @@
   // constraint then drags that rotation around the bolt point, which is
   // what makes an off-centre wheel behave like a real one. If both ends
   // are pinned down there is nothing to turn, so nothing happens.
-  Events.on(engine, "beforeUpdate", function(){
+  onStep("beforeUpdate", function(){
     if (mode !== "play") return;
     for (var i = 0; i < bolts.length; i++){
       var b = bolts[i];
@@ -2965,7 +2990,7 @@
   // dab's own position, so a long plank tips and rights itself instead
   // of sliding around flat. Dark Matter needs no force at all — it's
   // simply isStatic, so gravity never touches it.
-  Events.on(engine, "beforeUpdate", function(){
+  onStep("beforeUpdate", function(){
     var g = engine.gravity, gscale = (typeof g.scale !== "undefined") ? g.scale : 0.001;
     var noWater = (worldSettings.waterLevel == null) && waterCount === 0;
     objects.forEach(function(o){
@@ -3305,7 +3330,7 @@
 
   var groundedNext = false;
   var lastFallSpeed = 0;
-  Events.on(engine, "beforeUpdate", function(){
+  onStep("beforeUpdate", function(){
     var wasGrounded = grounded;
     grounded = groundedNext;
     groundedNext = false;
@@ -3318,13 +3343,13 @@
     }
     if (player) lastFallSpeed = player.velocity.y;
   });
-  Events.on(engine, "collisionActive", function(ev){
+  onStep("collisionActive", function(ev){
     if (!player) return;
     ev.pairs.forEach(function(p){
       if (p.bodyA === player || p.bodyB === player) groundedNext = true;
     });
   });
-  Events.on(engine, "collisionStart", function(ev){
+  onStep("collisionStart", function(ev){
     if (!player || mode !== "play") return;
     ev.pairs.forEach(function(p){
       var other = p.bodyA === player ? p.bodyB : (p.bodyB === player ? p.bodyA : null);
@@ -3374,7 +3399,7 @@
     }
     list.push({ x: lp.x, y: lp.y, r: Math.max(7, partR(part)*1.3), t0: performance.now() });
   }
-  Events.on(engine, "beforeUpdate", function(){
+  onStep("beforeUpdate", function(){
     if (mode !== "play") return;
     var now = performance.now();
     objects.slice().forEach(function(o){
@@ -3553,7 +3578,7 @@
 
   // ---- Physics-driven movement (runs inside Matter's own step, so it
   // only fires while the sim is unpaused — collisions resolve normally). ----
-  Events.on(engine, "beforeUpdate", function(){
+  onStep("beforeUpdate", function(){
     if (!player || !runner.enabled) return;
     var speed = flying ? FLY_SPEED : 4.2;
     var vx = 0;
@@ -7959,7 +7984,7 @@
     unpackWaterSparse(data.water);
   }
 
-  Events.on(engine, "beforeUpdate", function(){
+  onStep("beforeUpdate", function(){
     if (mode !== "play" || !player) return;
     if (goalPoint && dist(goalPoint, player.position) < 46) levelComplete();
     bubbles.forEach(function(b){

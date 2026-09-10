@@ -175,6 +175,30 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
     if (/frame failed to draw|further frame errors/.test(errs[i])) errs.splice(i, 1);
   }
 
+  console.log('\n== a broken object does not freeze the world ==');
+  await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setStick(false); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
+  await p.waitForTimeout(150);
+  await tool('wood', 1);
+  await drag([[X, Y],[X+120, Y+80]]);
+  await drag([[X+300, Y],[X+420, Y+80]]);
+  const loose = await p.evaluate(() => window.__pg.objects().filter(o => !o.body.isStatic).map(o => o.id));
+  ok('two loose objects to work with', loose.length >= 2, loose);
+  const yOf = (id) => p.evaluate(i => { const o = window.__pg.objects().find(q => q.id === i); return o ? Math.round(o.body.position.y) : null; }, id);
+  const yStart = await yOf(loose[1]);
+  /* Break the FIRST one. The buoyancy handler walks every object on every
+     step, so it throws before it ever reaches the second — which used to
+     abort the whole step and freeze the world solid while the runner kept
+     calling it a hundred times a second. */
+  await p.evaluate(i => { const o = window.__pg.objects().find(q => q.id === i); window.__pgBody = o.body; o.body = null; }, loose[0]);
+  let yNow = yStart;
+  for (let i = 0; i < 30 && yNow === yStart; i++){ await p.waitForTimeout(100); yNow = await yOf(loose[1]); }
+  ok('the other object carries on falling', yNow !== yStart, { yStart, yNow });
+  await p.evaluate(i => { const o = window.__pg.objects().find(q => q.id === i); if (o && window.__pgBody) o.body = window.__pgBody; }, loose[0]);
+  await p.waitForTimeout(200);
+  for (let i = errs.length - 1; i >= 0; i--){
+    if (/physics handler failed|further physics handler errors/.test(errs[i])) errs.splice(i, 1);
+  }
+
   console.log('\n== saving twice updates one level, not two ==');
   await p.evaluate(() => { localStorage.removeItem('pg_local_levels'); localStorage.removeItem('pg_level_id'); });
   await reset();
