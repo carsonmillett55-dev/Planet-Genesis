@@ -29,10 +29,14 @@ of them look arbitrary until you break one.
 Tests are Playwright suites, 97 checks across six files:
 
 ```
-python3 mkprev.py     # regenerate the test build after editing the HTML
-node regress.js       # and tsel, tlayer, tmat, tlight, tctx
-node regress.js perf  # migration + frame time on a real level
+npm install           # once — playwright-core, no browser download
+python mkprev.py      # regenerate the test build after editing the HTML
+npm test              # all 97 checks
+npm run perf          # migration + frame time on a real level
 ```
+
+They run in whatever Chrome or Chromium you already have; `tenv.js` finds it,
+and `PG_CHROME` overrides.
 
 ## Credits
 

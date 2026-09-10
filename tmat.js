@@ -1,12 +1,12 @@
-const { chromium } = require('playwright');
+const { launch, previewURL } = require('./tenv');
 let pass=0, fail=0;
 const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.log('  FAIL '+n+(e!==undefined?'  -> '+JSON.stringify(e):''));} };
 (async () => {
-  const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args:['--no-sandbox'] });
+  const b = await launch();
   const p = await b.newPage({ viewport:{width:1280,height:760} });
   const errs=[]; p.on('pageerror', e=>errs.push('PAGEERROR: '+e.message));
   p.on('console', m=>{ if(m.type()==='error') errs.push('CONSOLE: '+m.text()); });
-  await p.goto('file://' + __dirname + '/preview.html');
+  await p.goto(previewURL);
   await p.waitForTimeout(1100);
   await p.evaluate(() => { window.__pg.freezeCam(); window.__pg.setStick(true); window.__pg.setPaintMode('rect'); });
   const cam = await p.evaluate(() => window.__pg.cam());
@@ -72,7 +72,17 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await tool('wood', 1);
   await drag([[X, Y],[X+300, Y+180]]);
   await p.evaluate(() => { window.__pg.setTool('light'); window.__pg.setPaintMode('brush'); window.__pg.setBrush(1.2); window.__pg.deselect(); });
-  await drag([[X+140, Y+90],[X+170, Y+90]]);
+  /* The plank is dynamic on purpose — the check below asserts it still
+     falls — so by now it has dropped a couple of hundred pixels from
+     where it was painted. Aim the light at where it actually IS, not at
+     the paint coordinates, or the stroke lands in empty space and welds
+     into nothing. */
+  const plankPos = await p.evaluate(() => {
+    const o = window.__pg.objects().filter(q => !q.body.isStatic)[0];
+    return o ? { x:o.body.position.x, y:o.body.position.y } : null;
+  });
+  if (!plankPos) throw new Error('no dynamic plank to paint into');
+  await drag([[plankPos.x-15, plankPos.y],[plankPos.x+15, plankPos.y]]);
   const mixed = await p.evaluate(() => { const o = window.__pg.objects().filter(q=>q.pieces.length>1)[0];
     return o ? { pieces:o.pieces.map(x=>x.m), sensor:o.body.isSensor, still:o.body.isStatic, allGlow:o.allGlow } : null; });
   console.log('   ', JSON.stringify(mixed));

@@ -1,7 +1,7 @@
 """Build preview.html: the game with the Matter CDN swapped for a local
 copy, web fonts stripped, and a window.__pg test hook appended."""
 import re
-s = open('planet-genesis.html').read()
+s = open('planet-genesis.html', encoding='utf-8').read()
 s = s.replace('https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js', 'matter.min.js')
 s = re.sub(r'<link[^>]*fonts\.(googleapis|gstatic)\.com[^>]*>', '', s)
 HOOK = """
@@ -73,5 +73,5 @@ HOOK = """
 </script>"""
 old = "})();\n</script>"
 assert s.count(old) == 1, s.count(old)
-open('preview.html', 'w').write(s.replace(old, HOOK))
+open('preview.html', 'w', encoding='utf-8').write(s.replace(old, HOOK))
 print("preview.html", len(s))

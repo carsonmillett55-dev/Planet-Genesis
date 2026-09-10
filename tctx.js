@@ -1,12 +1,12 @@
-const { chromium } = require('playwright');
+const { launch, previewURL } = require('./tenv');
 let pass=0, fail=0;
 const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.log('  FAIL '+n+(e!==undefined?'  -> '+JSON.stringify(e):''));} };
 (async () => {
-  const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args:['--no-sandbox'] });
+  const b = await launch();
   const p = await b.newPage({ viewport:{width:1280,height:760} });
   const errs=[]; p.on('pageerror', e=>errs.push('PAGEERROR: '+e.message));
   p.on('console', m=>{ if(m.type()==='error') errs.push('CONSOLE: '+m.text()); });
-  await p.goto('file://' + __dirname + '/preview.html');
+  await p.goto(previewURL);
   await p.waitForTimeout(1100);
   await p.evaluate(() => { window.__pg.freezeCam(); window.__pg.setStick(true); window.__pg.setPaintMode('rect'); });
   const cam = await p.evaluate(() => window.__pg.cam());
