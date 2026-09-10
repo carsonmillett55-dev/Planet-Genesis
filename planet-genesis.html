@@ -852,15 +852,6 @@
   #cloudStatus{ font-size:.65rem; color:var(--paper-edge); white-space:nowrap; }
   #cloudStatus b{ color:var(--stitch); }
 
-  .hint{
-    font-size:.72rem;
-    color:var(--paper-edge);
-    background:var(--desk-dark);
-    padding:.25rem .8rem;
-    text-align:center;
-    border-bottom:2px solid var(--desk-dark);
-  }
-
   /* ---------- stage ---------- */
   main.stage{
     position:relative;
@@ -1204,7 +1195,6 @@
   <header class="topbar">
     <div class="brand">
       <h1>🪐 Planet Genesis</h1>
-      <span>build it, then play it</span>
     </div>
     <div class="modebar">
       <button id="modeBuild" class="active">🔨 Build</button>
@@ -1215,7 +1205,6 @@
     </div>
     <div id="cloudStatus">☁ checking…</div>
   </header>
-  <div class="hint" id="hintBar">Build: E for your menu · 1-4 tools, 5-9 materials · drag empty space to select several · right-click with a material to CUT · middle- or right-drag to pan · Ctrl+Z to undo</div>
 
   <main class="stage">
     <div id="canvasWrap">
@@ -7878,9 +7867,6 @@
       score = 0; comboMult = 1; lastBubbleTime = -99999;
       updateScoreHud();
       respawnPlayer();
-      document.getElementById("hintBar").textContent = "Play: arrows/WASD to move · Space to jump · hold Right-click on Grip Sponge to grapple · 1-4 for emotes · Esc for the menu";
-    } else {
-      document.getElementById("hintBar").textContent = "Build: E for your menu · 1-4 tools, 5-9 materials · drag empty space to select several · right-click with a material to CUT · middle- or right-drag to pan · Ctrl+Z to undo";
     }
   }
   modeBuildBtn.addEventListener("click", function(){ setMode("build"); });

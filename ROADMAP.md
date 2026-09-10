@@ -94,6 +94,45 @@ things to get right.
 Whether ropes remain as *level objects* is untouched by this — only the player
 mechanic changed.
 
+### The build UI rework
+
+Decided 2026-09-10. Three connected changes to how you handle a thing you have
+selected.
+
+**Kill the floating selection bar.** The strip of buttons that appears next to
+a selected object goes away. Its problem is that it follows the object and
+covers what you are working on.
+
+**One panel on the right instead.** Right-click opens a box down the right-hand
+side holding everything about the selected thing in one place — material,
+layer, physics state, and the actions that are not keybinds. **Adjustable in
+size and position.** This is closer to LBP's popit than a floating toolbar is.
+
+**Transforms become keybinds.** Rotate, flip and layer move to the keyboard
+rather than buttons. The rebindable-controls system already exists, so they
+should go through it rather than being hardcoded.
+
+### Resize what you have made — LBP style
+
+Carson: "the ability to resize the stuff you make like LBP would be super
+important too."
+
+Grab a selected object and scale it, the way LBP does. `pgScale` already
+exists in the geometry core, and scaling moves corners without adding any, so
+the geometry and the corner budget are not the hard part.
+
+The parts that need thought:
+
+- **A minimum size.** Scaled far enough down, convex physics parts go
+  degenerate and collision gets unreliable.
+- **Bolts attached to a scaled object.** Their anchor points are positions on
+  the object and have to scale with it, or joints drift off the thing they
+  were pinned to.
+- **The bitmap cache.** Corner count does not change but drawn size does, so a
+  big scale-up can cross the threshold where an object is too large to cache.
+- **Uniform or free.** LBP scales uniformly from a corner handle by default.
+  Worth matching before offering per-axis stretch.
+
 ### Fill tool
 
 A bucket, inside material paint mode. Draw a weird closed outline in wood, fill
@@ -263,6 +302,17 @@ In the inventory's **Tools tab**, a **"level door"**.
 - Before entering, choose level options — **"small, medium or large characters
   only?"** and other pertinent creation settings. All toggleable later.
 - Customising the door's own appearance comes later.
+
+### Tutorial mode
+
+Decided 2026-09-10, replacing the always-on hint strip and the tagline under
+the header, both now removed. Carson: "later we can add in a tutorial mode
+that slowly shows you stuff and gives tips."
+
+Teaching happens on a curve rather than as a permanent wall of text across the
+top of the screen. The material explanations in `MATERIAL_INFO` are still in
+the code and are the obvious content to draw on, along with whatever the new
+right-hand panel ends up showing.
 
 ### Portals
 
