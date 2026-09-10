@@ -112,8 +112,14 @@ Grab, move, duplicate and delete were already there.
 own object, born in the socket it left. Select now has every power LBP's
 cursor has.
 
-**Still to do:** sub-categories inside Materials, transforms as keybinds, and
-dropping the floating selection bar.
+**Stage 4 done (2026-09-10):** the floating selection bar and the right-click
+popup are gone, replaced by one object box docked on the right — movable,
+resizable, remembered. Carson: "just one object settings box that pops up on
+the right, like LBP; similarly bolts and other things will have a menu like
+this." Covered by `tctx.js`.
+
+**Still to do:** sub-categories inside Materials, and transforms as keybinds.
+The bolt rework and every gadget put their settings in the same box.
 
 ### The build UI rework — original note
 

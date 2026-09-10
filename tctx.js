@@ -1,3 +1,6 @@
+/* The object box: one docked panel for everything about what you have
+   selected. It opens on a left- or right-click, follows the selection, and
+   goes away when the selection does — by any route. node tctx.js */
 const { launch, previewURL } = require('./tenv');
 let pass=0, fail=0;
 const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.log('  FAIL '+n+(e!==undefined?'  -> '+JSON.stringify(e):''));} };
@@ -10,7 +13,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.waitForTimeout(1100);
   await p.evaluate(() => { window.__pg.freezeCam(); window.__pg.setStick(true); window.__pg.setPaintMode('rect'); });
   const cam = await p.evaluate(() => window.__pg.cam());
-  const X = cam.x + 320, Y = cam.y + 260;
+  let X = cam.x + 320, Y = cam.y + 260;
   async function drag(pts, btn){
     const s0 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), pts[0]);
     await p.mouse.move(s0.x, s0.y); await p.mouse.down({button: btn||'left'});
@@ -19,6 +22,8 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   }
   const use = (k,br,mode) => p.evaluate(([k,br,mode]) => { window.__pg.setTool(k); if(br) window.__pg.setBrush(br); if(mode) window.__pg.setPaintMode(mode); window.__pg.deselect(); }, [k,br,mode]);
   const open = () => p.evaluate(() => window.__pg.ctxOpen());
+  const title = () => p.evaluate(() => document.querySelector('#opHead .t').textContent);
+  const rect = () => p.evaluate(() => { const r = document.getElementById('objPanel').getBoundingClientRect(); return { l:Math.round(r.left), t:Math.round(r.top), w:Math.round(r.width), h:Math.round(r.height) }; });
   async function makeAndOpen(mat){
     await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
     await p.waitForTimeout(150);
@@ -31,7 +36,8 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
     return s;
   }
 
-  console.log('\n== the menu goes when its object does ==');
+  console.log('');
+  console.log('== the box goes when its object does ==');
   await makeAndOpen('light');
   ok('right-click opens it', await open());
   await p.keyboard.press('Delete');
@@ -41,7 +47,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await makeAndOpen('wood');
   await p.evaluate(() => window.__pg.deleteSel());
   await p.waitForTimeout(300);
-  ok('the bin on the selection bar closes it', !(await open()));
+  ok('the Delete button in the box closes it', !(await open()));
 
   await makeAndOpen('metal');
   await use('erase', 3, 'brush');
@@ -75,15 +81,19 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.waitForTimeout(350);
   ok('loading a level closes it', !(await open()));
 
-  console.log('\n== and it does not strand itself on screen ==');
+  console.log('');
+  console.log('== the camera does not shake it off ==');
+  /* The old popup was pinned to a spot on the level, so any camera move had
+     to close it or it would be pointing at nothing. The box is docked to
+     the screen, so it stays put and stays open. */
   await makeAndOpen('wood');
   await p.evaluate(() => window.__pg.zoomTo(1.9, 500, 1900));
   await p.waitForTimeout(300);
-  ok('zooming closes it', !(await open()));
+  ok('zooming leaves it open', await open());
 
   // A right-drag pans only from EMPTY space — on an object the right button
-  // opens that object's menu instead — so this one works in screen
-  // coordinates, up in the sky, and checks the camera really moved.
+  // selects that object instead — so this works in screen coordinates, up in
+  // the sky, and checks the camera really moved.
   await makeAndOpen('wood');
   const cam0 = await p.evaluate(() => window.__pg.cam());
   await p.mouse.move(900, 200); await p.mouse.down({button:'right'});
@@ -92,20 +102,62 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.waitForTimeout(250);
   const cam1 = await p.evaluate(() => window.__pg.cam());
   ok('the right-drag panned', Math.abs(cam1.x - cam0.x) > 20, [cam0.x, cam1.x]);
-  ok('panning closes it', !(await open()));
+  ok('panning leaves it open', await open());
 
-  console.log('\n== but it survives being used ==');
+  console.log('');
+  console.log('== left-click opens it too ==');
+  await makeAndOpen('wood');
+  await p.evaluate(() => window.__pg.deselect());
+  await p.waitForTimeout(150);
+  ok('deselecting closes it', !(await open()));
+  const lc = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+100, Y+70]);
+  await p.mouse.click(lc.x, lc.y);
+  await p.waitForTimeout(250);
+  ok('a plain left-click opens it', await open());
+  ok('and it says what the thing is', /Timber|Wood/i.test(await title()), await title());
+  await p.click('#opClose');
+  await p.waitForTimeout(150);
+  ok('the close button closes it', !(await open()));
+
+  console.log('');
+  console.log('== it survives being used ==');
   await makeAndOpen('light');
   await p.evaluate(() => {
-    var sl = document.querySelector('#objCtxMenu input[type=range]');
+    var sl = document.querySelector('#objPanel input[type=range]');
     sl.value = 4; sl.dispatchEvent(new Event('input', {bubbles:true}));
   });
   await p.waitForTimeout(200);
   const glow = await p.evaluate(() => window.__pg.objects().filter(function(o){ return o.allGlow; })[0].glow);
   ok('dragging the glow slider works', Math.abs(glow - 4) < 0.001, glow);
-  ok('and leaves the menu open', await open());
+  ok('and leaves the box open', await open());
 
-  console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
-  console.log('errors:', errs.length ? errs.slice(0,6).join('\n') : 'none');
+  console.log('');
+  console.log('== it is yours to move ==');
+  await makeAndOpen('wood');
+  const r0 = await rect();
+  const head = await p.evaluate(() => { const r = document.getElementById('opHead').getBoundingClientRect(); return { x:r.left + 60, y:r.top + r.height/2 }; });
+  await p.mouse.move(head.x, head.y); await p.mouse.down();
+  await p.mouse.move(head.x - 150, head.y + 60, { steps: 6 });
+  await p.mouse.move(head.x - 300, head.y + 120, { steps: 6 });
+  await p.mouse.up();
+  await p.waitForTimeout(250);
+  const r1 = await rect();
+  ok('dragging the header moves it', r1.l < r0.l - 200 && r1.t > r0.t + 80, { r0, r1 });
+  await p.reload();
+  await p.waitForTimeout(1200);
+  await p.evaluate(() => { window.__pg.freezeCam(); window.__pg.setStick(true); window.__pg.setPaintMode('rect'); });
+  /* The zoom is remembered across a reload, and an earlier check zoomed in,
+     so the old X/Y would now be off-screen. Re-read the camera. */
+  const camR = await p.evaluate(() => window.__pg.cam());
+  X = camR.x + 320; Y = camR.y + 260;
+  await makeAndOpen('wood');
+  const r2 = await rect();
+  ok('and it remembers where you put it', Math.abs(r2.l - r1.l) < 4 && Math.abs(r2.t - r1.t) < 4, { r1, r2 });
+  await p.evaluate(() => localStorage.removeItem('pg_panel'));
+
+  console.log('');
+  console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
+  console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();
+  process.exit(fail || errs.length ? 1 : 0);
 })();

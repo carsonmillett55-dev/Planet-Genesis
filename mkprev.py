@@ -70,7 +70,7 @@ HOOK = """
       for (var i=0;i<d.length;i+=4){ var L=d[i]+d[i+1]+d[i+2]; if (L>best){best=L; var px=(i/4)|0; bx=px%canvas.width; by=(px/canvas.width)|0;} }
       return { x:+(bx/dpr).toFixed(1), y:+(by/dpr).toFixed(1), lum:best }; },
     playerPos: function(){ return player ? { x:player.position.x, y:player.position.y } : null; },
-    ctxOpen: function(){ return !objCtxMenu.hidden; },
+    ctxOpen: function(){ return !objPanelEl.hidden; },
     holes: function(){ return objects.map(function(o){ return o.pieces.map(function(p){ return p.poly.map(function(pl){ return pl.slice(1).map(function(h){ return h.length; }); }); }); }); },
     undo: undo, redo: redo
   };

@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` | Playwright suites, 148 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` | Playwright suites, 154 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 148 checks + checkgeom, in order
+npm test                   # all 154 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -54,7 +54,7 @@ node tsel.js               # 39 — selection, marquee, group transforms, resize
 node tlayer.js             # 9  — layer accuracy and ranked picking
 node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
-node tctx.js               # 13 — the right-click menu's lifetime
+node tctx.js               # 19 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 19 — the personal menu's sections, pages and gradient
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -202,13 +202,40 @@ intended and matches LBP.
 - Glow range is 10%–1200% (`GLOW_MIN = 0.1`, `GLOW_MAX = 12`), radius is
   `L.r + 100 * glow` — **linear**, not squared.
 
-## The right-click menu
+## The object box
 
-`ctxObj` tracks which object the open menu belongs to and `ctxCam` snapshots
-the camera at open time. `pruneObjCtxMenu()` runs every frame and closes the
-menu when its object is gone or the camera has moved more than 6px. It is a
-catch-all on purpose: no future way of deleting an object or moving the camera
-has to remember the menu exists.
+One docked panel for everything about what you have selected — `#objPanel`,
+rendered by `renderSelBar()` (the name is historical; every edit path already
+called it, so it kept the name and changed its job). It replaced two things
+at once: the strip that followed the selection around and sat on top of it,
+and the right-click popup, which held half the same buttons.
+
+- **Left-click and right-click both open it.** Right-click just makes sure
+  the thing is selected; the caller has already recorded which piece was
+  under the cursor. `openObjCtxMenu` and `closeObjCtxMenu` survive as thin
+  wrappers so nothing had to be rewired.
+- **Sections appear only when they apply** — no Light section on a plank, no
+  This Piece section unless you clicked a real piece of something bigger.
+  It re-renders from scratch on every change; it is small, and that is far
+  simpler than keeping a dozen buttons' states in sync by hand.
+- **The camera does not close it.** The old popup was pinned to a spot on
+  the level and had to close on any camera move or it would point at nothing.
+  The box is docked to the screen. `pruneObjCtxMenu()` still runs every
+  frame as a catch-all, but now only for "the object is gone".
+- **It is yours to move and resize**, by the header and the corner, and both
+  are remembered in `pg_panel` next to the menu gradient. Position is saved
+  and restored with `offsetLeft`/`offsetTop`, which measure from inside the
+  stage's border — the same thing `style.left` positions against. Mixing in
+  `getBoundingClientRect`, which measures from outside it, put the box 5px
+  off every reload.
+- **`clearSelection` hides the box before it bails out.** `removeObject`
+  nulls `selected` and then calls it, so an early return above the hide
+  left the box open with nothing in it. The guard on `objPanelEl` is for
+  boot, when `clearAllObjects` runs before the element has been looked up.
+
+**Bolts and gadgets will show their settings here too.** That is the point
+of one box: a bolt's speed and tightness, a mover's line, a sensor's range
+all get a section, not a popup each.
 
 ---
 

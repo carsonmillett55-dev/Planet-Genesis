@@ -1110,20 +1110,59 @@
   .myObjRow .nm{ flex:1; font-family:'Patrick Hand',cursive; font-size:.9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
   /* ---------- right-click context menu on built objects ---------- */
-  #objCtxMenu{
-    position:absolute; z-index:40; background:var(--paper); border:3px solid var(--stitch);
-    border-radius:10px; box-shadow:0 6px 16px rgba(0,0,0,.5); overflow:hidden; min-width:9rem;
+  /* ---------- the object box: one place for everything about what you
+     have selected. Docked to the right of the stage, but yours to drag
+     about by its header and resize by its corner; both are remembered.
+     It replaces the strip that used to follow the selection around and
+     sit on top of it, and the right-click popup, which held half the
+     same buttons. Bolts and gadgets will show their settings here too. */
+  #objPanel{
+    position:absolute; z-index:30; right:.8rem; top:3.4rem;
+    width:15.5rem; min-width:12rem; max-width:70%;
+    min-height:9rem; max-height:88%; height:auto;
+    background:var(--paper); border:3px solid var(--stitch); border-radius:14px;
+    box-shadow:0 8px 22px rgba(0,0,0,.5);
+    display:flex; flex-direction:column; overflow:hidden;
+    resize:both;
+    animation:popIn .13s ease-out;
   }
-  #objCtxMenu[hidden]{ display:none !important; }
-  #objCtxMenu .ctxSlider{ padding:.35rem .6rem .1rem; min-width:11rem; }
-  #objCtxMenu .ctxSlider .settingRow{ margin:0; }
-  #objCtxMenu .ctxSlider input[type=range]{ width:100%; }
-  #objCtxMenu button{
-    display:block; width:100%; text-align:left; background:none; border:none;
-    font-family:'Baloo 2',sans-serif; font-size:.8rem; color:var(--ink);
-    padding:.5rem .8rem; cursor:pointer;
+  #objPanel[hidden]{ display:none !important; }
+  #opHead{
+    display:flex; align-items:center; gap:.4rem; padding:.4rem .55rem;
+    background:var(--desk-dark); color:var(--stitch); cursor:move; user-select:none;
+    flex:0 0 auto;
   }
-  #objCtxMenu button:hover{ background:var(--yellow); }
+  #opHead .t{ flex:1; font-family:'Patrick Hand',cursive; font-size:.98rem; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #opHead .grip{ opacity:.55; font-size:.8rem; letter-spacing:-.1em; }
+  #opHead button{
+    background:transparent; border:none; color:var(--stitch); cursor:pointer;
+    font-size:1rem; line-height:1; padding:.1rem .3rem; border-radius:6px;
+  }
+  #opHead button:hover{ background:rgba(246,236,217,.18); }
+  #opBody{ flex:1; min-height:0; overflow-y:auto; padding:.5rem .6rem .6rem; display:flex; flex-direction:column; gap:.5rem; }
+  .opSec h4{
+    margin:0 0 .25rem; font-family:'Patrick Hand',cursive; font-size:.72rem;
+    color:var(--paper-edge); text-transform:uppercase; letter-spacing:.05em;
+  }
+  .opInfo{ font-size:.76rem; color:var(--ink); line-height:1.45; }
+  .opInfo b{ font-family:'Patrick Hand',cursive; font-size:.9rem; }
+  .opRow{ display:flex; gap:.3rem; flex-wrap:wrap; }
+  .opRow button{
+    flex:1 1 auto; min-width:2.4rem; height:1.9rem; padding:0 .5rem; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:.3rem;
+    background:var(--stitch); color:var(--ink); border:2px solid rgba(43,27,18,.25);
+    border-radius:9px; font-family:'Baloo 2',sans-serif; font-size:.78rem; line-height:1;
+  }
+  .opRow button:hover{ background:var(--yellow); border-color:var(--yellow-dark); }
+  .opRow button.on{ background:var(--yellow); border-color:var(--yellow-dark); }
+  .opRow button.red{ background:#E4574B; color:#fff; border-color:#B3261E; }
+  .opRow button.red:hover{ background:#F0675B; }
+  .opRow button.wide{ flex-basis:100%; }
+  .opRow .ro{
+    display:flex; align-items:center; padding:0 .4rem; height:1.9rem;
+    font-family:'Patrick Hand',cursive; font-size:.82rem; color:var(--ink);
+  }
+  #objPanel .settingRow{ margin:0; }
 
   /* ---------- modal ---------- */
   .overlay{
@@ -1184,34 +1223,11 @@
   .hudPill button.mini{ padding:.1rem .4rem; }
   .hudPill .ro{ padding:0 .35rem; font-size:.76rem; opacity:.9; }
 
-  /* the little toolbar that floats beside whatever object is selected */
-  #selBar{
-    position:absolute; z-index:22; display:flex; gap:.2rem; flex-wrap:wrap;
-    background:rgba(43,27,18,.88); border:2px solid var(--stitch);
-    border-radius:999px; padding:.22rem .3rem; max-width:22rem;
-    box-shadow:0 4px 12px rgba(0,0,0,.45);
-    animation:popIn .13s ease-out;
-  }
-  #selBar[hidden]{ display:none !important; }
-  #selBar button{
-    font-size:.9rem; line-height:1; cursor:pointer; min-width:1.7rem; height:1.7rem;
-    display:flex; align-items:center; justify-content:center;
-    background:transparent; color:var(--stitch);
-    border:none; border-radius:999px; padding:0 .3rem;
-  }
-  #selBar button:hover{ background:var(--yellow); color:var(--ink); }
-  #selBar button.on{ background:var(--yellow); color:var(--ink); }
-  #selBar .sep{ width:1px; align-self:stretch; background:rgba(246,236,217,.3); margin:.1rem .15rem; }
-  #selBar .ro{
-    display:flex; align-items:center; padding:0 .35rem; height:1.7rem;
-    font-family:'Patrick Hand',cursive; font-size:.76rem; color:var(--paper-edge);
-  }
-
   @keyframes popIn{ from{ transform:scale(.86); opacity:0; } to{ transform:scale(1); opacity:1; } }
-  #personalMenu:not([hidden]), #objCtxMenu:not([hidden]){ animation:popIn .13s ease-out; }
+  #personalMenu:not([hidden]){ animation:popIn .13s ease-out; }
   .overlay:not([hidden]) .panel, .overlay:not([hidden]) #charEditor{ animation:popIn .16s ease-out; }
   @media (prefers-reduced-motion: reduce){
-    #selBar, #personalMenu:not([hidden]), #objCtxMenu:not([hidden]),
+    #objPanel, #personalMenu:not([hidden]),
     .overlay:not([hidden]) .panel, .overlay:not([hidden]) #charEditor{ animation:none; }
   }
 
@@ -1268,7 +1284,6 @@
         <button id="stateBtn" title="Playing — click to pause">▶</button>
       </div>
 
-      <div id="selBar" hidden></div>
 
       <div id="personalMenu" hidden>
         <div id="pmBags"></div>
@@ -1278,7 +1293,10 @@
         </div>
       </div>
 
-      <div id="objCtxMenu" hidden></div>
+      <div id="objPanel" hidden>
+        <div id="opHead"><span class="grip">⋮⋮</span><span class="t"></span><button id="opClose" title="Close">✕</button></div>
+        <div id="opBody"></div>
+      </div>
     </div>
   </main>
 
@@ -2443,7 +2461,6 @@
     bolts.slice().forEach(function(b){ if (b.objA===obj || b.objB===obj) removeBolt(b); });
     if (obj.body) World.remove(world, obj.body);
     objects.splice(idx,1);
-    if (ctxObj === obj) closeObjCtxMenu();
     var si = selection.indexOf(obj);
     if (si >= 0) selection.splice(si, 1);
     if (selected === obj){
@@ -6991,13 +7008,20 @@
      is what every action actually runs over, so a marquee drag and a
      plain click go through exactly the same code. */
   var selection = [];
-  var selBarEl = document.getElementById("selBar");
+  var objPanelEl = document.getElementById("objPanel");
+  var opHeadEl = document.getElementById("opHead");
+  var opTitleEl = opHeadEl.querySelector(".t");
+  var opBodyEl = document.getElementById("opBody");
   function clearSelection(){
     selectedRegion = null;
     selection = [];
+    /* Hide first, bail second. removeObject nulls `selected` before it
+       calls this, so an early return above the hide would leave the box
+       open with nothing in it — which is exactly what happened. The guard
+       is for boot: clearAllObjects runs before the box has been looked up. */
+    if (objPanelEl) objPanelEl.hidden = true;
     if (!selected) return;
     selected = null;
-    selBarEl.hidden = true;
   }
   // Everything selected that still exists.
   function selList(){
@@ -7010,7 +7034,7 @@
     selection = out;
     selected = out[out.length - 1] || null;
     selectedRegion = null;
-    if (!selected){ selBarEl.hidden = true; return; }
+    if (!selected){ objPanelEl.hidden = true; return; }
     renderSelBar();
   }
   function toggleInSelection(o){
@@ -7019,7 +7043,7 @@
     selection = list;
     selected = list[list.length - 1] || null;
     selectedRegion = null;
-    if (!selected){ selBarEl.hidden = true; return; }
+    if (!selected){ objPanelEl.hidden = true; return; }
     renderSelBar();
   }
   function selectionBounds(){
@@ -7059,69 +7083,128 @@
     b.addEventListener("click", function(e){ e.stopPropagation(); fn(); });
     return b;
   }
-  function renderSelBar(){
-    if (!selected || mode !== "build"){ selBarEl.hidden = true; return; }
-    var o = selected, many = selList().length;
-    selBarEl.innerHTML = "";
-    if (many > 1){
-      var cnt = document.createElement("span");
-      cnt.className = "ro";
-      cnt.textContent = many + " selected";
-      cnt.title = "Everything here moves, turns, copies and deletes together";
-      selBarEl.appendChild(cnt);
-      var sep0 = document.createElement("div"); sep0.className = "sep"; selBarEl.appendChild(sep0);
-    }
-    selBarEl.appendChild(selBtn("↺", "Rotate left (15°)", function(){ rotateSelected(-Math.PI/12); }));
-    selBarEl.appendChild(selBtn("↻", "Rotate right (15°)", function(){ rotateSelected(Math.PI/12); }));
-    selBarEl.appendChild(selBtn("⇄", "Flip horizontally", function(){ flipSelected(); }));
-    var sep1 = document.createElement("div"); sep1.className = "sep"; selBarEl.appendChild(sep1);
-    selBarEl.appendChild(selBtn("⧉", "Duplicate (Ctrl+D)", function(){ duplicateSelected(); }));
-    selBarEl.appendChild(selBtn(o.forcedStatic ? "🔒" : "🔓",
-      o.forcedStatic ? "Anchored in place — click to let it fall" : "Free to move — click to anchor it",
-      function(){ anchorSelected(); }, o.forcedStatic));
-    var sep2 = document.createElement("div"); sep2.className = "sep"; selBarEl.appendChild(sep2);
-    selBarEl.appendChild(selBtn("⤒", "Move a layer forward", function(){ layerSelected(1); }));
-    selBarEl.appendChild(selBtn("⤓", "Move a layer back", function(){ layerSelected(-1); }));
-    var lay = document.createElement("span");
-    lay.className = "ro";
-    lay.textContent = LAYER_NAMES[o.layer];
-    lay.title = o.layer === MID_LAYER ? "On the interactive layer" : "On a decoration layer";
-    selBarEl.appendChild(lay);
-    var sep3 = document.createElement("div"); sep3.className = "sep"; selBarEl.appendChild(sep3);
-    // Only worth offering when the piece is genuinely a part of
-     // something bigger — otherwise it is just the object again.
-    if (many === 1 && selectedRegion && selectedRegion.obj === o && regionValid(selectedRegion) && !regionIsWhole(selectedRegion)){
-      selBarEl.appendChild(selBtn("✂", "Delete just this " + matOf(selectedRegion.materialId).label +
-        " piece (Del) — whatever it was holding together may come apart",
-        function(){ deleteSelectedRegion(); }));
-      selBarEl.appendChild(selBtn("⇱", "Detach this " + matOf(selectedRegion.materialId).label +
-        " piece so it becomes its own object",
-        function(){ detachSelectedRegion(); }));
-    }
-    selBarEl.appendChild(selBtn("💾", "Save to My Objects", function(){ saveObjectToMyObjects(o); }));
-    selBarEl.appendChild(selBtn("🗑", "Delete the whole object — or double-click it first, then Del", function(){ deleteSelected(); }));
-    selBarEl.hidden = false;
-    updateSelBarPos();
+  /* Everything about the selection, in one box. Sections only appear when
+     they apply: no Light section on a plank, no This Piece section unless
+     you clicked a real piece of something bigger. Re-rendered from scratch
+     on every change — it is small, and that is far simpler than keeping a
+     dozen buttons' states in sync by hand. */
+  function opSection(title){
+    var sec = document.createElement("div"); sec.className = "opSec";
+    if (title){ var h = document.createElement("h4"); h.textContent = title; sec.appendChild(h); }
+    var row = document.createElement("div"); row.className = "opRow";
+    sec.appendChild(row);
+    opBodyEl.appendChild(sec);
+    return row;
   }
-  function updateSelBarPos(){
-    if (!selected || selBarEl.hidden) return;
+  function opBtn(row, label, title, fn, cls){
+    var b = document.createElement("button");
+    b.textContent = label; b.title = title || "";
+    if (cls) b.className = cls;
+    b.addEventListener("click", function(e){ e.stopPropagation(); fn(); });
+    row.appendChild(b);
+    return b;
+  }
+  function renderSelBar(){
+    if (!selected || mode !== "build"){ objPanelEl.hidden = true; return; }
     if (objects.indexOf(selected) < 0){ clearSelection(); return; }
-    var sb = selectionBounds();
-    if (!sb){ clearSelection(); return; }
-    var b = { min:{x:sb.minX, y:sb.minY}, max:{x:sb.maxX, y:sb.maxY} };
-    var visR = camX + viewRectW/camScale, visB = camY + viewRectH/camScale;
-    if (b.max.x < camX || b.min.x > visR || b.max.y < camY || b.min.y > visB){
-      selBarEl.style.visibility = "hidden"; return;   // off-screen: keep the
-    }                                                 // selection, hide the bar
-    selBarEl.style.visibility = "";
-    var s = worldToScreen((b.min.x + b.max.x)/2, b.min.y);
-    var wrapRect = wrap.getBoundingClientRect();
-    var bw = selBarEl.offsetWidth || 220, bh = selBarEl.offsetHeight || 30;
-    var left = Math.max(6, Math.min(s.x - bw/2, wrapRect.width - bw - 6));
-    var top = s.y - bh - 12;
-    if (top < 6) top = Math.min(wrapRect.height - bh - 6, worldToScreen(0, b.max.y).y + 12);
-    selBarEl.style.left = Math.round(left) + "px";
-    selBarEl.style.top = Math.round(Math.max(6, top)) + "px";
+    var o = selected, group = selList(), many = group.length;
+    var piece = (many === 1 && selectedRegion && selectedRegion.obj === o &&
+                 regionValid(selectedRegion) && !regionIsWhole(selectedRegion)) ? selectedRegion : null;
+    opBodyEl.innerHTML = "";
+
+    // Title: what it is.
+    var mats = [];
+    o.pieces.forEach(function(pc){ var m = matOf(pc.m); if (m && mats.indexOf(m.label) < 0) mats.push(m.label); });
+    opTitleEl.textContent = many > 1 ? (many + " objects") : (mats.join(" + ") || "Object");
+
+    // About.
+    var info = document.createElement("div"); info.className = "opInfo";
+    if (many > 1){
+      info.innerHTML = "<b>" + many + " selected</b> — they move, turn, copy and delete together.";
+    } else {
+      info.innerHTML = "<b>" + escapeHtml(mats.join(", ")) + "</b> · " + escapeHtml(LAYER_NAMES[o.layer]) +
+        (o.layer === MID_LAYER ? "" : " (decoration)") +
+        " · " + (o.forcedStatic ? "anchored" : "free to move") +
+        " · " + objCorners(o) + " corners";
+    }
+    var about = opSection(null); about.parentNode.insertBefore(info, about); about.remove();
+
+    // Turn & flip.
+    var tf = opSection("Turn & flip");
+    opBtn(tf, "↺", "Rotate left 15°", function(){ rotateSelected(-Math.PI/12); });
+    opBtn(tf, "↻", "Rotate right 15°", function(){ rotateSelected(Math.PI/12); });
+    opBtn(tf, "⇄", "Flip horizontally", function(){ flipSelected(); });
+
+    // Layer.
+    var ly = opSection("Layer");
+    opBtn(ly, "⤓ Back", "Move a layer back", function(){ layerSelected(-1); });
+    var lname = document.createElement("span"); lname.className = "ro"; lname.textContent = LAYER_NAMES[o.layer];
+    ly.appendChild(lname);
+    opBtn(ly, "⤒ Front", "Move a layer forward", function(){ layerSelected(1); });
+
+    // Light, only when there is one.
+    if (many === 1 && objectLights(o).length){
+      var lt = opSection("Light");
+      var pushedGlow = false;
+      var gl = sliderRow("☀ Glow", o.glow == null ? 1 : o.glow, GLOW_MIN, GLOW_MAX, 0.05,
+        function(v){
+          // one undo step for the whole drag, not one per pixel
+          if (!pushedGlow){ pushUndo("changing a light"); pushedGlow = true; }
+          o.glow = clampGlow(v);
+        },
+        function(v){ return Math.round(v*100) + "%"; });
+      gl.style.flexBasis = "100%";
+      lt.appendChild(gl);
+      opBtn(lt, o.lightSolid ? "👻 Walk through it" : "🧱 Make it solid",
+        o.lightSolid ? "Go back to walking straight through this light" : "Give this light a real surface you can stand on",
+        function(){
+          pushUndo(o.lightSolid ? "making a light walk-through" : "making a light solid");
+          o.lightSolid = !o.lightSolid;
+          rebuildFromPieces(o);
+          if (objects.indexOf(o) >= 0) refreshObjectPhysics(o);
+          showToast(o.lightSolid ? "🧱 Solid — you can stand on it" : "👻 Walk straight through");
+          sfx("click"); renderSelBar();
+        });
+      if (o.allGlow || o.lightFalls){
+        opBtn(lt, o.lightFalls ? "☁ Hold it up" : "⬇ Let it fall", "",
+          function(){
+            pushUndo("changing a light");
+            o.lightFalls = !o.lightFalls;
+            refreshObjectPhysics(o);
+            Body.setVelocity(o.body, {x:0,y:0});
+            showToast(o.lightFalls ? "⬇ Gravity has it" : "☁ Holding itself up");
+            sfx("click"); renderSelBar();
+          });
+      }
+    }
+
+    // This piece — only worth offering when it is genuinely part of
+    // something bigger, otherwise it is just the object again.
+    if (piece){
+      var pm = matOf(piece.materialId).label;
+      var ps = opSection("This piece — " + pm);
+      opBtn(ps, "✂ Delete piece", "Delete just the " + pm + " (Del) — whatever it was holding together may come apart",
+        function(){ deleteSelectedRegion(); });
+      opBtn(ps, "⇱ Detach", "Make the " + pm + " its own object", function(){ detachSelectedRegion(); });
+    }
+
+    // Actions.
+    var ac = opSection("Actions");
+    opBtn(ac, "⧉ Duplicate", "Duplicate (Ctrl+D)", function(){ duplicateSelected(); });
+    opBtn(ac, o.forcedStatic ? "🔓 Let it fall" : "🔒 Anchor",
+      o.forcedStatic ? "Anchored in place — click to let it fall" : "Free to move — click to anchor it",
+      function(){ anchorSelected(); }, o.forcedStatic ? "on" : "");
+    if (many === 1) opBtn(ac, "💾 Save", "Save to My Objects", function(){ saveObjectToMyObjects(o); });
+    opBtn(ac, "🗑 Delete", many > 1 ? "Delete all " + many : "Delete the whole object — or double-click it, then Del",
+      function(){ deleteSelected(); }, "red" + (many > 1 ? " wide" : ""));
+
+    objPanelEl.hidden = false;
+  }
+  /* The panel is docked, so nothing to position — but this runs every frame
+     and is the place that notices the selection has gone. */
+  function updateSelBarPos(){
+    if (!selected || objPanelEl.hidden) return;
+    if (objects.indexOf(selected) < 0){ clearSelection(); return; }
   }
   function drawSelectionOutline(){
     if (mode !== "build") return;
@@ -7644,110 +7727,90 @@
            puff(pt.x, pt.y, 10, { color:"#F6ECD9", speed:1.8, g:0.05 }); glueFirst = null; }
   }
 
-  // ---- Right-click context menu (Build) / grapple rope (Play) ----
-  var objCtxMenu = document.getElementById("objCtxMenu");
-  /* Which object the open menu belongs to. Without it, anything that
-     removed that object by another route — the eraser, a right-click cut,
-     Del, the bin on the selection bar, an undo, loading another level —
-     left its menu sitting there, still offering to anchor and duplicate
-     something that no longer exists. */
-  var ctxObj = null, ctxCam = null;
+  // ---- The object box (Build) / grapple rope (Play) ----
+  /* Right-click used to open its own popup at the cursor with half the
+     same buttons as the strip. Now both are the one box: right-click just
+     makes sure the thing is selected and the box is showing. The caller
+     has already recorded which piece was under the cursor. */
   function openObjCtxMenu(clientX, clientY, obj){
-    ctxObj = obj;
-    ctxCam = { x: camX, y: camY, s: camScale };   // see pruneObjCtxMenu
-    objCtxMenu.innerHTML = "";
-    var dup = document.createElement("button"); dup.textContent = "⧉ Duplicate";
-    dup.addEventListener("click", function(){ selectObject(obj); duplicateSelected(); closeObjCtxMenu(); });
-    objCtxMenu.appendChild(dup);
-    var anch = document.createElement("button");
-    anch.textContent = obj.forcedStatic ? "🔓 Let it fall" : "🔒 Anchor in place";
-    anch.addEventListener("click", function(){ selectObject(obj); anchorSelected(); closeObjCtxMenu(); });
-    objCtxMenu.appendChild(anch);
-    if (objectLights(obj).length){
-      var glowWrap = document.createElement("div");
-      glowWrap.className = "ctxSlider";
-      var pushedGlow = false;
-      glowWrap.appendChild(sliderRow("☀ Glow", obj.glow == null ? 1 : obj.glow, GLOW_MIN, GLOW_MAX, 0.05,
-        function(v){
-          // one undo step for the whole drag, not one per pixel
-          if (!pushedGlow){ pushUndo("changing a light"); pushedGlow = true; }
-          obj.glow = clampGlow(v);
-        },
-        function(v){ return Math.round(v*100) + "%"; }));
-      objCtxMenu.appendChild(glowWrap);
-      var solid = document.createElement("button");
-      solid.textContent = obj.lightSolid ? "👻 Walk through it" : "🧱 Make it solid";
-      solid.title = obj.lightSolid ? "Go back to walking straight through this light"
-                                   : "Give this light a real surface you can stand on";
-      solid.addEventListener("click", function(){
-        pushUndo(obj.lightSolid ? "making a light walk-through" : "making a light solid");
-        obj.lightSolid = !obj.lightSolid;
-        rebuildFromPieces(obj);
-        if (objects.indexOf(obj) >= 0) refreshObjectPhysics(obj);
-        showToast(obj.lightSolid ? "🧱 Solid — you can stand on it" : "👻 Walk straight through");
-        sfx("click");
-        closeObjCtxMenu();
-      });
-      objCtxMenu.appendChild(solid);
-      if (obj.allGlow || obj.lightFalls){
-        var fall = document.createElement("button");
-        fall.textContent = obj.lightFalls ? "☁ Hold it up" : "⬇ Let it fall";
-        fall.addEventListener("click", function(){
-          pushUndo("changing a light");
-          obj.lightFalls = !obj.lightFalls;
-          refreshObjectPhysics(obj);
-          Body.setVelocity(obj.body, {x:0,y:0});
-          showToast(obj.lightFalls ? "⬇ Gravity has it" : "☁ Holding itself up");
-          sfx("click");
-          closeObjCtxMenu();
-        });
-        objCtxMenu.appendChild(fall);
-      }
-    }
-    if (selectedRegion && selectedRegion.obj === obj && regionValid(selectedRegion) && !regionIsWhole(selectedRegion)){
-      var det = document.createElement("button");
-      det.textContent = "⇱ Detach this " + matOf(selectedRegion.materialId).label;
-      det.title = "Make this piece its own object";
-      det.addEventListener("click", function(){ detachSelectedRegion(); closeObjCtxMenu(); });
-      objCtxMenu.appendChild(det);
-    }
-    var save = document.createElement("button"); save.textContent = "💾 Save to My Objects";
-    save.addEventListener("click", function(){ saveObjectToMyObjects(obj); closeObjCtxMenu(); });
-    var del = document.createElement("button"); del.textContent = "🗑 Delete";
-    del.addEventListener("click", function(){ selectObject(obj); deleteSelected(); closeObjCtxMenu(); });
-    objCtxMenu.appendChild(save); objCtxMenu.appendChild(del);
-    var wrapRect = wrap.getBoundingClientRect();
-    objCtxMenu.style.left = (clientX - wrapRect.left) + "px";
-    objCtxMenu.style.top = (clientY - wrapRect.top) + "px";
-    objCtxMenu.hidden = false;
+    if (selList().indexOf(obj) < 0) selectObject(obj);
+    renderSelBar();
   }
-  function closeObjCtxMenu(){ ctxObj = null; ctxCam = null; objCtxMenu.hidden = true; }
-  /* Catch-all, checked every frame, so no future way of deleting something
-     or of moving the camera has to remember this menu exists:
-       - the object it belongs to is gone  → the menu goes with it
-       - the camera moved                  → it is pinned to the screen, not
-         to the world, so it would sit there pointing at empty air. */
+  function closeObjCtxMenu(){ renderSelBar(); }
+  /* Runs every frame. Catch-all on purpose: no future way of deleting an
+     object has to remember the box exists. The camera no longer matters —
+     the box is docked, not pinned to a spot on the level. */
   function pruneObjCtxMenu(){
-    if (objCtxMenu.hidden) return;
-    if (!ctxObj || objects.indexOf(ctxObj) < 0){ closeObjCtxMenu(); return; }
-    if (!ctxCam) return;
-    // A few pixels of drift (the camera easing back inside the world, a
-    // platform carrying the shot) is not worth snatching the menu away.
-    var dx = (ctxCam.x - camX) * camScale, dy = (ctxCam.y - camY) * camScale;
-    if (Math.abs(dx) > 6 || Math.abs(dy) > 6 || Math.abs(ctxCam.s - camScale) > 1e-4) closeObjCtxMenu();
+    if (objPanelEl.hidden) return;
+    if (!selected || objects.indexOf(selected) < 0) clearSelection();
   }
-  // Only a plain left click outside the menu dismisses it — the right-click
-  // that OPENS it also bubbles up to this same document listener on the
-  // very same event, so reacting to button 2 here would close the menu
-  // the instant it opens.
-  document.addEventListener("pointerdown", function(e){
-    if (e.button !== 0) return;
-    if (!objCtxMenu.hidden && !objCtxMenu.contains(e.target)) closeObjCtxMenu();
-  });
 
-  // Which bit of sponge the cursor is aiming at, and how far off it is.
-  // Used both to fire the rope and to colour the play-mode reticle, so
-  // the cursor always tells the truth about whether a shot will land.
+  /* ---- Dragging and resizing the box. The position and size are yours,
+     so they are remembered next to the menu gradient. Dragging converts
+     the box from right-docked to an absolute left/top the first time, so
+     it stays where you put it rather than snapping back. */
+  var opDrag = null;
+  /* offsetLeft/offsetTop are measured from inside the stage's border, which
+     is also what style.left/top position against — so saving one and
+     restoring the other lands in the same place. Mixing in
+     getBoundingClientRect, which measures from outside the border, put the
+     box 5px off every time it came back. */
+  function opSavePlacement(){
+    try {
+      localStorage.setItem("pg_panel", JSON.stringify({
+        left: objPanelEl.offsetLeft, top: objPanelEl.offsetTop,
+        w: objPanelEl.offsetWidth, h: objPanelEl.offsetHeight }));
+    } catch(e){}
+  }
+  function opClampIntoStage(){
+    var W = wrap.clientWidth, H = wrap.clientHeight;
+    var pw = objPanelEl.offsetWidth, ph = objPanelEl.offsetHeight;
+    var left = Math.max(0, Math.min(objPanelEl.offsetLeft, W - Math.min(pw, W)));
+    var top = Math.max(0, Math.min(objPanelEl.offsetTop, H - Math.min(ph, H)));
+    objPanelEl.style.left = Math.round(left) + "px";
+    objPanelEl.style.top = Math.round(top) + "px";
+    objPanelEl.style.right = "auto";
+  }
+  opHeadEl.addEventListener("pointerdown", function(e){
+    if (e.button !== 0 || e.target.tagName === "BUTTON") return;
+    var w = wrap.getBoundingClientRect();
+    var ox = w.left + wrap.clientLeft, oy = w.top + wrap.clientTop;   // inside the border
+    opDrag = { dx: e.clientX - ox - objPanelEl.offsetLeft, dy: e.clientY - oy - objPanelEl.offsetTop, wl: ox, wt: oy };
+    objPanelEl.style.right = "auto";
+    opHeadEl.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  opHeadEl.addEventListener("pointermove", function(e){
+    if (!opDrag) return;
+    objPanelEl.style.left = Math.round(e.clientX - opDrag.dx - opDrag.wl) + "px";
+    objPanelEl.style.top = Math.round(e.clientY - opDrag.dy - opDrag.wt) + "px";
+  });
+  ["pointerup","pointercancel"].forEach(function(ev){
+    opHeadEl.addEventListener(ev, function(){
+      if (!opDrag) return;
+      opDrag = null;
+      opClampIntoStage();
+      opSavePlacement();
+    });
+  });
+  document.getElementById("opClose").addEventListener("click", function(){ clearSelection(); });
+  if (typeof ResizeObserver !== "undefined"){
+    var opRO = new ResizeObserver(function(){ if (!objPanelEl.hidden && !opDrag) opSavePlacement(); });
+    opRO.observe(objPanelEl);
+  }
+  (function restorePanelPlacement(){
+    try {
+      var pl = JSON.parse(localStorage.getItem("pg_panel") || "null");
+      if (!pl) return;
+      if (pl.w) objPanelEl.style.width = pl.w + "px";
+      if (pl.h) objPanelEl.style.height = pl.h + "px";
+      if (pl.left != null && pl.top != null){
+        objPanelEl.style.left = pl.left + "px"; objPanelEl.style.top = pl.top + "px";
+        objPanelEl.style.right = "auto";
+      }
+    } catch(e){}
+  })();
+
   function grappleTargetAt(pt){
     if (!player) return null;
     var best = null, bestOwner = null, bestD = Infinity;
