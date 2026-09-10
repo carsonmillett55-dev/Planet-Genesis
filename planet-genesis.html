@@ -2532,65 +2532,147 @@
     World.remove(world, b.constraint);
     bolts.splice(idx,1);
   }
-  /* A bolt has four settings rather than two. Tight and Loose pin things
-     together rigidly or floppily; the two Motor settings drive whatever
-     is attached round and round, which is how you build a wheel, a
-     windmill, a rotating platform or a swinging arm. Motors only turn in
-     Play, so a spinning contraption doesn't fight you while you're
-     still positioning it. */
+  /* ---- Bolts -------------------------------------------------------
+
+     A bolt pins two objects together at a point and is one of two kinds:
+
+       bolt    a pivot. TIGHTNESS is rotational friction, 0 = swings freely,
+               1 = very stiff, like LBP's own tightness dial. Not a weld.
+       motor   drives whatever is attached round at SPEED in one direction.
+
+     The four legacy modes (tight / loose / cw / ccw) are still what gets
+     saved, so old levels load: tight and loose are a bolt at two tightness
+     presets, cw and ccw are a motor either way round.
+
+     Two things about the physics engine that shaped this, both measured:
+
+     - Matter keeps a constraint's anchor offset ALREADY ROTATED to the
+       body's current angle — it rotates pointA in place every step. So the
+       live anchor is simply body.position + pointA, no rotation of our own.
+       Rotating it again put a bolt on a turning wheel at twice the angle,
+       which is why bolts looked like they were slipping off. The joint
+       itself was holding to 0.02px the whole time.
+     - A motor that only sets angular velocity spins the body about its own
+       centre and leaves the joint to drag it round the pivot, so under load
+       the thing sags and wobbles. Setting the linear velocity as well, to
+       what rotation about the pivot implies, means the integrator moves the
+       body in a circle on its own and the joint only corrects gravity.
+
+     Motors run whenever the world is running — Build unpaused or Play —
+     so a contraption can be watched while it is being built. Dragging
+     something makes it static for the drag, so it does not fight you. */
   var BOLT_MODES = ["tight","loose","cw","ccw"];
-  var BOLT_LABEL = { tight:"Tight — rigid", loose:"Loose — wobbly",
-                     cw:"Motor ↻ — spins clockwise in Play", ccw:"Motor ↺ — spins the other way in Play" };
+  var BOLT_DEFAULT_SPEED = 0.06;
+  function boltIsMotor(b){ return b.mode === "cw" || b.mode === "ccw"; }
+  function boltDir(b){ return b.mode === "ccw" ? -1 : 1; }
   function applyBoltMode(b){
-    var rigid = b.mode === "tight" || b.mode === "cw" || b.mode === "ccw";
-    b.constraint.stiffness = rigid ? 0.9 : 0.12;
-    b.constraint.damping = rigid ? 0.35 : 0.04;
+    // The pin itself is always firm. Looseness is rotational, not the
+    // anchor going springy — a loose bolt in LBP still holds its spot.
+    b.constraint.stiffness = 0.9;
+    b.constraint.damping = 0.35;
     b.tight = b.mode === "tight";
+    if (b.tightness == null) b.tightness = b.mode === "loose" ? 0.05 : 0.85;
+    if (b.speed == null) b.speed = worldSettings.motorSpeed || BOLT_DEFAULT_SPEED;
   }
-  function addBolt(objA, objB, point, modeOrTight){
+  function addBolt(objA, objB, point, modeOrTight, extra){
     var m = typeof modeOrTight === "string" ? modeOrTight : (modeOrTight ? "tight" : "loose");
     if (BOLT_MODES.indexOf(m) === -1) m = "tight";
+    extra = extra || {};
     var c = Constraint.create({
       bodyA: objA.body, pointA: { x: point.x - objA.body.position.x, y: point.y - objA.body.position.y },
       bodyB: objB.body, pointB: { x: point.x - objB.body.position.x, y: point.y - objB.body.position.y },
       length: 0, stiffness: 0.9, damping: 0.35
     });
     World.add(world, c);
-    var bolt = { id:"b"+(boltCounter++), point:{x:point.x,y:point.y}, objA:objA, objB:objB, constraint:c, mode:m, tight:true };
+    var bolt = { id:"b"+(boltCounter++), point:{x:point.x,y:point.y}, objA:objA, objB:objB, constraint:c, mode:m, tight:true,
+                 layer: (extra.layer === 0 || extra.layer === 1 || extra.layer === 2) ? extra.layer : objA.layer,
+                 tightness: extra.tightness != null ? +extra.tightness : null,
+                 speed: extra.speed != null ? +extra.speed : null };
     applyBoltMode(bolt);
     bolts.push(bolt);
     return bolt;
   }
-  function toggleBolt(bolt){
-    bolt.mode = BOLT_MODES[(BOLT_MODES.indexOf(bolt.mode) + 1) % BOLT_MODES.length];
-    applyBoltMode(bolt);
-    showToast("🔩 " + BOLT_LABEL[bolt.mode]);
-    sfx(bolt.mode === "cw" || bolt.mode === "ccw" ? "motor" : "bolt");
+  function setBoltKind(b, kind){
+    if (kind === "motor"){ if (!boltIsMotor(b)) b.mode = "cw"; }
+    else { b.mode = b.tightness > 0.5 ? "tight" : "loose"; }
+    applyBoltMode(b);
   }
-  // Motors spin the body about its own centre; the zero-length
-  // constraint then drags that rotation around the bolt point, which is
-  // what makes an off-centre wheel behave like a real one. If both ends
-  // are pinned down there is nothing to turn, so nothing happens.
-  onStep("beforeUpdate", function(){
-    if (mode !== "play") return;
-    for (var i = 0; i < bolts.length; i++){
-      var b = bolts[i];
-      if (b.mode !== "cw" && b.mode !== "ccw") continue;
-      var w = worldSettings.motorSpeed * (b.mode === "cw" ? 1 : -1);
-      var target = !b.objA.body.isStatic ? b.objA.body : (!b.objB.body.isStatic ? b.objB.body : null);
-      if (target) Body.setAngularVelocity(target, w);
-    }
-  });
-  // Where a bolt actually IS right now. Its stored `point` is where you
-  // put it; once the thing it holds has moved or spun, the live anchor
-  // is the constraint's own attachment point carried into world space —
-  // which is what makes a bolt on a turning wheel stay on the wheel.
+  function setBoltTightness(b, t){
+    b.tightness = Math.max(0, Math.min(1, +t || 0));
+    if (!boltIsMotor(b)) b.mode = b.tightness > 0.5 ? "tight" : "loose";
+    b.tight = b.mode === "tight";
+  }
+  // Where a bolt IS right now: the constraint's own anchor, which Matter
+  // keeps rotated. Falls back to where it was put if it has no joint yet.
   function boltWorldPoint(b){
-    if (b.constraint && b.constraint.bodyA && b.constraint.pointA){
-      return toWorldPoint(b.constraint.bodyA, b.constraint.pointA);
-    }
+    var c = b.constraint;
+    if (c && c.bodyA && c.pointA) return { x: c.bodyA.position.x + c.pointA.x, y: c.bodyA.position.y + c.pointA.y };
     return b.point;
   }
+  function boltAnchorOn(b, body){
+    var c = b.constraint;
+    if (c.bodyA === body) return { x: body.position.x + c.pointA.x, y: body.position.y + c.pointA.y };
+    return { x: body.position.x + c.pointB.x, y: body.position.y + c.pointB.y };
+  }
+  /* Recompute both anchors from the bolt's world point. Matter wants the
+     CURRENT-angle offset and remembers which angle that was in angleA/B, so
+     both are set together — after a rebuild resets the body's angle to 0,
+     leaving the old angle in there would rotate the anchor by the
+     difference on the next step. That was the flip-drifts-bolts bug. */
+  function refreshBoltAnchors(b){
+    var c = b.constraint;
+    if (!c) return;
+    if (b.objA && c.bodyA){
+      c.pointA = { x: b.point.x - c.bodyA.position.x, y: b.point.y - c.bodyA.position.y };
+      c.angleA = c.bodyA.angle;
+    }
+    if (b.objB && c.bodyB){
+      c.pointB = { x: b.point.x - c.bodyB.position.x, y: b.point.y - c.bodyB.position.y };
+      c.angleB = c.bodyB.angle;
+    }
+  }
+  function boltsTouching(list){
+    return bolts.filter(function(b){ return list.indexOf(b.objA) >= 0 || list.indexOf(b.objB) >= 0; });
+  }
+  /* Objects in `list` have just been transformed in place by `mapPt`, a
+     world-point function. Bolts with both ends inside move with them; a
+     bolt to something outside holds its place, because the other end did
+     not move. Either way the anchors are rebuilt from the world point. */
+  function carryBolts(list, mapPt){
+    boltsTouching(list).forEach(function(b){
+      b.point = boltWorldPoint(b);
+      if (list.indexOf(b.objA) >= 0 && list.indexOf(b.objB) >= 0) b.point = mapPt(b.point);
+      refreshBoltAnchors(b);
+    });
+  }
+  onStep("beforeUpdate", function(){
+    if (!runner.enabled) return;
+    for (var i = 0; i < bolts.length; i++){
+      var b = bolts[i], c = b.constraint;
+      if (!c || !c.bodyA || !c.bodyB) continue;
+      var A = c.bodyA, B = c.bodyB;
+      if (boltIsMotor(b)){
+        // Drive the free body about the OTHER body's anchor. If both are
+        // free, B goes round A. If both are pinned there is nothing to turn.
+        var target = !A.isStatic ? A : (!B.isStatic ? B : null);
+        var other = target === A ? B : A;
+        if (!target) continue;
+        if (!A.isStatic && !B.isStatic){ target = B; other = A; }
+        var w = b.speed * boltDir(b);
+        var pivot = boltAnchorOn(b, other);
+        var rx = target.position.x - pivot.x, ry = target.position.y - pivot.y;
+        Body.setAngularVelocity(target, w);
+        Body.setVelocity(target, { x: other.velocity.x - w * ry, y: other.velocity.y + w * rx });
+      } else if (b.tightness > 0.001){
+        // Rotational friction: pull each free body's spin toward the
+        // other's. Tightness 1 kills a swing in a handful of steps; 0.05
+        // barely touches it.
+        var k = Math.min(0.92, b.tightness * 0.7);
+        if (!A.isStatic) Body.setAngularVelocity(A, A.angularVelocity + (B.angularVelocity - A.angularVelocity) * k);
+        if (!B.isStatic) Body.setAngularVelocity(B, B.angularVelocity + (A.angularVelocity - B.angularVelocity) * k);
+      }
+    }
+  });
   function boltAt(x, y, maxD){
     maxD = maxD || 16;
     var best = null, bestD = maxD;
@@ -3530,6 +3612,9 @@
       if (e.code === "Minus" || e.code === "NumpadSubtract"){ e.preventDefault(); zoomAround(camCenterWorld(), 0.8); updateViewHud(); return; }
       return;
     }
+    if ((e.code === "Delete" || e.code === "Backspace") && selectedBolt && mode === "build" && !e.repeat){
+      e.preventDefault(); deleteSelectedBolt(); return;
+    }
     if ((e.code === "Delete" || e.code === "Backspace") && selected && mode === "build" && !e.repeat){
       e.preventDefault();
       /* Del removes the PIECE you clicked, not the whole object — draw a
@@ -3808,7 +3893,9 @@
       return packObject(o);
     });
     var boltSnaps = bolts.map(function(b){
-      return { a: objIndex[b.objA.id], b: objIndex[b.objB.id], x:b.point.x, y:b.point.y, tight:b.tight, mode:b.mode };
+      var wp = boltWorldPoint(b);
+      return { a: objIndex[b.objA.id], b: objIndex[b.objB.id], x:wp.x, y:wp.y, tight:b.tight, mode:b.mode,
+               layer:b.layer, tightness:b.tightness, speed:b.speed };
     });
     return {
       objects: objSnaps, bolts: boltSnaps,
@@ -3835,7 +3922,8 @@
     newObjs.forEach(function(o){ if (o) refreshObjectPhysics(o); });
     snap.bolts.forEach(function(bs){
       var oa = newObjs[bs.a], ob = newObjs[bs.b];
-      if (oa && ob) addBolt(oa, ob, { x:bs.x, y:bs.y }, bs.mode || (bs.tight ? "tight" : "loose"));
+      if (oa && ob) addBolt(oa, ob, { x:bs.x, y:bs.y }, bs.mode || (bs.tight ? "tight" : "loose"),
+                            { layer:bs.layer, tightness:bs.tightness, speed:bs.speed });
     });
     checkpoints = snap.checkpoints.map(function(c){ return { x:c.x, y:c.y, reached:false }; });
     goalPoint = snap.goal ? { x:snap.goal.x, y:snap.goal.y } : null;
@@ -4603,17 +4691,26 @@
     }
   }
 
-  function drawBolts(){
+  /* Bolts draw with their layer, right after it, so a bolt on the Front
+     layer sits on top of Front objects instead of under them. */
+  function drawBolts(layer){
     var spin = performance.now()/1000;
     bolts.forEach(function(b){
-      var motor = b.mode === "cw" || b.mode === "ccw";
+      if (b.layer !== layer) return;
+      var motor = boltIsMotor(b);
       var p = boltWorldPoint(b);
       ctx.save();
       ctx.translate(p.x, p.y);
+      if (b === selectedBolt && mode === "build"){
+        ctx.beginPath(); ctx.arc(0, 0, 17, 0, Math.PI*2);
+        ctx.lineWidth = 3/camScale; ctx.strokeStyle = "#F2B705";
+        ctx.setLineDash([6/camScale, 4/camScale]); ctx.lineDashOffset = -performance.now()/70/camScale;
+        ctx.stroke(); ctx.setLineDash([]);
+      }
       if (motor){
         // a little gear that actually turns the way the motor drives
-        var dir = b.mode === "cw" ? 1 : -1;
-        ctx.rotate(spin * worldSettings.motorSpeed * 26 * dir);
+        var dir = boltDir(b);
+        ctx.rotate(spin * b.speed * 26 * dir * (runner.enabled ? 1 : 0));
         ctx.beginPath();
         for (var t = 0; t < 8; t++){
           var a0 = t/8*Math.PI*2;
@@ -5170,8 +5267,9 @@
     // and its markers, THEN Front decoration on top — so anything you
     // paint on the front layer correctly covers the player, LBP-style.
     drawLayer(0);
+    drawBolts(0);
     drawLayer(1);
-    drawBolts();
+    drawBolts(1);
     drawBubbles();
     checkpoints.forEach(function(cp, i){ drawFlag(cp, i===0 ? "#5F9E5A" : "#2F86A6", i===0 ? "start" : "checkpoint"); });
     drawFlag(goalPoint, "#F2B705", "goal");
@@ -5179,6 +5277,7 @@
     drawParticles();
     drawMaterialWater();
     drawLayer(2);
+    drawBolts(2);
     drawWorldWaterOverlay();
     drawLighting();
     // The selection ring and the drag highlight are interface, not
@@ -5785,8 +5884,6 @@
         function(v){ return v <= 0 ? "empty" : (v >= WORLD_H ? "the whole world" : Math.round(v/WORLD_H*100) + "% deep"); }));
     }
     el.appendChild(sliderRow("Rope Length", worldSettings.ropeLength, 80, 420, 10, function(v){ worldSettings.ropeLength=v; }, function(v){ return Math.round(v)+"px"; }));
-    el.appendChild(sliderRow("Motor Speed", worldSettings.motorSpeed, 0.01, 0.25, 0.01,
-      function(v){ worldSettings.motorSpeed=v; }, function(v){ return Math.round(v/0.06*100)+"%"; }));
     var mNote = document.createElement("div"); mNote.className = "noteText";
     mNote.textContent = "How fast motor bolts turn. Place a bolt, then right-click it to cycle Tight → Loose → Motor ↻ → Motor ↺. Motors only run in Play.";
     el.appendChild(mNote);
@@ -6394,18 +6491,32 @@
     ]}
   ];
 
+  /* A bolt joins the two nearest objects ON THE LAYER YOU ARE BUILDING ON,
+     measured to their actual shape — inside counts as zero, otherwise the
+     distance to the edge. It used to measure to the centre of each part and
+     give up past 90px, which meant you could not bolt anywhere near the
+     edge of anything big. */
   function placeBoltAt(pt){
     var candidates = [];
     objects.forEach(function(o){
-      var bestD = Infinity;
-      o.parts.forEach(function(p){ var d = dist(p.position, pt); if (d < bestD) bestD = d; });
-      if (bestD < 90) candidates.push({ o:o, d:bestD });
+      if (o.layer !== buildLayer) return;
+      var lp = worldPtToLocal(o, pt.x, pt.y), bestD = Infinity;
+      for (var i = 0; i < o.pieces.length; i++){
+        var poly = o.pieces[i].poly;
+        var d = pgContains(poly, lp.x, lp.y) ? 0 : pgEdgeDist(poly, lp.x, lp.y, 80);
+        if (d < bestD) bestD = d;
+      }
+      if (bestD < 70) candidates.push({ o:o, d:bestD });
     });
     candidates.sort(function(a,b){ return a.d - b.d; });
-    if (candidates.length < 2){ showToast("Bolts need two nearby objects to connect."); sfx("deny"); return; }
+    if (candidates.length < 2){
+      showToast("Bolts need two objects near the cursor, on the " + LAYER_NAMES[buildLayer] + " layer.");
+      sfx("deny"); return;
+    }
     pushUndo("placing a bolt");
-    addBolt(candidates[0].o, candidates[1].o, pt, "tight");
-    showToast("🔩 Bolt placed — right-click it for Loose or Motor.");
+    var nb = addBolt(candidates[0].o, candidates[1].o, pt, "tight", { layer: buildLayer });
+    selectBolt(nb);
+    showToast("🔩 Bolt placed — right-click it to set it up.");
     sfx("bolt");
     puff(pt.x, pt.y, 8, { color:"#98A3B3", speed:1.6, g:0.06 });
   }
@@ -6997,6 +7108,7 @@
      actions beside it.
      ============================================================ */
   var selected = null;
+  var selectedBolt = null;   // a bolt is selected instead of objects
   var opWanted = false;   // the object box is open — see renderSelBar
   /* The PIECE under the cursor, as opposed to the whole object: the run
      of one material you could pull out on its own. LittleBigPlanet lets
@@ -7016,6 +7128,7 @@
   function clearSelection(){
     selectedRegion = null;
     selection = [];
+    selectedBolt = null;
     /* Hide first, bail second. removeObject nulls `selected` before it
        calls this, so an early return above the hide would leave the box
        open with nothing in it — which is exactly what happened. The guard
@@ -7024,6 +7137,22 @@
     opWanted = false;
     if (!selected) return;
     selected = null;
+  }
+  function selectBolt(b){
+    clearSelection();
+    selectedBolt = b;
+    sfx("tick");
+  }
+  function deleteSelectedBolt(){
+    var b = selectedBolt;
+    if (!b || bolts.indexOf(b) < 0) return;
+    pushUndo("removing a bolt");
+    var pt = boltWorldPoint(b);
+    removeBolt(b);
+    puff(pt.x, pt.y, 8, { color:"#98A3B3", speed:1.6, g:0.06 });
+    clearSelection();
+    sfx("delete");
+    showToast("Bolt removed.");
   }
   // Everything selected that still exists.
   function selList(){
@@ -7072,6 +7201,7 @@
     return pth;
   }
   function selectObject(o){
+    selectedBolt = null;
     if (selected === o && selection.length <= 1){ selection = [o]; renderSelBar(); return; }
     selected = o;
     selection = [o];
@@ -7111,7 +7241,51 @@
      in the way of that every time was the complaint. Right-click opens it;
      the close button or losing the selection shuts it. While it is open it
      follows whatever is selected. */
+  function renderBoltBox(){
+    var b = selectedBolt;
+    opBodyEl.innerHTML = "";
+    opTitleEl.textContent = boltIsMotor(b) ? "Motor bolt" : "Bolt";
+    var info = document.createElement("div"); info.className = "opInfo";
+    var an = matOf(b.objA.pieces[0] ? b.objA.pieces[0].m : "wood"), bn = matOf(b.objB.pieces[0] ? b.objB.pieces[0].m : "wood");
+    info.innerHTML = "<b>" + escapeHtml((an ? an.label : "?") + " ↔ " + (bn ? bn.label : "?")) + "</b> · " + escapeHtml(LAYER_NAMES[b.layer]);
+    opBodyEl.appendChild(info);
+
+    var kind = opSection("Kind");
+    opBtn(kind, "🔩 Bolt", "A pivot the two can turn on", function(){ pushUndo("changing a bolt"); setBoltKind(b, "bolt"); renderSelBar(); sfx("bolt"); }, boltIsMotor(b) ? "" : "on");
+    opBtn(kind, "⚙ Motor", "Drives what is attached round and round", function(){ pushUndo("changing a bolt"); setBoltKind(b, "motor"); renderSelBar(); sfx("motor"); }, boltIsMotor(b) ? "on" : "");
+
+    if (boltIsMotor(b)){
+      var dr = opSection("Direction");
+      opBtn(dr, "↻ Clockwise", "", function(){ pushUndo("changing a bolt"); b.mode = "cw"; renderSelBar(); sfx("tick"); }, b.mode === "cw" ? "on" : "");
+      opBtn(dr, "↺ Anticlockwise", "", function(){ pushUndo("changing a bolt"); b.mode = "ccw"; renderSelBar(); sfx("tick"); }, b.mode === "ccw" ? "on" : "");
+      var sp = opSection("Speed");
+      var pushedSp = false;
+      var sl = sliderRow("Speed", b.speed, 0.005, 0.3, 0.005, function(v){
+        if (!pushedSp){ pushUndo("changing a motor's speed"); pushedSp = true; }
+        b.speed = v;
+      }, function(v){ return Math.round(v / BOLT_DEFAULT_SPEED * 100) + "%"; });
+      sl.style.flexBasis = "100%"; sp.appendChild(sl);
+    } else {
+      var tg = opSection("Tightness");
+      var pushedT = false;
+      var tl = sliderRow("Tightness", b.tightness, 0, 1, 0.05, function(v){
+        if (!pushedT){ pushUndo("changing a bolt's tightness"); pushedT = true; }
+        setBoltTightness(b, v);
+      }, function(v){ return v < 0.1 ? "loose" : (v > 0.9 ? "very tight" : Math.round(v*100) + "%"); });
+      tl.style.flexBasis = "100%"; tg.appendChild(tl);
+    }
+
+    var ac = opSection("Actions");
+    opBtn(ac, "🗑 Remove bolt", "Take the bolt out (Del) — the two come apart", function(){ deleteSelectedBolt(); }, "red wide");
+    objPanelEl.hidden = false;
+  }
   function renderSelBar(){
+    if (selectedBolt){
+      if (bolts.indexOf(selectedBolt) < 0){ clearSelection(); return; }
+      if (mode !== "build" || !opWanted){ objPanelEl.hidden = true; return; }
+      renderBoltBox();
+      return;
+    }
     if (!selected || mode !== "build" || !opWanted){ objPanelEl.hidden = true; return; }
     if (objects.indexOf(selected) < 0){ clearSelection(); return; }
     var o = selected, group = selList(), many = group.length;
@@ -7210,6 +7384,7 @@
   /* The panel is docked, so nothing to position — but this runs every frame
      and is the place that notices the selection has gone. */
   function updateSelBarPos(){
+    if (selectedBolt && bolts.indexOf(selectedBolt) < 0){ clearSelection(); return; }
     if (!selected || objPanelEl.hidden) return;
     if (objects.indexOf(selected) < 0){ clearSelection(); return; }
   }
@@ -7319,17 +7494,6 @@
   var RESIZE_MIN_PX = 14;
   var RESIZE_MAX_PX = 4200;
 
-  function boltsTouching(list){
-    return bolts.filter(function(b){ return list.indexOf(b.objA) >= 0 || list.indexOf(b.objB) >= 0; });
-  }
-  /* Recompute both ends from the bolt's world point. Cheaper to reason about
-     than trying to transform the local offsets: whatever the bodies did, the
-     bolt is still meant to be at that spot in the world. */
-  function refreshBoltAnchors(b){
-    if (!b.constraint) return;
-    if (b.objA && b.constraint.bodyA) b.constraint.pointA = toBodyLocal(b.objA.body, b.point);
-    if (b.objB && b.constraint.bodyB) b.constraint.pointB = toBodyLocal(b.objB.body, b.point);
-  }
   function scaleObjectAbout(o, cx, cy, k){
     var pieces = o.pieces.map(function(pc){
       var w = objToWorld(o, pc.poly);
@@ -7356,17 +7520,9 @@
     if (!list.length) return;
     if (Math.abs(k - 1) < 0.001) return;
     pushUndo(list.length > 1 ? ("resizing " + list.length + " objects") : "resize");
-    var touched = boltsTouching(list);
+    var held = boltsTouching(list).map(function(b){ return boltWorldPoint(b); });
     list.forEach(function(o){ scaleObjectAbout(o, pivot.x, pivot.y, k); });
-    /* A bolt between two selected objects moves with them; one anchored to
-       something outside the selection stays where it was, because the other
-       end did not move. */
-    touched.forEach(function(b){
-      if (list.indexOf(b.objA) >= 0 && list.indexOf(b.objB) >= 0){
-        b.point = { x: pivot.x + (b.point.x - pivot.x)*k, y: pivot.y + (b.point.y - pivot.y)*k };
-      }
-      refreshBoltAnchors(b);
-    });
+    carryBolts(list, function(pt){ return { x: pivot.x + (pt.x - pivot.x)*k, y: pivot.y + (pt.y - pivot.y)*k }; });
     renderSelBar();
     sfx("glue");
   }
@@ -7481,6 +7637,7 @@
     var sb = selectionBounds();
     var cx = list.length > 1 ? (sb.minX + sb.maxX)/2 : list[0].body.position.x;
     list.forEach(function(o){ flipObjectAbout(o, cx); });
+    carryBolts(list, function(pt){ return { x: 2*cx - pt.x, y: pt.y }; });
     renderSelBar();
     sfx("glue");
   }
@@ -7624,6 +7781,8 @@
     if (!additive){
       var handle = resizeHandleAt(pt);
       if (handle){ dragging = null; beginResize(pt, handle); return; }
+      var bh = boltAt(pt.x, pt.y);
+      if (bh){ dragging = null; selectBolt(bh); renderSelBar(); return; }
     }
     if (goalPoint && dist(goalPoint, pt) < 34){ dragging = { type:"goal" }; clearSelection(); return; }
     for (var i = checkpoints.length - 1; i >= 0; i--){
@@ -7749,7 +7908,9 @@
      object has to remember the box exists. The camera no longer matters —
      the box is docked, not pinned to a spot on the level. */
   function pruneObjCtxMenu(){
+    if (selectedBolt && bolts.indexOf(selectedBolt) < 0){ clearSelection(); return; }
     if (objPanelEl.hidden) return;
+    if (selectedBolt) return;
     if (!selected || objects.indexOf(selected) < 0) clearSelection();
   }
 
@@ -7942,7 +8103,7 @@
           return;
         }
         var boltHit = boltAt(pt.x, pt.y);
-        if (boltHit){ toggleBolt(boltHit); return; }
+        if (boltHit){ selectBolt(boltHit); opWanted = true; renderSelBar(); return; }
         var hitObj = objectAt(pt.x, pt.y);
         if (hitObj){
           selectedRegion = regionAt(pt.x, pt.y);
@@ -8374,7 +8535,9 @@
   function serializeLevel(name){
     var objIndex = {};
     var objSnaps = objects.map(function(o,i){ objIndex[o.id] = i; return packObject(o); });
-    var boltSnaps = bolts.map(function(b){ return { a:objIndex[b.objA.id], b:objIndex[b.objB.id], x:b.point.x, y:b.point.y, tight:b.tight, mode:b.mode }; });
+    var boltSnaps = bolts.map(function(b){ var wp = boltWorldPoint(b);
+      return { a:objIndex[b.objA.id], b:objIndex[b.objB.id], x:wp.x, y:wp.y, tight:b.tight, mode:b.mode,
+               layer:b.layer, tightness:b.tightness, speed:b.speed }; });
     return {
       name: name, updatedAt: Date.now(), version: 4,
       checkpoints: checkpoints.map(function(c){ return { x:c.x, y:c.y }; }),
@@ -8400,9 +8563,13 @@
       if (truncated) showToast("That level is bigger than this build can hold — some of it was left out.");
       newObjs.forEach(function(o){ if (o) refreshObjectPhysics(o); });
       if (version === 2) showToast("Rebuilt this level's shapes as polygons — the edges are clean now.");
+      /* Older levels had one motor speed for the whole world. A bolt saved
+         without its own speed gets that one, so nothing changes pace. */
+      var oldSpeed = data.world && data.world.motorSpeed != null ? +data.world.motorSpeed : null;
       (Array.isArray(data.bolts) ? data.bolts : []).forEach(function(bs){
         var oa = newObjs[bs.a], ob = newObjs[bs.b];
-        if (oa && ob) addBolt(oa, ob, { x:+bs.x||0, y:+bs.y||0 }, bs.mode || (bs.tight ? "tight" : "loose"));
+        if (oa && ob) addBolt(oa, ob, { x:+bs.x||0, y:+bs.y||0 }, bs.mode || (bs.tight ? "tight" : "loose"),
+                              { layer:bs.layer, tightness:bs.tightness, speed: bs.speed != null ? bs.speed : oldSpeed });
       });
       if (data.world){
         worldSettings.gravity = data.world.gravity != null ? data.world.gravity : 1;

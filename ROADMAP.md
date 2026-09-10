@@ -30,7 +30,7 @@ approximated.
 No new architecture. These are things wrong or missing in systems already
 built, and they are the cheapest wins in the document.
 
-### Bolts (a rework, not a patch)
+### Bolts — DONE
 
 Carson flagged bolts twice, independently. Current problems:
 
@@ -42,8 +42,13 @@ Carson flagged bolts twice, independently. Current problems:
   right-click a bolt for its own menu. Carson explicitly does not want this in
   the global menu.
 
-Treat as one coherent rework of how bolts are placed, drawn, layered and
-configured, rather than a series of spot fixes.
+Reworked 2026-09-10 as one piece. Every item above is addressed, and the
+cause turned out to be different from the symptom: the joint was always
+holding, but bolts were drawn at twice the angle on anything that had turned,
+and motors spun things about their own centre instead of the pivot. Bolts now
+have a layer, place against real shapes, drive cleanly, have a tightness dial
+and their own speed in the object box, and run in Build when unpaused. See the
+Bolts section of `CLAUDE.md`. Covered by `tbolt.js`.
 
 ### Delete should remove the region, not the object — DONE
 

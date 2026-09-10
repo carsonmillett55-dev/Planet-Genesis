@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` | Playwright suites, 159 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` | Playwright suites, 187 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 159 checks + checkgeom, in order
+npm test                   # all 187 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -56,6 +56,7 @@ node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 19 — the personal menu's sections, pages and gradient
+node tbolt.js              # 28 — bolts: layers, placement, motors, tightness, the box, save/load
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -262,6 +263,55 @@ a clean stop, because it looks like a hang rather than a crash.
 step; the other handlers and the physics itself carry on. Errors log three
 times and then go quiet, same as the frame loop.
 
+## Bolts
+
+A bolt pins two objects at a point and is one of two kinds. **Bolt** is a
+pivot with a **tightness** dial — rotational friction, 0 swings freely, 1 is
+very stiff, like LBP's own. Not a weld. **Motor** drives whatever is attached
+round at its own **speed** in one **direction**. The four legacy modes
+(tight / loose / cw / ccw) are still what is saved so old levels load; tight
+and loose are a bolt at two tightness presets, cw and ccw a motor either way.
+
+Every bolt has a **layer**, set from the build layer when placed. It joins
+only objects on that layer, and draws with that layer — `drawBolts(l)` runs
+right after `drawLayer(l)` — so a Front bolt sits on top of Front objects
+instead of under them. Placement measures to each object's actual shape
+(inside is zero, otherwise edge distance, cutoff 70px); it used to measure to
+the centre of each part and give up past 90px, so nothing big could be bolted
+near its edge.
+
+Two physics-engine facts shaped the rest, both **measured, not assumed**:
+
+- **Matter keeps a constraint's anchor offset already rotated.** It rotates
+  `pointA` in place every step and remembers the angle it did that at in
+  `angleA`. So the live anchor is `body.position + pointA`, full stop.
+  Rotating it again — which `toWorldPoint` does — put a bolt on a turning
+  wheel at twice the angle, which is why bolts looked like they were slipping
+  off. The joint itself was holding to 0.02px the whole time. `boltWorldPoint`
+  does not rotate. `refreshBoltAnchors` sets `pointA` and `angleA` **together**;
+  a rebuild resets the body's angle to 0 and leaving the old angle in there
+  rotates the anchor by the difference on the next step. That was the
+  flip-drifts-bolts bug.
+- **A motor that only sets angular velocity spins the body about its own
+  centre** and leaves the joint to drag it round the pivot, so under load it
+  sags and wobbles — 63° of tilt in the probe. Setting linear velocity as
+  well, to what rotation about the pivot implies (`v = ω × r`), means the
+  integrator moves the body in a circle on its own and the joint only
+  corrects gravity. Do not use `Body.rotate` for this: with `updateVelocity`
+  it sets `positionPrev` to the old position and the Verlet step moves the
+  body again.
+
+Motors run whenever the world is running — Build unpaused or Play — so a
+contraption can be watched while it is built. Dragging makes the dragged
+thing static for the drag, so it does not fight you. Tightness is applied
+each step by pulling each free body's spin toward the other's.
+
+A bolt is selected with a left-click (`selectedBolt`; it clears the object
+selection and vice versa), right-click opens its box, Del removes it. Save
+files carry `layer`, `tightness` and `speed`; a level saved without a per-bolt
+speed gets the old world `motorSpeed`, so nothing changes pace. The world
+settings slider for motor speed is gone.
+
 ## Resizing
 
 Corner handles on the selection. The drag scales about the **opposite**
@@ -283,11 +333,8 @@ Four things it has to respect, and all four are in the code for a reason:
 - **`RESIZE_MAX_PX = 4200`.** Past that an object crosses the size where it
   stops being cached as a bitmap and gets slower to draw every frame.
 - **Bolt anchors are positions ON the object**, so they have to move too.
-  `refreshBoltAnchors` recomputes both ends from the bolt's world point,
-  which is easier to reason about than transforming the local offsets. A bolt
-  with both ends inside the selection moves with it; a bolt to something
-  outside holds its place in the world and the object grows around it, which
-  keeps the joint valid on both bodies. A bolt that jumped would not.
+  `carryBolts(list, mapPt)` handles it for resize and flip both — see
+  **Bolts** for why the anchor maths is the way it is.
 
 **The drag only previews.** Rebuilding geometry and physics on every mouse
 move would be waste when the only thing that matters is where you let go, so
@@ -383,9 +430,8 @@ clears whichever matched. `regress.js` covers all four paths.
 whole project, captured 2026-09-10 and sorted by what each part depends on.
 Read it before planning anything larger than a bug fix.
 
-The short version. Near-term, cheap and self-contained: the bolt rework,
-region-delete (Delete should remove the selected material region, not the whole
-object), the fill tool, a 4x larger world, and the water/ice polish. Then the
+The short version. Near-term, cheap and self-contained: the fill tool, a 4x
+larger world, and the water/ice polish. Bolts and region-delete are done. Then the
 LBP gadget family — buttons, levers, player and water sensors, emitters, mover,
 world changer, creature eye — none of which exists yet, and which is the
 biggest jump in what a level can actually do.

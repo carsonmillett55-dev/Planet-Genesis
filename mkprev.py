@@ -35,9 +35,23 @@ HOOK = """
     select: function(o){ selectObject(o); },
     anchor: function(){ anchorSelected(); },
     detachRegion: function(){ detachSelectedRegion(); },
-    bolts: function(){ return bolts.map(function(b){ return { id:b.id, x:Math.round(b.point.x), y:Math.round(b.point.y),
-      a:b.objA?b.objA.id:null, b:b.objB?b.objB.id:null, mode:b.mode }; }); },
+    bolts: function(){ return bolts.map(function(b){ var wp = boltWorldPoint(b); return { id:b.id, x:Math.round(wp.x), y:Math.round(wp.y),
+      a:b.objA?b.objA.id:null, b:b.objB?b.objB.id:null, mode:b.mode, layer:b.layer, speed:b.speed, tightness:b.tightness }; }); },
+    flip: function(){ flipSelected(); },
     boltAt: function(x,y){ var bl = placeBoltAt({x:x,y:y}); return bolts.length; },
+    boltSet: function(id, props){ var b = bolts.filter(function(q){ return q.id===id; })[0]; if (!b) return false;
+      for (var k in props){ if (k === 'stiffness' || k === 'damping') b.constraint[k] = props[k]; else b[k] = props[k]; }
+      if (props.mode !== undefined) applyBoltMode(b); return true; },
+    boltGap: function(id){ var b = bolts.filter(function(q){ return q.id===id; })[0]; if (!b || !b.constraint) return null;
+      var pa = toWorldPoint(b.constraint.bodyA, b.constraint.pointA), pb = toWorldPoint(b.constraint.bodyB, b.constraint.pointB);
+      return +Math.hypot(pa.x-pb.x, pa.y-pb.y).toFixed(2); },
+    paused: function(v){ if (v != null) setPaused(!!v); return !runner.enabled; },
+    engineSet: function(k, v){ engine[k] = v; return engine[k]; },
+    boltGapTrue: function(id){ var b = bolts.filter(function(q){ return q.id===id; })[0]; if (!b || !b.constraint) return null;
+      var c = b.constraint, pa = { x:c.bodyA.position.x + c.pointA.x, y:c.bodyA.position.y + c.pointA.y };
+      var pb = { x:c.bodyB.position.x + c.pointB.x, y:c.bodyB.position.y + c.pointB.y };
+      return { gap:+Math.hypot(pa.x-pb.x, pa.y-pb.y).toFixed(2), armAngleDeg:+(c.bodyB.angle*180/Math.PI).toFixed(1),
+               drawnAt: boltWorldPoint(b), trueAt: pb }; },
     deselect: function(){ clearSelection(); },
     selection: function(){ return selList().map(function(o){ return o.id; }); },
     deleteRegion: function(r){ return deleteRegion(r); },
