@@ -235,6 +235,38 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await ctrlS();
   ok('and saving it stores a second level rather than overwriting the first', (await settleTo(2)) === 2, await storedCount());
 
+  console.log('');
+  console.log('== the map has edges ==');
+  await reset();
+  const W = await p.evaluate(() => window.__pg.worldSize());
+  // Fling the player at the wall far faster than a wall is thick.
+  await p.evaluate(() => window.__pg.setMode('play'));
+  await p.waitForTimeout(300);
+  await p.evaluate(() => window.__pg.fling(-400, 0));
+  await p.waitForTimeout(700);
+  const pp = await p.evaluate(() => window.__pg.playerPos());
+  ok('the player cannot be flung out of the map', pp && pp.x >= 0 && pp.x <= W.w && pp.y >= 0 && pp.y <= W.h, pp);
+  await p.evaluate(() => window.__pg.setMode('build'));
+  await p.waitForTimeout(300);
+  // A fat brush dabbed right at the left edge hangs well past it: what
+  // lands must stop at the edge.
+  await reset();
+  await p.evaluate(() => { window.__pg.setPaintMode('brush'); window.__pg.setStick(false); window.__pg.zoomTo(0.6, 120, 1900); });
+  await tool('wood', 3, 'circle');
+  await p.waitForTimeout(250);
+  await drag([[18, 1900],[22, 1900]]);
+  const edgeObj = (await stats()).filter(o => o.pos.y > 1800 && o.pos.y < 2000 && o.pos.x < 200)[0];
+  const eb = edgeObj ? await p.evaluate(i => window.__pg.bounds(i), edgeObj.id) : null;
+  ok('nothing gets built past the edge of the map', !!eb && eb.x >= -1 && eb.x2 > 30, eb);
+  // Zoom out as far as it goes: the view never shows past the edge.
+  await p.evaluate(() => window.__pg.zoomTo(0.05, 2400, 1200));
+  await p.waitForTimeout(250);
+  const v = await p.evaluate(() => window.__pg.view());
+  ok('the camera cannot zoom out past the size of the map', v.w <= W.w + 1 && v.h <= W.h + 1, { view: v, world: W });
+  ok('and sits inside it', v.x >= -1 && v.y >= -1 && v.x + v.w <= W.w + 1 && v.y + v.h <= W.h + 1, v);
+  await p.evaluate(() => { window.__pg.zoomTo(1, 640, 1900); window.__pg.freezeCam(); });
+  await p.waitForTimeout(200);
+
   if (process.argv[2] === 'perf'){
     console.log('\n== migration + frame time on the real level ==');
     const lv = JSON.parse(JSON.parse(fs.readFileSync(__dirname+'/level.json','utf8')).payload);

@@ -42,13 +42,27 @@ Carson flagged bolts twice, independently. Current problems:
   right-click a bolt for its own menu. Carson explicitly does not want this in
   the global menu.
 
-Reworked 2026-09-10 as one piece. Every item above is addressed, and the
-cause turned out to be different from the symptom: the joint was always
-holding, but bolts were drawn at twice the angle on anything that had turned,
-and motors spun things about their own centre instead of the pivot. Bolts now
-have a layer, place against real shapes, drive cleanly, have a tightness dial
-and their own speed in the object box, and run in Build when unpaused. See the
-Bolts section of `CLAUDE.md`. Covered by `tbolt.js`.
+Reworked 2026-09-10, then reworked again the same day after Carson pointed
+out the layer behaviour was backwards: a bolt goes THROUGH the layers, as in
+LBP. Now: bolts join a Mid thing to the Back or Front behind or in front of
+it; four kinds as four tools (Bolt, Sprung, Motor, Wobble) with LBP1/2's own
+settings in the object box; a ghost of the bolt at the cursor, green when it
+has a pair and red when not; motors drive about the pivot and run in Build
+when unpaused. See the Bolts section of `CLAUDE.md`. Covered by `tbolt.js`.
+
+**Open question for Carson:** a cart with wheels needs both parts physical in
+different layers, which is how LBP does it. Here Front and Back are
+decoration with no physics. Should Front/Back objects be able to be physical?
+
+**Deferred:** the wobble bolt's *flipper* mode (swing on a trigger, return on
+release) needs the sensor/switch family from Part B.
+
+### The map has edges — DONE
+
+Carson wound up outside the map. Fixed 2026-09-10: thick walls, a per-step
+backstop that pushes anything back in, paint clipped to the map, a zoom floor
+that never shows past the edge, and resize that cannot make something that
+does not fit.
 
 ### Delete should remove the region, not the object — DONE
 

@@ -36,12 +36,19 @@ HOOK = """
     anchor: function(){ anchorSelected(); },
     detachRegion: function(){ detachSelectedRegion(); },
     bolts: function(){ return bolts.map(function(b){ var wp = boltWorldPoint(b); return { id:b.id, x:Math.round(wp.x), y:Math.round(wp.y),
-      a:b.objA?b.objA.id:null, b:b.objB?b.objB.id:null, mode:b.mode, layer:b.layer, speed:b.speed, tightness:b.tightness }; }); },
+      a:b.objA?b.objA.id:null, b:b.objB?b.objB.id:null, mode:b.mode, layer:b.layer, speed:b.speed, tightness:b.tightness,
+      kind:b.kind, dir:b.dir, strength:b.strength, angle:b.angle, period:b.period }; }); },
     flip: function(){ flipSelected(); },
     boltAt: function(x,y){ var bl = placeBoltAt({x:x,y:y}); return bolts.length; },
     boltSet: function(id, props){ var b = bolts.filter(function(q){ return q.id===id; })[0]; if (!b) return false;
-      for (var k in props){ if (k === 'stiffness' || k === 'damping') b.constraint[k] = props[k]; else b[k] = props[k]; }
-      if (props.mode !== undefined) applyBoltMode(b); return true; },
+      if (props.kind) setBoltKind(b, props.kind);
+      for (var k in props){ if (k === 'kind') continue; if (k === 'stiffness' || k === 'damping') b.constraint[k] = props[k]; else b[k] = props[k]; }
+      applyBoltMode(b); return true; },
+    boltPairAt: function(x, y){ var pr = boltPairAt(x, y); return pr ? { front: pr.front.id, partner: pr.partner.id, layer: pr.layer } : null; },
+    boltRel: function(id){ var b = bolts.filter(function(q){ return q.id===id; })[0]; return b ? +(relAngle(b)*180/Math.PI).toFixed(1) : null; },
+    fling: function(vx, vy){ if (player) Body.setVelocity(player, { x:vx, y:vy }); },
+    worldSize: function(){ return { w: WORLD_W, h: WORLD_H }; },
+    view: function(){ return { x: camX, y: camY, w: viewRectW / camScale, h: viewRectH / camScale, zoom: camZoom }; },
     boltGap: function(id){ var b = bolts.filter(function(q){ return q.id===id; })[0]; if (!b || !b.constraint) return null;
       var pa = toWorldPoint(b.constraint.bodyA, b.constraint.pointA), pb = toWorldPoint(b.constraint.bodyB, b.constraint.pointB);
       return +Math.hypot(pa.x-pb.x, pa.y-pb.y).toFixed(2); },

@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` | Playwright suites, 187 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` | Playwright suites, 204 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,21 +42,21 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 187 checks + checkgeom, in order
+npm test                   # all 204 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
 Or one suite at a time:
 
 ```
-node regress.js            # 31 — geometry, save/load, play mode, loop and save safety
+node regress.js            # 35 — geometry, save/load, play mode, loop and save safety, map edges
 node tsel.js               # 39 — selection, marquee, group transforms, resize, detach
 node tlayer.js             # 9  — layer accuracy and ranked picking
 node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 19 — the personal menu's sections, pages and gradient
-node tbolt.js              # 28 — bolts: layers, placement, motors, tightness, the box, save/load
+node tbolt.js              # 41 — bolts: through the layers, four kinds, the box, the ghost, save/load
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -265,52 +265,88 @@ times and then go quiet, same as the frame loop.
 
 ## Bolts
 
-A bolt pins two objects at a point and is one of two kinds. **Bolt** is a
-pivot with a **tightness** dial — rotational friction, 0 swings freely, 1 is
-very stiff, like LBP's own. Not a weld. **Motor** drives whatever is attached
-round at its own **speed** in one **direction**. The four legacy modes
-(tight / loose / cw / ccw) are still what is saved so old levels load; tight
-and loose are a bolt at two tightness presets, cw and ccw a motor either way.
+A bolt pins two objects at a point and, **as in LBP, the two must be in
+different layers**: it goes through the front one into the one behind. This
+was researched, not assumed — the LBP wiki: "the objects must be in different
+layers if you wish to link them with a bolt." Only the Mid layer has physics
+here, so a bolt is a Mid thing pinned to a fixed Back or Front backdrop: a
+wheel on a wall, a seesaw, a door, a spinner. Two things side by side on the
+same layer cannot be bolted. `boltPairAt(x, y)` finds the object under the
+point on the build layer and the object under it one layer behind (or, if
+nothing is behind, one in front); the bolt takes the front-most layer of the
+two so it draws on top.
 
-Every bolt has a **layer**, set from the build layer when placed. It joins
-only objects on that layer, and draws with that layer — `drawBolts(l)` runs
-right after `drawLayer(l)` — so a Front bolt sits on top of Front objects
-instead of under them. Placement measures to each object's actual shape
-(inside is zero, otherwise edge distance, cutoff 70px); it used to measure to
-the centre of each part and give up past 90px, so nothing big could be bolted
-near its edge.
+**The open question this leaves** is a cart with wheels — wheel bolted to
+cart body, both moving — which LBP does with both parts physical in
+different layers. Not possible here until Front/Back objects can be physical.
+Carson's call; flagged, not decided.
+
+Four kinds, LBP1/2's own, **each its own tool** in the Tools section and each
+with its own settings in the object box. The kind can also be changed there.
+
+| kind | what it is | settings |
+| --- | --- | --- |
+| **Bolt** | a pivot | tightness — rotational friction, 0 free, 1 very stiff. Not a weld. |
+| **Sprung bolt** | a pivot that springs back to the angle it was placed at | strength (the spring), tightness, "set rest angle to now" |
+| **Motor bolt** | drives what is attached round | speed, direction |
+| **Wobble bolt** | swings to an angle either side of where it was placed and back | angle each way, seconds per swing, direction |
+
+Every bolt has a **layer** and draws with it — `drawBolts(l)` runs right after
+`drawLayer(l)`. `drawBoltGlyph(kind, tightness, spin, alpha)` is the one
+drawing routine, shared with the **ghost**: with a bolt tool in hand the
+cursor shows a translucent bolt of that kind, ringed green when there is a
+pair under it and red when there is not.
 
 Two physics-engine facts shaped the rest, both **measured, not assumed**:
 
 - **Matter keeps a constraint's anchor offset already rotated.** It rotates
   `pointA` in place every step and remembers the angle it did that at in
   `angleA`. So the live anchor is `body.position + pointA`, full stop.
-  Rotating it again — which `toWorldPoint` does — put a bolt on a turning
-  wheel at twice the angle, which is why bolts looked like they were slipping
-  off. The joint itself was holding to 0.02px the whole time. `boltWorldPoint`
-  does not rotate. `refreshBoltAnchors` sets `pointA` and `angleA` **together**;
-  a rebuild resets the body's angle to 0 and leaving the old angle in there
-  rotates the anchor by the difference on the next step. That was the
-  flip-drifts-bolts bug.
-- **A motor that only sets angular velocity spins the body about its own
-  centre** and leaves the joint to drag it round the pivot, so under load it
-  sags and wobbles — 63° of tilt in the probe. Setting linear velocity as
-  well, to what rotation about the pivot implies (`v = ω × r`), means the
-  integrator moves the body in a circle on its own and the joint only
-  corrects gravity. Do not use `Body.rotate` for this: with `updateVelocity`
-  it sets `positionPrev` to the old position and the Verlet step moves the
-  body again.
+  Rotating it again — which `toWorldPoint` does — drew a bolt on a turning
+  wheel at twice the angle, which read as the bolt slipping off. The joint
+  itself was holding to 0.02px. `boltWorldPoint` does not rotate.
+  `refreshBoltAnchors` sets `pointA` and `angleA` **together**; a rebuild
+  resets the body's angle to 0 and leaving the old angle in there rotates the
+  anchor by the difference on the next step. That was the flip-drifts-bolts
+  bug. `carryBolts` does this after resize and flip.
+- **Driving by angular velocity alone spins the body about its own centre**
+  and leaves the joint to drag it round the pivot, so it sags — 63° of tilt
+  under load in the probe. `driveAboutPivot` sets linear velocity too, to
+  what rotation about the pivot implies (`v = ω × r`), so the integrator
+  moves the body in a circle by itself and the joint only corrects gravity.
+  Not `Body.rotate`: with `updateVelocity` it sets `positionPrev` to the old
+  position and the Verlet step moves the body a second time.
 
-Motors run whenever the world is running — Build unpaused or Play — so a
-contraption can be watched while it is built. Dragging makes the dragged
-thing static for the drag, so it does not fight you. Tightness is applied
-each step by pulling each free body's spin toward the other's.
+Motors and wobbles run whenever the world runs — Build unpaused or Play.
+Sprung bolts pull toward their rest angle each step; tightness pulls each free
+body's spin toward the other's. `rest` is the relative angle at placement and
+is re-read by `refreshBoltAnchors`.
 
 A bolt is selected with a left-click (`selectedBolt`; it clears the object
-selection and vice versa), right-click opens its box, Del removes it. Save
-files carry `layer`, `tightness` and `speed`; a level saved without a per-bolt
-speed gets the old world `motorSpeed`, so nothing changes pace. The world
-settings slider for motor speed is gone.
+selection and vice versa), right-click opens its box, Del removes it. Saves
+carry `kind`, `layer`, `dir`, `tightness`, `speed`, `strength`, `angle`,
+`period` and `rest`; the legacy `mode` is still written and read, so a level
+saved before any of this loads as the right kind, and one without a per-bolt
+speed gets the old world `motorSpeed`. The world-settings motor slider is gone.
+
+## The map has edges
+
+Three things kept the player inside the map before, and Carson still ended up
+outside it. Now:
+
+- **Walls are 240px thick, not 40.** Matter has no continuous collision, so
+  anything moving faster than a wall is thick passes through it in one step —
+  and a motor can fling the player that fast.
+- **`keepInside(body)` runs every step** on the player and every object,
+  static ones included since a locked thing can be dragged. Anything whose
+  bounds poke past the edge is pushed back and stopped along that axis. Four
+  comparisons per body.
+- **Paint is clipped to the map** in both `addPolyToObject` and
+  `newObjectFromPoly`, so nothing is ever built outside it.
+- **The zoom floor keeps the view inside the map** on both axes, so zooming
+  out never shows the void past the edge. `applyCamScale` raises
+  `CAM_ZOOM_MIN` to whatever that takes.
+- **Resize cannot make something that does not fit**, per axis.
 
 ## Resizing
 

@@ -215,29 +215,28 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setStick(false); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
   await p.waitForTimeout(150);
   await tool('wood', 1);
-  /* Two rects with a small gap. Touching ones would weld into a single
-     object and a bolt needs two things to join — but the gap has to stay
-     tight, because placeBoltAt measures to each part's centre and gives up
-     past 90px. */
+  /* A bolt goes through the layers: a backboard on Back, a plate on Mid
+     lying over it, and the bolt through the plate into the board. */
+  await p.evaluate(() => { window.__pg.paused(true); window.__pg.setLayer(0); });
   await drag([[X, Y],[X+100, Y+100]]);
-  await p.evaluate(()=>window.__pg.deselect());
-  await drag([[X+140, Y],[X+240, Y+100]]);
+  await p.evaluate(()=>{ window.__pg.deselect(); window.__pg.setLayer(1); });
+  await drag([[X+20, Y+20],[X+140, Y+120]]);
   await p.evaluate(()=>window.__pg.deselect());
   await p.waitForTimeout(250);
-  // Hold them still, then bolt between them at wherever they actually are.
+  // Hold the plate still, then bolt where the two overlap.
   await p.evaluate(() => window.__pg.objects().forEach(o => {
     if (!o.body.isStatic){ window.__pg.select(o); window.__pg.anchor(); }
   }));
   await p.evaluate(()=>window.__pg.deselect());
   await p.waitForTimeout(250);
-  const pair = (await stats()).slice().sort((u,v)=>u.pos.x-v.pos.x).filter(o=>o.pos.y < 2340);
-  ok('two separate objects to bolt', pair.length === 2, pair.map(o=>o.id));
-  const midX = (pair[0].pos.x + pair[1].pos.x)/2, midY = (pair[0].pos.y + pair[1].pos.y)/2;
-  const nBolts = await p.evaluate(([x,y]) => window.__pg.boltAt(x,y), [midX, midY]);
+  const pair = (await stats()).filter(o=>o.pos.y < 2340);
+  ok('two objects on different layers to bolt', pair.length === 2 && new Set(pair.map(o=>o.layer)).size === 2, pair.map(o=>[o.id,o.layer]));
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('bolt'); });
+  const nBolts = await p.evaluate(([x,y]) => window.__pg.boltAt(x,y), [X+60, Y+60]);
   ok('a bolt got placed', nBolts === 1, nBolts);
   const b0 = (await p.evaluate(()=>window.__pg.bolts()))[0];
 
-  const leftId = pair[0].id;
+  const leftId = pair.filter(o=>o.layer===1)[0].id;
   // Handles only exist under the move tool, and painting left it on wood.
   await p.evaluate(()=>window.__pg.setTool('move'));
   await p.evaluate(q => { const o = window.__pg.objects().find(z=>z.id===q); window.__pg.select(o); }, leftId);
@@ -260,6 +259,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('and is still on the object it was pinned to',
      !!b1 && !!lb2 && b1.x >= lb2.x - 8 && b1.x <= lb2.x2 + 8 && b1.y >= lb2.y - 8 && b1.y <= lb2.y2 + 8,
      { bolt: b1, box: lb2 });
+  await p.evaluate(() => window.__pg.paused(false));
 
   console.log('');
   console.log('== detach makes the piece its own object ==');
