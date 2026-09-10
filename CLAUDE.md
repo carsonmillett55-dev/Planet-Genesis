@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` | Playwright suites, 209 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` | Playwright suites, 237 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 209 checks + checkgeom, in order
+npm test                   # all 237 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -57,6 +57,7 @@ node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 19 — the personal menu's sections, pages and gradient
 node tbolt.js              # 46 — bolts: through the layers, four kinds, limits, the box, the ghost, save/load
+node tgadget.js            # 28 — player sensor, button, lever, wires, and what they drive
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -341,6 +342,51 @@ carry `kind`, `layer`, `dir`, `tightness`, `speed`, `strength`, `angle`,
 `period` and `rest`; the legacy `mode` is still written and read, so a level
 saved before any of this loads as the right kind, and one without a per-bolt
 speed gets the old world `motorSpeed`. The world-settings motor slider is gone.
+
+## Gadgets and wires
+
+The first of the LBP logic family: **player sensor**, **button**, **lever**,
+and the **wires** that carry their signal. All in `gadgets[]` and `wires[]`,
+and every later gadget — emitters, movers, the rest — plugs into the same
+two arrays.
+
+A gadget sits ON an object and rides with it. Position is stored two ways:
+`local` is a true body-local offset (so `toWorldPoint` is right here, unlike
+a bolt's Matter anchor) and `pos` is the world point, refreshed every step. A
+rebuild replaces the host body with its angle reset to 0, so `local` is
+re-derived from `pos` then — `reanchorGadgets`, called from
+`rebuildFromPieces`. Removing the host removes its gadgets and their wires.
+
+Each gadget has an **output**, 0 or 1:
+
+| gadget | on when | settings |
+| --- | --- | --- |
+| **sensor** | the player is within `radius` (Play only) | radius |
+| **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
+| **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
+
+A **wire** is `{from: gadget id, to: bolt or gadget id}`. Every step, after
+outputs are computed, each receiver's `input` is reset to `null` and then set
+to the strongest signal wired into it. **`null` means unwired**, and an
+unwired receiver behaves as it always did — that is the whole compatibility
+story. The gadget step is registered before the bolt step so the inputs are
+fresh when bolts read them.
+
+What takes an input today (`canReceive`): a **motor bolt** — the signal is
+the throttle, and off holds firm like a tight bolt (zeroing the velocity
+alone let gravity creep the arm 3.5° in half a second, so the stop angle is
+held and turned back to); a **wobble bolt** — wired, it is a *flipper*:
+swings out while the signal is on, back when it drops, at the pace its
+period implies. Pistons are next.
+
+Wiring is done from the gadget's box: **Connect to…** then click the thing
+it should drive; Esc or a right-click cancels. Wires draw in Build only, as
+LBP's do, lit green while carrying a signal. Gadgets draw with their layer
+after bolts; a sensor's reach shows while it is selected or a gadget tool is
+in hand.
+
+Snapshots (undo, mode switch) and level saves both carry gadgets and wires,
+by index. Entering Play resets buttons and held levers.
 
 ## The map has edges
 

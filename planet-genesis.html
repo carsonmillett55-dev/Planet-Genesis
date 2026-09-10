@@ -1726,6 +1726,7 @@
     { id:"up",        label:"Fly up",           def:["ArrowUp","KeyW"] },
     { id:"down",      label:"Fly down",         def:["ArrowDown","KeyS"] },
     { id:"jump",      label:"Jump / fly toggle",def:["Space"] },
+    { id:"interact",  label:"Use a lever",      def:["KeyF"] },
     { id:"menu",      label:"Personal menu",    def:["KeyE"] },
     { id:"pauseMenu", label:"Pause menu",       def:["Escape"] },
     { id:"pause",     label:"Pause / resume",   def:["KeyP"] },
@@ -2368,6 +2369,7 @@
       if (b.objA === obj) b.constraint.bodyA = newBody;
       if (b.objB === obj) b.constraint.bodyB = newBody;
     });
+    reanchorGadgets(obj);
     if (typeof ropeConstraint !== "undefined" && ropeConstraint){
       if (oldBody && ropeConstraint.bodyA === oldBody) ropeConstraint.bodyA = newBody;
       if (oldBody && ropeConstraint.bodyB === oldBody) ropeConstraint.bodyB = newBody;
@@ -2482,6 +2484,7 @@
     if (idx < 0) return;
     dropBitmap(obj);
     bolts.slice().forEach(function(b){ if (b.objA===obj || b.objB===obj) removeBolt(b); });
+    gadgets.slice().forEach(function(g){ if (g.obj === obj) removeGadget(g); });
     if (obj.body) World.remove(world, obj.body);
     objects.splice(idx,1);
     var si = selection.indexOf(obj);
@@ -2555,6 +2558,135 @@
     World.remove(world, b.constraint);
     bolts.splice(idx,1);
   }
+  /* ---- Gadgets: switches and sensors -----------------------------
+
+     A gadget sits ON an object and rides with it. Each one has an output,
+     0 or 1, and a WIRE carries an output to something that takes an input:
+     a motor bolt runs only while its input is on, a wobble bolt swings out
+     while on and back when off. Unwired, a receiver behaves as it always
+     did. This is LBP's logic in its first, simplest form — analogue
+     values and the rest of the family plug into the same two arrays.
+
+       sensor   on while the player is within RADIUS.
+       button   on while the player stands on it; STICKY stays on once
+                pressed.
+       lever    on/off, flipped with the interact key when the player is
+                within reach; SPRINGS BACK makes it on only while held.
+
+     Position is stored two ways. `local` is a true body-local offset (so
+     toWorldPoint is right here, unlike a bolt's Matter anchor) and `pos`
+     is the world point, refreshed every step. A rebuild replaces the host
+     body with its angle reset to 0, so `local` is re-derived from `pos`
+     then — see reanchorGadgets. */
+  var GADGET_KINDS = ["sensor","button","lever"];
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever" };
+  var gadgets = [], gadgetCounter = 1;
+  var wires = [];                 // { from: gadget id, to: bolt or gadget id }
+  var selectedGadget = null;
+  var wiring = null;              // { from: gadget } while choosing where a wire goes
+  function isGadgetTool(){ return !!GADGET_TOOL_KIND[currentTool]; }
+  function gadgetById(id){ for (var i = 0; i < gadgets.length; i++) if (gadgets[i].id === id) return gadgets[i]; return null; }
+  function boltById(id){ for (var i = 0; i < bolts.length; i++) if (bolts[i].id === id) return bolts[i]; return null; }
+  function gadgetWorld(g){ return g.obj && g.obj.body ? toWorldPoint(g.obj.body, g.local) : g.pos; }
+  function addGadget(kind, obj, pt, extra){
+    if (GADGET_KINDS.indexOf(kind) < 0 || !obj || !obj.body) return null;
+    extra = extra || {};
+    var g = { id:"g"+(gadgetCounter++), kind:kind, obj:obj,
+              local: toBodyLocal(obj.body, pt), pos:{ x:pt.x, y:pt.y }, layer: obj.layer,
+              out:0, on:false, held:false, input:null,
+              radius: extra.radius != null ? +extra.radius : 160,
+              size: extra.size != null ? +extra.size : 64,
+              sticky: !!extra.sticky, springs: !!extra.springs,
+              visible: extra.visible != null ? !!extra.visible : true };
+    if (extra.on) g.on = true;
+    gadgets.push(g);
+    return g;
+  }
+  function removeGadget(g){
+    var i = gadgets.indexOf(g);
+    if (i < 0) return;
+    gadgets.splice(i, 1);
+    wires = wires.filter(function(w){ return w.from !== g.id && w.to !== g.id; });
+    if (selectedGadget === g) selectedGadget = null;
+  }
+  function gadgetAt(x, y, maxD){
+    maxD = maxD || 18;
+    var best = null, bestD = maxD;
+    gadgets.forEach(function(g){
+      var d = dist(gadgetWorld(g), { x:x, y:y });
+      if (d < bestD){ bestD = d; best = g; }
+    });
+    return best;
+  }
+  function reanchorGadgets(obj){
+    gadgets.forEach(function(g){ if (g.obj === obj && obj.body) g.local = toBodyLocal(obj.body, g.pos); });
+  }
+  function receiverById(id){ return boltById(id) || gadgetById(id); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston"); }
+  function addWire(from, to){
+    if (!from || !to || from === to) return false;
+    if (!canReceive(to)) return false;
+    for (var i = 0; i < wires.length; i++) if (wires[i].from === from.id && wires[i].to === to.id) return false;
+    wires.push({ from: from.id, to: to.id });
+    return true;
+  }
+  function wiresFrom(g){ return wires.filter(function(w){ return w.from === g.id; }); }
+  /* The button is a pad on the host's surface. Pressed when the player's
+     feet are on it: in the host's own frame the player's bottom sits at the
+     pad's height, within the pad's width. */
+  function buttonPressed(g){
+    if (!player || !g.obj || !g.obj.body) return false;
+    var lp = toBodyLocal(g.obj.body, player.position);
+    var feetY = lp.y + PH/2;
+    return Math.abs(lp.x - g.local.x) < g.size/2 + PW*0.45 && Math.abs(feetY - g.local.y) < 16;
+  }
+  function leverInReach(g){
+    return !!player && dist(gadgetWorld(g), player.position) < 80;
+  }
+  function useLever(){
+    if (mode !== "play" || !player) return false;
+    var best = null, bestD = 80;
+    gadgets.forEach(function(g){
+      if (g.kind !== "lever") return;
+      var d = dist(gadgetWorld(g), player.position);
+      if (d < bestD){ bestD = d; best = g; }
+    });
+    if (!best) return false;
+    if (best.springs) best.held = true; else best.on = !best.on;
+    sfx("click");
+    return true;
+  }
+  function releaseLevers(){ gadgets.forEach(function(g){ if (g.kind === "lever") g.held = false; }); }
+  onStep("beforeUpdate", function(){
+    var i, g;
+    for (i = 0; i < gadgets.length; i++){ g = gadgets[i]; g.pos = gadgetWorld(g); }
+    if (!runner.enabled) return;
+    for (i = 0; i < gadgets.length; i++){
+      g = gadgets[i];
+      if (g.kind === "sensor"){
+        g.out = (player && mode === "play" && dist(g.pos, player.position) < g.radius) ? 1 : 0;
+      } else if (g.kind === "button"){
+        var pressed = mode === "play" && buttonPressed(g);
+        if (pressed && g.sticky) g.on = true;
+        g.out = (g.sticky ? g.on : pressed) ? 1 : 0;
+      } else if (g.kind === "lever"){
+        g.out = (g.springs ? g.held : g.on) ? 1 : 0;
+      }
+    }
+    // Inputs: null when nothing is wired to you, else the strongest signal in.
+    for (i = 0; i < bolts.length; i++) bolts[i].input = null;
+    for (i = 0; i < gadgets.length; i++) gadgets[i].input = null;
+    for (i = 0; i < wires.length; i++){
+      var src = gadgetById(wires[i].from), tgt = receiverById(wires[i].to);
+      if (!src || !tgt) continue;
+      tgt.input = Math.max(tgt.input || 0, src.out);
+    }
+  });
+  function resetGadgetsForPlay(){
+    gadgets.forEach(function(g){ if (g.kind === "button") g.on = false; g.held = false; });
+  }
+
   /* ---- Bolts -------------------------------------------------------
 
      A bolt pins two objects together at a point and, as in LBP, the two
@@ -2736,13 +2868,36 @@
       var sign = target === A ? 1 : -1;      // relAngle is A relative to B
       var kF = Math.min(0.92, b.tightness * 0.7);
       if (b.kind === "motor"){
-        driveAboutPivot(target, other, boltAnchorOn(b, other), b.speed * boltDir(b));
+        // Wired: the signal is the throttle.
+        var throttle = b.input == null ? 1 : b.input, pivM = boltAnchorOn(b, other);
+        if (throttle <= 0.001){
+          /* Off holds firm, like a tight bolt. Zeroing the velocity alone
+             lets gravity creep the arm down a fraction each step before it
+             is zeroed again — measured at 3.5° in half a second — so hold
+             the angle it stopped at and turn it back there. */
+          if (b.holdRel == null) b.holdRel = relAngle(b);
+          Body.rotate(target, sign * (b.holdRel - relAngle(b)), pivM);
+          driveAboutPivot(target, other, pivM, 0);
+        } else {
+          b.holdRel = null;
+          driveAboutPivot(target, other, pivM, b.speed * boltDir(b) * throttle);
+        }
       } else if (b.kind === "wobble"){
-        b.t += dt;
-        var amp = b.angle * Math.PI / 180 * boltDir(b), ph = Math.PI*2 * b.t / Math.max(0.2, b.period);
-        var want = amp * Math.sin(ph), wantV = amp * Math.cos(ph) * Math.PI*2 / Math.max(0.2, b.period) * dt;
+        var amp = b.angle * Math.PI / 180 * boltDir(b), per = Math.max(0.2, b.period);
+        var want, wantV;
+        if (b.input == null){
+          b.t += dt;
+          var ph = Math.PI*2 * b.t / per;
+          want = amp * Math.sin(ph); wantV = amp * Math.cos(ph) * Math.PI*2 / per * dt;
+        } else {
+          // Wired, it is a flipper: swing out while the signal is on,
+          // back when it drops, at the pace the period implies.
+          want = amp * b.input; wantV = 0;
+        }
         var err = want - relAngle(b);
-        driveAboutPivot(target, other, boltAnchorOn(b, other), sign * (wantV + err * 0.25));
+        var maxStep = Math.abs(amp) * Math.PI*2 / per * dt * 1.2;
+        var v = wantV + Math.max(-maxStep, Math.min(maxStep, err * 0.25));
+        driveAboutPivot(target, other, boltAnchorOn(b, other), sign * v);
       } else {
         var w = target.angularVelocity;
         if (b.kind === "sprung"){
@@ -2786,6 +2941,7 @@
     objects = [];
     bolts.slice().forEach(removeBolt);
     bolts = [];
+    gadgets = []; wires = []; selectedGadget = null; wiring = null;
   }
 
   function starterLevel(){
@@ -3691,7 +3847,10 @@
     // While a full-screen surface is up it owns the keyboard — otherwise
     // typing in the character creator walks the player around behind it.
     if (!charEditorOverlay.hidden || !pauseOverlay.hidden){
-      if (isAction("pauseMenu", e.code) && !e.repeat){ e.preventDefault(); onEscape(); }
+      if (isAction("pauseMenu", e.code) && !e.repeat){
+      e.preventDefault();
+      if (wiring){ wiring = null; showToast("Wiring cancelled."); } else onEscape();
+    }
       return;
     }
     // Modifier combos first, and they never leak into movement — Ctrl+D
@@ -3706,6 +3865,9 @@
       if (e.code === "Equal" || e.code === "NumpadAdd"){ e.preventDefault(); zoomAround(camCenterWorld(), 1.25); updateViewHud(); return; }
       if (e.code === "Minus" || e.code === "NumpadSubtract"){ e.preventDefault(); zoomAround(camCenterWorld(), 0.8); updateViewHud(); return; }
       return;
+    }
+    if ((e.code === "Delete" || e.code === "Backspace") && selectedGadget && mode === "build" && !e.repeat){
+      e.preventDefault(); deleteSelectedGadget(); return;
     }
     if ((e.code === "Delete" || e.code === "Backspace") && selectedBolt && mode === "build" && !e.repeat){
       e.preventDefault(); deleteSelectedBolt(); return;
@@ -3741,6 +3903,7 @@
       e.preventDefault();
       if (!e.repeat) handleJumpOrFlyToggle();
     }
+    if (isAction("interact", e.code) && !e.repeat && mode === "play"){ if (useLever()) e.preventDefault(); }
     if (isAction("pauseMenu", e.code) && !e.repeat){ e.preventDefault(); onEscape(); }
     if (isAction("layerDown", e.code) && !e.repeat) setBuildLayer(buildLayer - 1);
     if (isAction("layerUp", e.code) && !e.repeat) setBuildLayer(buildLayer + 1);
@@ -3806,6 +3969,7 @@
     if (isAction("up", e.code)) input.up = false;
     if (isAction("down", e.code)) input.down = false;
     if (isAction("glue", e.code)){ exitGlueMode(); }
+    if (isAction("interact", e.code)) releaseLevers();
   });
   window.addEventListener("blur", function(){ exitGlueMode(); });
 
@@ -3993,8 +4157,18 @@
                layer:b.layer, tightness:b.tightness, speed:b.speed, kind:b.kind, dir:b.dir,
                strength:b.strength, angle:b.angle, period:b.period, rest:b.rest, visible:b.visible, limit:b.limit, minA:b.minA, maxA:b.maxA };
     });
+    var gadgetSnaps = gadgets.map(function(g){
+      var wp = gadgetWorld(g);
+      return { kind:g.kind, o:objIndex[g.obj.id], x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
+               sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible };
+    });
+    var gIdx = {}; gadgets.forEach(function(g, i){ gIdx[g.id] = i; });
+    var bIdx = {}; bolts.forEach(function(b, i){ bIdx[b.id] = i; });
+    var wireSnaps = wires.map(function(w){
+      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to] };
+    }).filter(function(w){ return w.from != null && (w.toBolt != null || w.toGadget != null); });
     return {
-      objects: objSnaps, bolts: boltSnaps,
+      objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps,
       checkpoints: checkpoints.map(function(c){ return { x:c.x, y:c.y }; }),
       goal: goalPoint ? { x:goalPoint.x, y:goalPoint.y } : null,
       bubbles: bubbles.map(function(b){ return { x:b.x, y:b.y }; }),
@@ -4021,6 +4195,14 @@
       if (oa && ob) addBolt(oa, ob, { x:bs.x, y:bs.y }, bs.mode || (bs.tight ? "tight" : "loose"),
                             { layer:bs.layer, tightness:bs.tightness, speed:bs.speed, kind:bs.kind, dir:bs.dir,
                               strength:bs.strength, angle:bs.angle, period:bs.period, rest:bs.rest, visible:bs.visible, limit:bs.limit, minA:bs.minA, maxA:bs.maxA });
+    });
+    (Array.isArray(snap.gadgets) ? snap.gadgets : []).forEach(function(gs){
+      var host = newObjs[gs.o];
+      if (host) addGadget(gs.kind, host, { x:+gs.x||0, y:+gs.y||0 }, gs);
+    });
+    (Array.isArray(snap.wires) ? snap.wires : []).forEach(function(ws){
+      var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : gadgets[ws.toGadget];
+      if (src && tgt) addWire(src, tgt);
     });
     checkpoints = snap.checkpoints.map(function(c){ return { x:c.x, y:c.y, reached:false }; });
     goalPoint = snap.goal ? { x:snap.goal.x, y:snap.goal.y } : null;
@@ -4836,6 +5018,82 @@
     }
     ctx.globalAlpha = 1;
   }
+  function drawGadgetGlyph(g, alpha){
+    ctx.globalAlpha = alpha == null ? 1 : alpha;
+    var on = g.out > 0;
+    if (g.kind === "sensor"){
+      ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI*2);
+      ctx.fillStyle = on ? "#7FD4D9" : "#2A7B8C"; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(0, 0, 5.5, 3.2, 0, 0, Math.PI*2);
+      ctx.fillStyle = "#F6ECD9"; ctx.fill();
+      ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
+    } else if (g.kind === "button"){
+      var w = g.size, h = on ? 5 : 11;
+      ctx.beginPath(); ctx.rect(-w/2 - 4, -3, w + 8, 7);
+      ctx.fillStyle = "#5C3A26"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.rect(-w/2, -3 - h, w, h);
+      ctx.fillStyle = on ? "#B3261E" : "#E4574B"; ctx.fill(); ctx.stroke();
+    } else if (g.kind === "lever"){
+      ctx.beginPath(); ctx.rect(-9, -3, 18, 7);
+      ctx.fillStyle = "#5C3A26"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      var a = on ? -0.55 : -2.6;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a)*22, Math.sin(a)*22);
+      ctx.lineWidth = 4; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(Math.cos(a)*22, Math.sin(a)*22, 5, 0, Math.PI*2);
+      ctx.fillStyle = on ? "#5F9E5A" : "#F2B705"; ctx.fill(); ctx.lineWidth = 2; ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+  /* Gadgets draw with their layer. In Build, a sensor's reach and every wire
+     are shown too; in Play only the gadget itself, and only if it is
+     visible. */
+  function drawGadgets(layer){
+    gadgets.forEach(function(g){
+      if (g.layer !== layer) return;
+      if (mode === "play" && g.visible === false) return;
+      var p = gadgetWorld(g);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      if (g.obj && g.obj.body) ctx.rotate(g.obj.body.angle);
+      if (mode === "build" && g.kind === "sensor" && (g === selectedGadget || isGadgetTool())){
+        ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
+        ctx.beginPath(); ctx.arc(0, 0, g.radius, 0, Math.PI*2);
+        ctx.fillStyle = "rgba(127,212,217,0.12)"; ctx.fill();
+        ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#2A7B8C"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.restore();
+      }
+      if (g === selectedGadget && mode === "build"){
+        ctx.beginPath(); ctx.arc(0, 0, 19, 0, Math.PI*2);
+        ctx.lineWidth = 3/camScale; ctx.strokeStyle = "#F2B705";
+        ctx.setLineDash([6/camScale, 4/camScale]); ctx.lineDashOffset = -performance.now()/70/camScale;
+        ctx.stroke(); ctx.setLineDash([]);
+      }
+      drawGadgetGlyph(g, 1);
+      ctx.restore();
+    });
+  }
+  function drawWires(){
+    if (mode !== "build") return;
+    ctx.save();
+    ctx.lineWidth = 2.2/camScale;
+    wires.forEach(function(w){
+      var src = gadgetById(w.from), tgt = receiverById(w.to);
+      if (!src || !tgt) return;
+      var a = gadgetWorld(src), b = tgt.constraint ? boltWorldPoint(tgt) : (tgt.pos || gadgetWorld(tgt));
+      ctx.beginPath(); ctx.moveTo(a.x, a.y);
+      var mx = (a.x + b.x)/2, my = (a.y + b.y)/2 - 30;
+      ctx.quadraticCurveTo(mx, my, b.x, b.y);
+      ctx.strokeStyle = src.out ? "#5F9E5A" : "#2A7B8C"; ctx.setLineDash([8/camScale, 5/camScale]);
+      ctx.lineDashOffset = -performance.now()/40/camScale; ctx.stroke(); ctx.setLineDash([]);
+    });
+    if (wiring){
+      var s0 = gadgetWorld(wiring.from);
+      ctx.beginPath(); ctx.moveTo(s0.x, s0.y); ctx.lineTo(mouseWorld.x, mouseWorld.y);
+      ctx.strokeStyle = "#F2B705"; ctx.setLineDash([6/camScale, 4/camScale]); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
   /* Bolts draw with their layer, right after it, so a bolt on the Front
      layer sits on top of Front objects instead of under them. */
   /* The allowed swing, as LBP draws it: a wedge about the pivot from the
@@ -5042,6 +5300,16 @@
         ctx.fillStyle = matOf(currentTool).color;
         ctx.globalAlpha = 0.9;
         ctx.beginPath(); ctx.arc(mouseWorld.x, mouseWorld.y, 3/camScale, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+        showCustom = true;
+      } else if (isGadgetTool()){
+        var host = objectUnderOn(mouseWorld.x, mouseWorld.y, buildLayer, 6);
+        ctx.save();
+        ctx.translate(mouseWorld.x, mouseWorld.y);
+        ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI*2);
+        ctx.lineWidth = 2.4/camScale; ctx.strokeStyle = host ? "#5F9E5A" : "#D64545";
+        ctx.globalAlpha = 0.85; ctx.stroke();
+        drawGadgetGlyph({ kind: GADGET_TOOL_KIND[currentTool], out: 0, size: 64 }, host ? 0.55 : 0.3);
         ctx.restore();
         showCustom = true;
       } else if (isBoltTool()){
@@ -5423,9 +5691,9 @@
     // and its markers, THEN Front decoration on top — so anything you
     // paint on the front layer correctly covers the player, LBP-style.
     drawLayer(0);
-    drawBolts(0);
+    drawBolts(0); drawGadgets(0);
     drawLayer(1);
-    drawBolts(1);
+    drawBolts(1); drawGadgets(1);
     drawBubbles();
     checkpoints.forEach(function(cp, i){ drawFlag(cp, i===0 ? "#5F9E5A" : "#2F86A6", i===0 ? "start" : "checkpoint"); });
     drawFlag(goalPoint, "#F2B705", "goal");
@@ -5433,7 +5701,8 @@
     drawParticles();
     drawMaterialWater();
     drawLayer(2);
-    drawBolts(2);
+    drawBolts(2); drawGadgets(2);
+    drawWires();
     drawWorldWaterOverlay();
     drawLighting();
     // The selection ring and the drag highlight are interface, not
@@ -5970,6 +6239,7 @@
     var h = document.createElement("h3"); h.textContent = "Tools"; el.appendChild(h);
     var grid = document.createElement("div"); grid.className = "catalogGrid";
     var defs = [["move","🕹","Move"],["bolt","🔩","Bolt"],["sprungbolt","🌀","Sprung bolt"],["motorbolt","⚙","Motor bolt"],["wobblebolt","↔","Wobble bolt"],
+                ["sensor","👁","Player sensor"],["button","🔴","Button"],["lever","🎚","Lever"],
                 ["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]];
     defs.forEach(function(d){
       var chip = document.createElement("div"); chip.className = "chip" + (currentTool===d[0] ? " active" : "");
@@ -6679,6 +6949,17 @@
     if (!partner) return null;
     return { front: front, partner: partner, layer: Math.max(buildLayer, pl) };
   }
+  function placeGadgetAt(pt){
+    var kind = GADGET_TOOL_KIND[currentTool];
+    var host = objectUnderOn(pt.x, pt.y, buildLayer, 6);
+    if (!host){ showToast("Put it on something on the " + LAYER_NAMES[buildLayer] + " layer."); sfx("deny"); return; }
+    pushUndo("placing a " + GADGET_LABEL[kind].toLowerCase());
+    var g = addGadget(kind, host, pt);
+    selectGadget(g);
+    showToast("✨ " + GADGET_LABEL[kind] + " placed — right-click it to set it up and wire it.");
+    sfx("bolt");
+    puff(pt.x, pt.y, 8, { color:"#7FD4D9", speed:1.6, g:0.06 });
+  }
   function placeBoltAt(pt){
     var pair = boltPairAt(pt.x, pt.y);
     if (!pair){
@@ -6931,6 +7212,7 @@
     }
     if (currentTool === "goal"){ goalPoint = pt; sfx("place"); return; }
     if (isBoltTool()){ if (!lastPaint){ placeBoltAt(pt); lastPaint = pt; } return; }
+    if (isGadgetTool()){ if (!lastPaint){ placeGadgetAt(pt); lastPaint = pt; } return; }
     if (currentTool.indexOf("stamp:") === 0){
       stampObject(currentTool.slice(6), pt);
       currentTool = "move"; canvas.dataset.tool = "move";
@@ -7304,6 +7586,7 @@
     selectedRegion = null;
     selection = [];
     selectedBolt = null;
+    selectedGadget = null;
     /* Hide first, bail second. removeObject nulls `selected` before it
        calls this, so an early return above the hide would leave the box
        open with nothing in it — which is exactly what happened. The guard
@@ -7317,6 +7600,35 @@
     clearSelection();
     selectedBolt = b;
     sfx("tick");
+  }
+  function selectGadget(g){
+    clearSelection();
+    selectedGadget = g;
+    sfx("tick");
+  }
+  function deleteSelectedGadget(){
+    var g = selectedGadget;
+    if (!g || gadgets.indexOf(g) < 0) return;
+    pushUndo("removing a " + GADGET_LABEL[g.kind].toLowerCase());
+    var pt = gadgetWorld(g);
+    removeGadget(g);
+    puff(pt.x, pt.y, 8, { color:"#7FD4D9", speed:1.6, g:0.06 });
+    clearSelection();
+    sfx("delete");
+  }
+  /* A wire is made by picking "Connect to…" on a gadget, then clicking the
+     bolt (or gadget) it should drive. Anything that cannot take an input
+     just cancels. */
+  function finishWire(pt){
+    if (!wiring) return false;
+    var from = wiring.from;
+    var tgt = boltAt(pt.x, pt.y, 22) || gadgetAt(pt.x, pt.y, 22);
+    wiring = null;
+    if (!tgt || !canReceive(tgt)){ showToast("That cannot be driven — wire to a motor bolt, wobble bolt or piston."); sfx("deny"); return true; }
+    pushUndo("wiring a " + GADGET_LABEL[from.kind].toLowerCase());
+    if (addWire(from, tgt)){ showToast("Wired."); sfx("glue"); } else { showToast("Already wired to that."); }
+    selectGadget(from); opWanted = true; renderSelBar();
+    return true;
   }
   function deleteSelectedBolt(){
     var b = selectedBolt;
@@ -7377,6 +7689,7 @@
   }
   function selectObject(o){
     selectedBolt = null;
+    selectedGadget = null;
     if (selected === o && selection.length <= 1){ selection = [o]; renderSelBar(); return; }
     selected = o;
     selection = [o];
@@ -7486,7 +7799,63 @@
     opBtn(ac, "🗑 Remove bolt", "Take the bolt out (Del) — the two come apart", function(){ deleteSelectedBolt(); }, "red wide");
     objPanelEl.hidden = false;
   }
+  function renderGadgetBox(){
+    var g = selectedGadget;
+    opBodyEl.innerHTML = "";
+    opTitleEl.textContent = GADGET_LABEL[g.kind];
+    var info = document.createElement("div"); info.className = "opInfo";
+    var hm = matOf(g.obj.pieces[0] ? g.obj.pieces[0].m : "wood");
+    info.innerHTML = "<b>on " + escapeHtml(hm ? hm.label : "?") + "</b> · " + escapeHtml(LAYER_NAMES[g.layer]) +
+      " · " + (g.out ? "<b>ON</b>" : "off");
+    opBodyEl.appendChild(info);
+    function slider(sec, label, val, min, max, step, set, fmt, undoLabel){
+      var pushed = false;
+      var sl = sliderRow(label, val, min, max, step, function(v){ if (!pushed){ pushUndo(undoLabel); pushed = true; } set(v); }, fmt);
+      sl.style.flexBasis = "100%"; sec.appendChild(sl);
+    }
+    if (g.kind === "sensor"){
+      slider(opSection("Reach"), "Radius", g.radius, 40, 800, 10, function(v){ g.radius = v; }, function(v){ return Math.round(v) + "px"; }, "changing a sensor");
+    }
+    if (g.kind === "button"){
+      var bs = opSection("Behaviour");
+      opBtn(bs, g.sticky ? "📌 Stays on once pressed" : "↕ On while pressed", "",
+        function(){ pushUndo("changing a button"); g.sticky = !g.sticky; g.on = false; renderSelBar(); sfx("tick"); }, g.sticky ? "on" : "");
+      slider(opSection("Size"), "Width", g.size, 24, 200, 4, function(v){ g.size = v; }, function(v){ return Math.round(v) + "px"; }, "changing a button");
+    }
+    if (g.kind === "lever"){
+      var ls = opSection("Behaviour");
+      opBtn(ls, g.springs ? "↩ Springs back when let go" : "⇅ Flips on, flips off", "",
+        function(){ pushUndo("changing a lever"); g.springs = !g.springs; g.on = false; g.held = false; renderSelBar(); sfx("tick"); }, g.springs ? "on" : "");
+      opBtn(ls, g.on ? "Starts ON" : "Starts OFF", "Which way it is when the level begins",
+        function(){ pushUndo("changing a lever"); g.on = !g.on; renderSelBar(); sfx("tick"); }, g.on ? "on" : "");
+    }
+    var ws = opSection("Wires");
+    var outs = wiresFrom(g);
+    outs.forEach(function(w){
+      var t = receiverById(w.to);
+      var lbl = t ? (t.kind ? (BOLT_KIND_LABEL[t.kind] || GADGET_LABEL[t.kind] || t.kind) : "?") : "?";
+      opBtn(ws, "✕ " + lbl, "Remove this wire", function(){
+        pushUndo("removing a wire"); wires = wires.filter(function(q){ return q !== w; }); renderSelBar(); sfx("delete");
+      }, "wide");
+    });
+    opBtn(ws, wiring && wiring.from === g ? "… click what it should drive (Esc cancels)" : "🔌 Connect to…",
+      "Then click a motor bolt, wobble bolt or piston",
+      function(){ wiring = wiring && wiring.from === g ? null : { from: g }; renderSelBar(); sfx("tick"); }, "wide" + (wiring && wiring.from === g ? " on" : ""));
+    var vis = opSection("In play");
+    opBtn(vis, g.visible === false ? "🙈 Hidden in Play" : "👁 Visible in Play",
+      g.visible === false ? "Not drawn while playing — it still works" : "Drawn while playing",
+      function(){ pushUndo("changing a gadget"); g.visible = g.visible === false; renderSelBar(); sfx("tick"); }, g.visible === false ? "" : "on");
+    var ac = opSection("Actions");
+    opBtn(ac, "🗑 Remove", "Take it off (Del)", function(){ deleteSelectedGadget(); }, "red wide");
+    objPanelEl.hidden = false;
+  }
   function renderSelBar(){
+    if (selectedGadget){
+      if (gadgets.indexOf(selectedGadget) < 0){ clearSelection(); return; }
+      if (mode !== "build" || !opWanted){ objPanelEl.hidden = true; return; }
+      renderGadgetBox();
+      return;
+    }
     if (selectedBolt){
       if (bolts.indexOf(selectedBolt) < 0){ clearSelection(); return; }
       if (mode !== "build" || !opWanted){ objPanelEl.hidden = true; return; }
@@ -7591,6 +7960,7 @@
   /* The panel is docked, so nothing to position — but this runs every frame
      and is the place that notices the selection has gone. */
   function updateSelBarPos(){
+    if (selectedGadget && gadgets.indexOf(selectedGadget) < 0){ clearSelection(); return; }
     if (selectedBolt && bolts.indexOf(selectedBolt) < 0){ clearSelection(); return; }
     if (!selected || objPanelEl.hidden) return;
     if (objects.indexOf(selected) < 0){ clearSelection(); return; }
@@ -7991,6 +8361,9 @@
     if (!additive){
       var handle = resizeHandleAt(pt);
       if (handle){ dragging = null; beginResize(pt, handle); return; }
+      if (wiring){ dragging = null; finishWire(pt); return; }
+      var gh = gadgetAt(pt.x, pt.y);
+      if (gh){ dragging = null; selectGadget(gh); renderSelBar(); return; }
       var bh = boltAt(pt.x, pt.y);
       if (bh){ dragging = null; selectBolt(bh); renderSelBar(); return; }
     }
@@ -8118,9 +8491,10 @@
      object has to remember the box exists. The camera no longer matters —
      the box is docked, not pinned to a spot on the level. */
   function pruneObjCtxMenu(){
+    if (selectedGadget && gadgets.indexOf(selectedGadget) < 0){ clearSelection(); return; }
     if (selectedBolt && bolts.indexOf(selectedBolt) < 0){ clearSelection(); return; }
     if (objPanelEl.hidden) return;
-    if (selectedBolt) return;
+    if (selectedBolt || selectedGadget) return;
     if (!selected || objects.indexOf(selected) < 0) clearSelection();
   }
 
@@ -8312,6 +8686,9 @@
           eraseStep();
           return;
         }
+        if (wiring){ wiring = null; showToast("Wiring cancelled."); return; }
+        var gadHit = gadgetAt(pt.x, pt.y);
+        if (gadHit){ selectGadget(gadHit); opWanted = true; renderSelBar(); return; }
         var boltHit = boltAt(pt.x, pt.y);
         if (boltHit){ selectBolt(boltHit); opWanted = true; renderSelBar(); return; }
         var hitObj = objectAt(pt.x, pt.y);
@@ -8673,6 +9050,7 @@
       activeCheckpoint = 0;
       score = 0; comboMult = 1; lastBubbleTime = -99999;
       updateScoreHud();
+      resetGadgetsForPlay();
       respawnPlayer();
     }
   }
@@ -8745,6 +9123,16 @@
   function serializeLevel(name){
     var objIndex = {};
     var objSnaps = objects.map(function(o,i){ objIndex[o.id] = i; return packObject(o); });
+    var gadgetSnaps = gadgets.map(function(g){
+      var wp = gadgetWorld(g);
+      return { kind:g.kind, o:objIndex[g.obj.id], x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
+               sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible };
+    });
+    var gIdx = {}; gadgets.forEach(function(g, i){ gIdx[g.id] = i; });
+    var bIdx = {}; bolts.forEach(function(b, i){ bIdx[b.id] = i; });
+    var wireSnaps = wires.map(function(w){
+      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to] };
+    }).filter(function(w){ return w.from != null && (w.toBolt != null || w.toGadget != null); });
     var boltSnaps = bolts.map(function(b){ var wp = boltWorldPoint(b);
       return { a:objIndex[b.objA.id], b:objIndex[b.objB.id], x:wp.x, y:wp.y, tight:b.tight, mode:b.mode,
                layer:b.layer, tightness:b.tightness, speed:b.speed, kind:b.kind, dir:b.dir,
@@ -8754,7 +9142,7 @@
       checkpoints: checkpoints.map(function(c){ return { x:c.x, y:c.y }; }),
       goal: goalPoint,
       bubbles: bubbles.map(function(b){ return { x:b.x, y:b.y }; }),
-      objects: objSnaps, bolts: boltSnaps,
+      objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps,
       water: packWaterSparse(),
       world: { gravity: worldSettings.gravity, waterLevel: worldSettings.waterLevel, ropeLength: worldSettings.ropeLength, motorSpeed: worldSettings.motorSpeed, light: worldSettings.light }
     };
@@ -8782,6 +9170,14 @@
         if (oa && ob) addBolt(oa, ob, { x:+bs.x||0, y:+bs.y||0 }, bs.mode || (bs.tight ? "tight" : "loose"),
                               { layer:bs.layer, tightness:bs.tightness, speed: bs.speed != null ? bs.speed : oldSpeed,
                                 kind:bs.kind, dir:bs.dir, strength:bs.strength, angle:bs.angle, period:bs.period, rest:bs.rest, visible:bs.visible, limit:bs.limit, minA:bs.minA, maxA:bs.maxA });
+      });
+      (Array.isArray(data.gadgets) ? data.gadgets : []).forEach(function(gs){
+        var host = newObjs[gs.o];
+        if (host) addGadget(gs.kind, host, { x:+gs.x||0, y:+gs.y||0 }, gs);
+      });
+        (Array.isArray(data.wires) ? data.wires : []).forEach(function(ws){
+        var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : gadgets[ws.toGadget];
+        if (src && tgt) addWire(src, tgt);
       });
       if (data.world){
         worldSettings.gravity = data.world.gravity != null ? data.world.gravity : 1;

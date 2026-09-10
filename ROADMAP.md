@@ -196,17 +196,20 @@ needs the tool and the flood-region logic.
 Self-contained, offline, and the biggest single jump in what levels can *be*.
 Nothing here needs a backend.
 
-**None of it exists yet** — verified: `emitter` in the code today is a material
-flag meaning "emits light", not a gadget.
+**Started 2026-09-10.** Player sensor, button and lever exist, with wires
+that drive motor and wobble bolts. The signal system — `gadgets[]`, `wires[]`,
+an output per gadget and an input per receiver — is what the rest of the
+family plugs into. Pistons and rope are next. `emitter` in the code is still
+a material flag meaning "emits light", not a gadget.
 
 Carson's instruction for the whole family: research the real LBP system and
 implement it, including connected systems, rather than approximating.
 
 | gadget | behaviour |
 | --- | --- |
-| **Buttons** | LBP behaviour. Activator. |
-| **Levers** | LBP behaviour. Activator. |
-| **Player sensors** | Activates motor bolts and other tools. Works like LBP. |
+| **Player sensors** | DONE. Radius; on while the player is inside it. |
+| **Buttons** (stepped on) | DONE. Sticky option. |
+| **Levers** (interact key) | DONE. F to flip; springs-back option. |
 | **Water sensors** | LBP behaviour. |
 | **Emitters** | Research the LBP emitter system specifically — it is deeper than it looks. |
 | **World changer** | Driven by activators (sensors, buttons). Adjusts world lighting, world water level, etc. |
@@ -237,10 +240,9 @@ Drop it onto an object you built and the object becomes a creature.
 
 Carson explicitly grants liberty on the details here: make it feel like LBP.
 
-### Gadget visibility
+### Gadget visibility — DONE
 
-Every tool needs an **"invisible in play mode"** option. Reference how LBP
-gadgets handle this and implement the pertinent behaviour.
+Every bolt and gadget has "Visible in Play". Hidden ones still work.
 
 ---
 

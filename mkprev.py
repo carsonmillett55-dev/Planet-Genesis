@@ -54,6 +54,16 @@ HOOK = """
       return +Math.hypot(pa.x-pb.x, pa.y-pb.y).toFixed(2); },
     paused: function(v){ if (v != null) setPaused(!!v); return !runner.enabled; },
     engineSet: function(k, v){ engine[k] = v; return engine[k]; },
+    gadgets: function(){ return gadgets.map(function(g){ var wp = gadgetWorld(g); return { id:g.id, kind:g.kind, x:Math.round(wp.x), y:Math.round(wp.y),
+      out:g.out, on:g.on, radius:g.radius, size:g.size, sticky:g.sticky, springs:g.springs, visible:g.visible, obj:g.obj?g.obj.id:null, input:g.input }; }); },
+    gadgetAt: function(x,y){ placeGadgetAt({x:x,y:y}); return gadgets.length; },
+    gadgetSet: function(id, props){ var g = gadgetById(id); if (!g) return false; for (var k in props) g[k] = props[k]; return true; },
+    wire: function(fromId, toId){ return addWire(gadgetById(fromId), receiverById(toId)); },
+    wires: function(){ return wires.slice(); },
+    playerTo: function(x, y){ if (player){ Body.setPosition(player, {x:x,y:y}); Body.setVelocity(player, {x:0,y:0}); } },
+    boltInput: function(id){ var b = boltById(id); return b ? b.input : undefined; },
+    selectGadget: function(id){ var g = gadgetById(id); if (g){ selectGadget(g); opWanted = true; renderSelBar(); } },
+    wiring: function(){ return wiring ? wiring.from.id : null; },
     boltGapTrue: function(id){ var b = bolts.filter(function(q){ return q.id===id; })[0]; if (!b || !b.constraint) return null;
       var c = b.constraint, pa = { x:c.bodyA.position.x + c.pointA.x, y:c.bodyA.position.y + c.pointA.y };
       var pb = { x:c.bodyB.position.x + c.pointB.x, y:c.bodyB.position.y + c.pointB.y };
