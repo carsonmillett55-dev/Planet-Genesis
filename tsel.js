@@ -262,6 +262,39 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
      { bolt: b1, box: lb2 });
 
   console.log('');
+  console.log('== detach makes the piece its own object ==');
+  await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setStick(true); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
+  await p.waitForTimeout(150);
+  await tool('wood', 1);
+  await drag([[X, Y],[X+260, Y+160]]);
+  await p.evaluate(()=>window.__pg.deselect());
+  await tool('sponge', 1);
+  await drag([[X+40, Y+60],[X+220, Y+100]]);
+  await p.evaluate(()=>window.__pg.deselect());
+  const welded = (await stats()).filter(o => o.pieces.length === 2)[0];
+  ok('wood and sponge are one object to start', !!welded, (await stats()).map(o=>o.pieces));
+  const nStart = (await stats()).length;
+  await p.evaluate(() => window.__pg.setTool('move'));
+  const sp = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+130, Y+80]);
+  await p.mouse.click(sp.x, sp.y); await p.waitForTimeout(250);      // on the sponge
+  await p.evaluate(() => window.__pg.detachRegion());
+  await p.waitForTimeout(450);
+  const now = await stats();
+  const woodOnly = now.filter(o => o.pieces.length === 1 && o.pieces[0].indexOf('wood') === 0);
+  const spongeOnly = now.filter(o => o.pieces.length === 1 && o.pieces[0].indexOf('sponge') === 0);
+  console.log('   ', JSON.stringify(now.map(o=>o.pieces)));
+  ok('there is one more object than before', now.length === nStart + 1, { nStart, now: now.length });
+  ok('the sponge is now its own object', spongeOnly.length === 1, spongeOnly.map(o=>o.pieces));
+  ok('the wood is still there, without the sponge', woodOnly.length >= 1 && !now.some(o => o.pieces.length === 2), now.map(o=>o.pieces));
+  ok('the sponge sits where it was, in the socket it left',
+     spongeOnly.length === 1 && Math.abs(spongeOnly[0].pos.x - (X+130)) < 30, spongeOnly[0] && spongeOnly[0].pos);
+  ok('and it is what is selected now',
+     JSON.stringify(await sel()) === JSON.stringify(spongeOnly.map(o=>o.id)), { sel: await sel(), sponge: spongeOnly.map(o=>o.id) });
+  await p.evaluate(()=>window.__pg.undo());
+  await p.waitForTimeout(450);
+  ok('undo glues it back', (await stats()).some(o => o.pieces.length === 2), (await stats()).map(o=>o.pieces));
+
+  console.log('');
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();

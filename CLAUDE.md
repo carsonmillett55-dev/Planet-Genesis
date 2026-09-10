@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` | Playwright suites, 141 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` | Playwright suites, 148 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 141 checks + checkgeom, in order
+npm test                   # all 148 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -50,7 +50,7 @@ Or one suite at a time:
 
 ```
 node regress.js            # 31 — geometry, save/load, play mode, loop and save safety
-node tsel.js               # 22 — selection, marquee, group transforms
+node tsel.js               # 39 — selection, marquee, group transforms, resize, detach
 node tlayer.js             # 9  — layer accuracy and ranked picking
 node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
@@ -304,6 +304,13 @@ inherits the behaviour without knowing about it.
 
 `regionIsWhole()` keeps a one-material object behaving as it always did, since
 there the piece and the object are the same thing.
+
+**Detach** is the complement of region-delete: same removal, but the polygon
+is handed to `newObjectFromPoly` as a fresh object instead of thrown away.
+The new object is born exactly where the piece was, sitting in the socket it
+left, and physics takes it from there — which is what LBP's unglue does. On
+the selection bar and the right-click menu, under the same "a real piece of
+something bigger" condition as the scissors.
 
 ## Saving
 

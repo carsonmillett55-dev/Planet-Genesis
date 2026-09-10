@@ -34,6 +34,7 @@ HOOK = """
     selected: function(){ return selected; }, selectedRegion: function(){ return selectedRegion; },
     select: function(o){ selectObject(o); },
     anchor: function(){ anchorSelected(); },
+    detachRegion: function(){ detachSelectedRegion(); },
     bolts: function(){ return bolts.map(function(b){ return { id:b.id, x:Math.round(b.point.x), y:Math.round(b.point.y),
       a:b.objA?b.objA.id:null, b:b.objB?b.objB.id:null, mode:b.mode }; }); },
     boltAt: function(x,y){ var bl = placeBoltAt({x:x,y:y}); return bolts.length; },

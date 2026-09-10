@@ -7094,6 +7094,9 @@
       selBarEl.appendChild(selBtn("✂", "Delete just this " + matOf(selectedRegion.materialId).label +
         " piece (Del) — whatever it was holding together may come apart",
         function(){ deleteSelectedRegion(); }));
+      selBarEl.appendChild(selBtn("⇱", "Detach this " + matOf(selectedRegion.materialId).label +
+        " piece so it becomes its own object",
+        function(){ detachSelectedRegion(); }));
     }
     selBarEl.appendChild(selBtn("💾", "Save to My Objects", function(){ saveObjectToMyObjects(o); }));
     selBarEl.appendChild(selBtn("🗑", "Delete the whole object — or double-click it first, then Del", function(){ deleteSelected(); }));
@@ -7475,6 +7478,29 @@
     showToast(split > 1 ? ("✂ Removed — it came apart into " + split + " pieces.")
                         : "✂ Piece removed.");
   }
+  /* Detach: the piece you clicked stops being part of its object and
+     becomes its own. The complement of deleteSelectedRegion — same removal,
+     but the polygon is handed back as a fresh object instead of thrown away.
+
+     The new object is born exactly where the piece was, so a bar of sponge
+     detached from a wooden circle is sitting in the socket it left, and
+     physics takes it from there. That is what LBP's unglue does. */
+  function detachSelectedRegion(){
+    var reg = selectedRegion;
+    if (!regionValid(reg) || regionIsWhole(reg)) return;
+    var o = reg.obj, mat = reg.materialId, layer = o.layer;
+    var worldPoly = objToWorld(o, regionPoly(reg));
+    pushUndo("detaching a " + matOf(mat).label + " piece");
+    var before = objects.length;
+    deleteRegion(reg);
+    var fresh = newObjectFromPoly(mat, worldPoly, layer);
+    clearSelection();
+    if (fresh) selectObject(fresh);
+    sfx("glue");
+    var split = objects.length - before;
+    showToast(split > 1 ? "⇱ Detached — and what it was holding together came apart too."
+                        : "⇱ Detached — it's its own thing now.");
+  }
   function deleteSelected(){
     var list = selList();
     if (!list.length) return;
@@ -7677,6 +7703,13 @@
         });
         objCtxMenu.appendChild(fall);
       }
+    }
+    if (selectedRegion && selectedRegion.obj === obj && regionValid(selectedRegion) && !regionIsWhole(selectedRegion)){
+      var det = document.createElement("button");
+      det.textContent = "⇱ Detach this " + matOf(selectedRegion.materialId).label;
+      det.title = "Make this piece its own object";
+      det.addEventListener("click", function(){ detachSelectedRegion(); closeObjCtxMenu(); });
+      objCtxMenu.appendChild(det);
     }
     var save = document.createElement("button"); save.textContent = "💾 Save to My Objects";
     save.addEventListener("click", function(){ saveObjectToMyObjects(obj); closeObjCtxMenu(); });

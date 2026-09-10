@@ -108,8 +108,12 @@ costume. Applies to anything user-facing from here on.
 **Stage 2 done (2026-09-10):** resize, via corner handles on the selection.
 Grab, move, duplicate and delete were already there.
 
-**Still to do:** detach, sub-categories inside Materials, transforms as
-keybinds, and dropping the floating selection bar.
+**Stage 3 done (2026-09-10):** detach — the piece you clicked becomes its
+own object, born in the socket it left. Select now has every power LBP's
+cursor has.
+
+**Still to do:** sub-categories inside Materials, transforms as keybinds, and
+dropping the floating selection bar.
 
 ### The build UI rework — original note
 
