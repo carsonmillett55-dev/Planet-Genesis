@@ -953,22 +953,56 @@
   /* ---------- personal menu: LBP-style popup box that hovers near
      the player, opened with E. Tabs down the side, content on the
      right. Replaces every on-screen button the old build had. ---------- */
+  /* The popit's own colours live on the element as --pop-a/--pop-b so the
+     Costume > Your Popit page can rewrite them at runtime, and everything
+     inside picks the change up for free. */
   #personalMenu{
     position:absolute; z-index:25;
-    width:26rem; max-width:92vw; max-height:75%;
-    background:var(--paper); border:4px solid var(--stitch); border-radius:16px;
+    width:27rem; max-width:92vw; max-height:78%;
+    --pop-a:#D9B57F; --pop-b:#B8935B; --pop-ang:150deg;
+    background:linear-gradient(var(--pop-ang), var(--pop-a), var(--pop-b));
+    border:4px solid var(--stitch); border-radius:18px;
     box-shadow:0 10px 26px rgba(0,0,0,.5);
-    display:flex; overflow:hidden;
+    display:flex; flex-direction:column; overflow:hidden;
   }
   #personalMenu[hidden]{ display:none !important; }
-  #pmTabs{ display:flex; flex-direction:column; background:var(--desk-dark); flex:0 0 6.4rem; overflow-y:auto; }
-  #pmTabs button{
-    font-family:'Patrick Hand',cursive; font-size:.82rem; color:var(--paper-edge);
-    background:transparent; border:none; border-left:4px solid transparent;
-    padding:.6rem .5rem; cursor:pointer; text-align:left;
+  /* LBP2 puts the bags in a row across the top, not a list down the side. */
+  #pmBags{
+    display:flex; gap:.25rem; padding:.4rem .45rem .3rem;
+    background:rgba(67,39,20,.42); border-bottom:2px solid rgba(43,27,18,.35);
   }
-  #pmTabs button.active{ background:var(--paper); color:var(--ink); border-left-color:var(--yellow); }
+  #pmBags button{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:.1rem;
+    font-family:'Patrick Hand',cursive; font-size:.62rem; line-height:1.1;
+    color:var(--stitch); background:transparent;
+    border:2px solid transparent; border-radius:10px;
+    padding:.3rem .15rem; cursor:pointer; text-align:center;
+  }
+  #pmBags button .bagIcon{ font-size:1.15rem; line-height:1; }
+  #pmBags button:hover{ background:rgba(246,236,217,.14); }
+  #pmBags button.active{
+    background:var(--yellow); border-color:var(--yellow-dark); color:var(--ink);
+  }
+  #pmMain{ flex:1; min-height:0; display:flex; flex-direction:column; }
+  #pmPages{ display:flex; gap:.25rem; padding:.35rem .45rem 0; flex-wrap:wrap; }
+  #pmPages[hidden]{ display:none !important; }
+  #pmPages button{
+    font-family:'Patrick Hand',cursive; font-size:.74rem; color:var(--ink);
+    background:rgba(246,236,217,.55); border:2px solid rgba(43,27,18,.25);
+    border-radius:8px 8px 0 0; padding:.22rem .5rem; cursor:pointer;
+  }
+  #pmPages button.active{ background:var(--stitch); border-color:var(--ink); }
   #pmBody{ flex:1; min-width:0; padding:.7rem; overflow-y:auto; display:flex; flex-direction:column; gap:.6rem; }
+  /* Gradient pickers on the Your Popit page. */
+  .popitPresets{ display:flex; gap:.35rem; flex-wrap:wrap; }
+  .popitPresets button{
+    width:2.4rem; height:2.4rem; border-radius:9px; cursor:pointer;
+    border:2px solid var(--ink);
+  }
+  .popitPresets button.active{ border-color:var(--yellow); box-shadow:0 0 0 2px var(--yellow-dark); }
+  .popitPickers{ display:flex; gap:.6rem; }
+  .popitPickers label{ flex:1; display:flex; flex-direction:column; gap:.2rem; font-size:.74rem; }
+  .popitPickers input[type="color"]{ width:100%; height:2rem; border:2px solid var(--ink); border-radius:8px; background:none; cursor:pointer; }
   #pmBody h3{ font-family:'Patrick Hand',cursive; margin:0; font-size:1.1rem; color:var(--ink); }
   /* Ghost buttons are paper-coloured by default, which is invisible on
      any of the paper-coloured panels — restate them in ink there. */
@@ -1237,8 +1271,11 @@
       <div id="selBar" hidden></div>
 
       <div id="personalMenu" hidden>
-        <div id="pmTabs"></div>
-        <div id="pmBody"></div>
+        <div id="pmBags"></div>
+        <div id="pmMain">
+          <div id="pmPages"></div>
+          <div id="pmBody"></div>
+        </div>
       </div>
 
       <div id="objCtxMenu" hidden></div>
@@ -3540,16 +3577,19 @@
     sfx("tick");
     showToast("Brush: " + Math.round(paintScale*BRUSH_R*2) + "px");
   }
-  function quickPickTool(i){
+  function pickTool(id, label){
     if (mode !== "build") return;
-    var t = QUICK_TOOLS[i];
-    if (!t) return;
-    currentTool = t.id; canvas.dataset.tool = t.id;
+    currentTool = id; canvas.dataset.tool = id;
     shapeDrag = null; marquee = null;
-    if (t.id !== "move") clearSelection();
+    if (id !== "move") clearSelection();
     if (pmOpen) renderPersonalMenu();
     sfx("tick");
-    showToast("🛠 " + t.label);
+    showToast("🛠 " + (label || id));
+  }
+  function quickPickTool(i){
+    var t = QUICK_TOOLS[i];
+    if (!t) return;
+    pickTool(t.id, t.label);
   }
   function quickPickMaterial(i){
     if (mode !== "build") return;
@@ -5310,9 +5350,10 @@
 
   // ---- Personal menu ----
   var personalMenuEl = document.getElementById("personalMenu");
-  var pmTabsEl = document.getElementById("pmTabs");
+  var pmBagsEl = document.getElementById("pmBags");
+  var pmPagesEl = document.getElementById("pmPages");
   var pmBodyEl = document.getElementById("pmBody");
-  var pmOpen = false, pmActiveTab = null;
+  var pmOpen = false, pmActiveBag = null, pmActivePage = null;
   var pmEditState = "idle", pmEditFrame = 0, pmPaintColor = CHAR_PALETTE[0];
   var pmRigPart = "head";
 
@@ -5321,14 +5362,89 @@
     pmOpen = true;
     personalMenuEl.hidden = false;
     sfx("open");
-    var tabs = mode === "build" ? PM_TABS_BUILD : PM_TABS_PLAY;
-    if (!pmActiveTab || !tabs.some(function(t){ return t.id===pmActiveTab && !t.action; })) {
-      pmActiveTab = tabs.filter(function(t){return !t.action;})[0].id;
-    }
+    pmNormaliseTab();
     renderPersonalMenu();
     updatePersonalMenuPos();
   }
   function closePersonalMenu(){ if (pmOpen) sfx("close"); pmOpen = false; personalMenuEl.hidden = true; }
+
+  /* ---- The popit's own colours -------------------------------------
+     Your popit is yours, so its gradient is a personal setting rather than
+     a level one: it lives in localStorage next to the character, not in the
+     save file. The two colours and the angle are written onto the element
+     as CSS variables, so the stylesheet keeps ownership of how they are
+     used and nothing here has to know the layout. */
+  var POPIT_PRESETS = [
+    { id:"sackcloth", a:"#D9B57F", b:"#B8935B", ang:150 },
+    { id:"bubblegum", a:"#F49AC1", b:"#C2185B", ang:150 },
+    { id:"sherbet",   a:"#FFD36E", b:"#F2760B", ang:150 },
+    { id:"lagoon",    a:"#7FD4D9", b:"#2A7B8C", ang:150 },
+    { id:"grape",     a:"#B79BE8", b:"#5B3A9E", ang:150 },
+    { id:"moss",      a:"#A8CF7A", b:"#4C7A2E", ang:150 },
+    { id:"midnight",  a:"#6E6A93", b:"#2B2740", ang:150 },
+    { id:"cherry",    a:"#FF8A7A", b:"#B3261E", ang:150 }
+  ];
+  var popitStyle = { a:"#D9B57F", b:"#B8935B", ang:150 };
+  try {
+    var savedPopit = JSON.parse(localStorage.getItem("pg_popit") || "null");
+    if (savedPopit && /^#[0-9a-f]{6}$/i.test(savedPopit.a) && /^#[0-9a-f]{6}$/i.test(savedPopit.b)){
+      popitStyle = { a:savedPopit.a, b:savedPopit.b, ang:+savedPopit.ang || 0 };
+    }
+  } catch(e){}
+  function applyPopitStyle(){
+    personalMenuEl.style.setProperty("--pop-a", popitStyle.a);
+    personalMenuEl.style.setProperty("--pop-b", popitStyle.b);
+    personalMenuEl.style.setProperty("--pop-ang", popitStyle.ang + "deg");
+    try { localStorage.setItem("pg_popit", JSON.stringify(popitStyle)); } catch(e){}
+  }
+  function popitCss(g){ return "linear-gradient(" + g.ang + "deg, " + g.a + ", " + g.b + ")"; }
+  function renderPopitTab(el){
+    var h = document.createElement("h3"); h.textContent = "Your Popit"; el.appendChild(h);
+
+    var presets = document.createElement("div"); presets.className = "popitPresets";
+    POPIT_PRESETS.forEach(function(g){
+      var b = document.createElement("button");
+      b.style.background = popitCss(g);
+      b.title = g.id;
+      if (g.a.toLowerCase() === popitStyle.a.toLowerCase() && g.b.toLowerCase() === popitStyle.b.toLowerCase()) b.className = "active";
+      b.addEventListener("click", function(){
+        popitStyle.a = g.a; popitStyle.b = g.b;
+        applyPopitStyle(); renderPersonalMenu(); sfx("tick");
+      });
+      presets.appendChild(b);
+    });
+    el.appendChild(presets);
+
+    var pick = document.createElement("div"); pick.className = "popitPickers";
+    [["Top colour","a"],["Bottom colour","b"]].forEach(function(pair){
+      var lab = document.createElement("label");
+      var txt = document.createElement("span"); txt.textContent = pair[0];
+      var inp = document.createElement("input"); inp.type = "color"; inp.value = popitStyle[pair[1]];
+      /* "input" rather than "change" so dragging around the colour wheel
+         recolours the popit live — you are looking at the thing you are
+         editing, which is the whole point of it being your popit. */
+      inp.addEventListener("input", function(){
+        popitStyle[pair[1]] = inp.value;
+        applyPopitStyle();
+      });
+      lab.appendChild(txt); lab.appendChild(inp);
+      pick.appendChild(lab);
+    });
+    el.appendChild(pick);
+
+    el.appendChild(sliderRow("Gradient angle", popitStyle.ang, 0, 350, 10, function(v){
+      popitStyle.ang = v; applyPopitStyle();
+    }, function(v){ return Math.round(v) + "°"; }));
+
+    var reset = document.createElement("button");
+    reset.className = "btn ghost"; reset.textContent = "Back to sackcloth";
+    reset.addEventListener("click", function(){
+      popitStyle = { a:"#D9B57F", b:"#B8935B", ang:150 };
+      applyPopitStyle(); renderPersonalMenu(); sfx("tick");
+    });
+    el.appendChild(reset);
+  }
+  applyPopitStyle();
   function updatePersonalMenuPos(){
     if (!pmOpen || !player) return;
     var s = worldToScreen(player.position.x, player.position.y);
@@ -5339,22 +5455,57 @@
     personalMenuEl.style.left = left + "px";
     personalMenuEl.style.top = top + "px";
   }
+  function pmBags(){ return mode === "build" ? PM_BAGS_BUILD : PM_BAGS_PLAY; }
+  function pmBagById(id){
+    var found = null;
+    pmBags().forEach(function(b){ if (b.id === id && b.pages) found = b; });
+    return found;
+  }
+  /* Keep the open bag and page pointing at something that exists. Switching
+     between Build and Play changes which bags are on offer, so a bag that
+     was open in one mode may be gone in the other. */
+  function pmNormaliseTab(){
+    var bag = pmBagById(pmActiveBag);
+    if (!bag){
+      bag = pmBags().filter(function(b){ return b.pages; })[0];
+      pmActiveBag = bag ? bag.id : null;
+    }
+    if (!bag) return;
+    if (!bag.pages.some(function(pg){ return pg.id === pmActivePage; })) pmActivePage = bag.pages[0].id;
+  }
   function renderPersonalMenu(){
-    var tabs = mode === "build" ? PM_TABS_BUILD : PM_TABS_PLAY;
-    pmTabsEl.innerHTML = "";
-    tabs.forEach(function(t){
+    pmNormaliseTab();
+    var bags = pmBags(), bag = pmBagById(pmActiveBag);
+    pmBagsEl.innerHTML = "";
+    bags.forEach(function(bg){
       var b = document.createElement("button");
-      b.textContent = t.label;
-      b.className = (!t.action && t.id === pmActiveTab) ? "active" : "";
+      var ic = document.createElement("span"); ic.className = "bagIcon"; ic.textContent = bg.icon;
+      var lb = document.createElement("span"); lb.textContent = bg.label;
+      b.appendChild(ic); b.appendChild(lb);
+      b.title = bg.label + (bg.action ? "" : " Bag");
+      if (!bg.action && bg.id === pmActiveBag) b.className = "active";
       b.addEventListener("click", function(){
-        if (t.action){ t.run(); return; }
-        pmActiveTab = t.id; renderPersonalMenu();
+        if (bg.action){ bg.run(); return; }
+        pmActiveBag = bg.id; pmActivePage = null; renderPersonalMenu();
       });
-      pmTabsEl.appendChild(b);
+      pmBagsEl.appendChild(b);
     });
+    /* One page in a bag needs no page row — the bag icon already said it. */
+    pmPagesEl.innerHTML = "";
+    pmPagesEl.hidden = !bag || bag.pages.length < 2;
+    if (bag && bag.pages.length > 1){
+      bag.pages.forEach(function(pg){
+        var b = document.createElement("button");
+        b.textContent = pg.label;
+        if (pg.id === pmActivePage) b.className = "active";
+        b.addEventListener("click", function(){ pmActivePage = pg.id; renderPersonalMenu(); });
+        pmPagesEl.appendChild(b);
+      });
+    }
     pmBodyEl.innerHTML = "";
-    var active = tabs.filter(function(t){ return t.id===pmActiveTab && !t.action; })[0] || tabs.filter(function(t){return !t.action;})[0];
-    active.render(pmBodyEl);
+    if (!bag) return;
+    var page = bag.pages.filter(function(pg){ return pg.id === pmActivePage; })[0] || bag.pages[0];
+    page.render(pmBodyEl);
   }
 
   function sliderRow(label, val, min, max, step, onChange, fmt){
@@ -6188,18 +6339,42 @@
     }
   }
 
-  var PM_TABS_BUILD = [
-    { id:"materials", label:"Materials", render:renderMaterialsTab },
-    { id:"tools", label:"Tools", render:renderToolsTab },
-    { id:"myobjects", label:"My Objects", render:renderMyObjectsTab },
-    { id:"world", label:"World Settings", render:renderWorldSettingsTab },
-    { id:"resetpos", label:"Reset Position", action:true, run:function(){ resetCharacterPosition(); closePersonalMenu(); } },
-    { id:"character", label:"Character", render:renderCharacterTab },
-    { id:"info", label:"Info", render:renderInfoTab }
+  /* LBP2's popit, as it actually is: bags across the top, pages inside each
+     bag. Goodies Bag holds what you build the world out of; Tools Bag holds
+     what you build behaviour out of; Global Stuff is the level itself.
+     LBP2's own page lists are longer than ours — Goodies also has Objects,
+     Community Objects and Hearted; Tools has Gadgets, Music, Backgrounds and
+     the rest — so the empty slots are where the roadmap's gadget family,
+     music tab and backgrounds land. Adding one is a line in this table.
+
+     The Popit Cursor is first and is an action rather than a page, because
+     in LBP it is a tool you pick up and then use on the level, not something
+     you read. */
+  var PM_BAGS_BUILD = [
+    { id:"cursor", icon:"👆", label:"Popit Cursor", action:true,
+      run:function(){ pickTool("move", "Popit Cursor"); closePersonalMenu(); } },
+    { id:"goodies", icon:"🎒", label:"Goodies", pages:[
+      { id:"materials", label:"Materials", render:renderMaterialsTab },
+      { id:"myobjects", label:"My Objects", render:renderMyObjectsTab }
+    ]},
+    { id:"toolsbag", icon:"🧰", label:"Tools", pages:[
+      { id:"functions", label:"Functions", render:renderToolsTab }
+    ]},
+    { id:"global", icon:"🌍", label:"Global", pages:[
+      { id:"world", label:"World Settings", render:renderWorldSettingsTab }
+    ]},
+    { id:"costume", icon:"🧑", label:"Costume", pages:[
+      { id:"character", label:"Character", render:renderCharacterTab },
+      { id:"popit", label:"Your Popit", render:renderPopitTab }
+    ]},
+    { id:"resetpos", icon:"⤾", label:"Reset", action:true,
+      run:function(){ resetCharacterPosition(); closePersonalMenu(); } }
   ];
-  var PM_TABS_PLAY = [
-    { id:"character", label:"Character", render:renderCharacterTab },
-    { id:"info", label:"Info", render:renderInfoTab }
+  var PM_BAGS_PLAY = [
+    { id:"costume", icon:"🧑", label:"Costume", pages:[
+      { id:"character", label:"Character", render:renderCharacterTab },
+      { id:"popit", label:"Your Popit", render:renderPopitTab }
+    ]}
   ];
 
   function placeBoltAt(pt){

@@ -94,7 +94,19 @@ things to get right.
 Whether ropes remain as *level objects* is untouched by this — only the player
 mechanic changed.
 
-### The build UI rework
+### The build UI rework — LBP2, in progress
+
+**Stage 1 done (2026-09-10):** the popit is rebuilt on LBP2's structure —
+bags across the top (Popit Cursor, Goodies, Tools, Global, Costume), pages
+inside each, and a gradient you choose yourself under Costume > Your Popit
+with eight presets, two colour pickers and an angle. Covered by `tpop.js`.
+
+**Still to do:** the Popit Cursor's own powers — grab, move, resize,
+duplicate, delete, detach — which is where LBP keeps resizing. Then
+sub-categories inside Materials, then transforms as keybinds, then dropping
+the floating selection bar.
+
+### The build UI rework — original note
 
 Decided 2026-09-10. Three connected changes to how you handle a thing you have
 selected.

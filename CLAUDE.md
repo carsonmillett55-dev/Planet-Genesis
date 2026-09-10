@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` | Playwright suites, 111 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tpop.js` | Playwright suites, 130 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 111 checks + checkgeom, in order
+npm test                   # all 130 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -55,6 +55,7 @@ node tlayer.js             # 9  — layer accuracy and ranked picking
 node tmat.js               # 16 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 13 — the right-click popit menu's lifetime
+node tpop.js               # 19 — the popit's bags, pages and gradient
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -225,6 +226,35 @@ a clean stop, because it looks like a hang rather than a crash.
 `onStep()` catches, so a failing handler loses only its own work for that one
 step; the other handlers and the physics itself carry on. Errors log three
 times and then go quiet, same as the frame loop.
+
+## The popit
+
+Modelled on LBP2's, which is bags across the top and pages inside each bag —
+not a list of tabs down the side. `PM_BAGS_BUILD` is the whole structure:
+
+- **Popit Cursor** — an action, not a page. In LBP it is a tool you pick up
+  and use on the level, so picking it selects the move tool and closes the
+  menu.
+- **Goodies** — what you build the world from. Materials, My Objects. LBP2
+  also has Objects, Community Objects and Hearted.
+- **Tools** — what you build behaviour from. Functions today; LBP2 also has
+  Gadgets, Gameplay Kits, Music, Sound Objects, Backgrounds and the rest,
+  which is where the roadmap's gadget family and music tab land.
+- **Global** — the level itself.
+- **Costume** — Character, and Your Popit.
+
+Adding a page is one line in that table. A bag with a single page hides the
+page row, since the bag icon already said what it is.
+
+**The gradient is a personal setting, not a level one.** Two colours and an
+angle, written onto `#personalMenu` as `--pop-a`, `--pop-b` and `--pop-ang`,
+so the stylesheet keeps ownership of how they are used and the JavaScript
+never has to know the layout. Saved in `pg_popit` in localStorage next to the
+character, never in the save file — your popit follows you between levels.
+
+`renderInfoTab` is still defined but no longer reachable: LBP2 has no Info
+bag, and the plan is a tutorial mode instead. `MATERIAL_INFO` is its content
+and is kept for that.
 
 ## Selection, and what Del means
 
