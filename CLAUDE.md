@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` | Playwright suites, 592 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` | Playwright suites, 598 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 592 checks + checkgeom, in order
+npm test                   # all 598 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -56,13 +56,13 @@ node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 31 — the personal menu's sections, the Tools bag's four pages, the number keys, the gradient
-node tbolt.js              # 56 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, typed rpm, painting onto a bolted wall, save/load
+node tbolt.js              # 57 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, typed rpm, painting onto a bolted wall, save/load
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
-node tlink.js              # 59 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
+node tlink.js              # 60 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
 node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint; the weight slider
 node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
 node tmover.js             # 22 — the Mover: two-click placing, once and bounce, riding it, a loose host held, wired, the knob, save/load
-node tworld.js             # 18 — the Water sensor, and the World changer's light and water, wired, latched, saved
+node tworld.js             # 22 — the Water sensor (touching, not a pool above; on Front), and the World changer's light and water, wired, latched, saved
 node tcreature.js          # 32 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, painted weak spot and danger, colour, a Back-layer creature, save/load
 node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
@@ -304,9 +304,9 @@ layers if you wish to link them with a bolt." Only the Mid layer has physics
 here, so a bolt is a Mid thing pinned to a fixed Back or Front backdrop: a
 wheel on a wall, a seesaw, a door, a spinner. Two things side by side on the
 same layer cannot be bolted. `boltPairAt(x, y)` finds the object under the
-point on the build layer and the object under it one layer behind (or, if
-nothing is behind, one in front); the bolt takes the front-most layer of the
-two so it draws on top.
+point on the build layer and a partner on another layer — behind first,
+then in front, then two away, so Front bolts to Back with nothing between;
+the bolt takes the front-most layer of the two so it draws on top.
 
 **The open question this leaves** is a cart with wheels — wheel bolted to
 cart body, both moving — which LBP does with both parts physical in
@@ -418,7 +418,7 @@ Each gadget has an **output**, 0 or 1:
 | **sensor** | the player is within `radius` (Play only) | radius |
 | **camera** | takes over the Play camera while the player is in its zone, or while wired on — see The camera | zoom, tracking, speed, zone, view, hold, once, glide, shake, freeze |
 | **mover** | drives its host along a line — see The Mover | line, speed, bounce |
-| **watersensor** | the sensor itself is under water (`waterAt(pos) > 0.5`), the world's or painted — LBP's | — |
+| **watersensor** | water is touching it: a wet cell within 12px, or the world's flood above it (`waterTouching`) — not "somewhere up this column", which read a pool on a shelf above as under water | — |
 | **changer** | while wired on (unwired: always; `latch`: for good once it has been), the world's light and/or water level move to its values over `secs` — see The live world | setLight, light, setWater, water, secs, latch |
 | **eye** | its host is a creature — see Creatures | range, speed, fly, deadly |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
@@ -475,7 +475,10 @@ where those and the length say, every frame, after whatever the solver did
 — and hands it the velocity that motion implies, so the next integration
 lands almost there anyway and contacts feel the push. 0px of droop with a
 weight dropped on the far end. Whichever end is dynamic is the one placed;
-both static, nothing to do.
+both static, nothing to do — unless an end is Back or Front scenery, which
+has no physics to be still *with*: `stiffRoles` then makes that end the
+target and the piston drives it by hand, as the Mover does, so a piston on
+the Back layer moves scenery. Carson: every tool usable on every layer.
 
 **That reference is the design pose, and stiff is the default.** It is
 taken when the piston is placed and re-taken only when the pose is

@@ -3030,8 +3030,11 @@
       } else if (g.kind === "lever"){
         g.out = (g.springs ? g.held : g.on) ? 1 : 0;
       } else if (g.kind === "watersensor"){
-        // LBP's: on while the sensor itself is under water
-        g.out = waterAt(g.pos.x, g.pos.y, 10) > 0.5 ? 1 : 0;
+        // on while water is actually touching it: a wet cell within its
+        // reach, or the world's water above it. It used to ask the column's
+        // top surface, so a pool on a shelf above read as "under water"
+        // from any depth below — Carson: "as far above it as possible"
+        g.out = waterTouching(g.pos.x, g.pos.y, 12) ? 1 : 0;
       }
     }
     // Inputs: null when nothing is wired to you, else the strongest signal in.
@@ -3307,6 +3310,12 @@
     var c = l.constraint, A = c.bodyA, B = c.bodyB;
     if (!B.isStatic) return { base: A, tgt: B, tgtIsA: false };
     if (!A.isStatic) return { base: B, tgt: A, tgtIsA: true };
+    // both still: a Back or Front end has no physics to be still WITH, so a
+    // stiff piston drives it by hand, as the Mover does — a piston on the
+    // Back layer moves scenery. Both decorative: the second end moves.
+    var dA = l.objA && l.objA.decorative, dB = l.objB && l.objB.decorative;
+    if (dB && !(dA && !dB)) return { base: A, tgt: B, tgtIsA: false };
+    if (dA) return { base: B, tgt: A, tgtIsA: true };
     return null;
   }
   function refreshStiffRef(l){
@@ -4664,6 +4673,19 @@
   var SWIM_SPEED = 3.3;
   // How submerged the player is right now, 0..1. Cheap to call every
   // step, and short-circuits when the level has no water at all.
+  /* Is there water AT this spot — in the cells around it, or the world's
+     flood above it? Not "somewhere up this column". */
+  function waterTouching(x, y, r){
+    var wl = liveWater();
+    if (wl != null && y + r >= wl) return true;
+    if (waterCount <= 0) return false;
+    var c0 = Math.max(0, Math.floor((x - r)/WATER_CELL)), c1 = Math.min(WCOLS-1, Math.floor((x + r)/WATER_CELL));
+    var r0 = Math.max(0, Math.floor((y - r)/WATER_CELL)), r1 = Math.min(WROWS-1, Math.floor((y + r)/WATER_CELL));
+    for (var row = r0; row <= r1; row++) for (var col = c0; col <= c1; col++){
+      if (waterLevels[row*WCOLS + col] > 0.3) return true;
+    }
+    return false;
+  }
   function playerWetness(){
     if (!player) return 0;
     if (liveWater() == null && waterCount === 0) return 0;
@@ -9018,7 +9040,7 @@
   function boltPairAt(x, y){
     var front = objectUnderOn(x, y, buildLayer, 6);
     if (!front) return null;
-    var tries = [buildLayer - 1, buildLayer + 1], partner = null, pl = null;
+    var tries = [buildLayer - 1, buildLayer + 1, buildLayer - 2, buildLayer + 2], partner = null, pl = null;   // the layer behind, then in front, then two away — any two different layers can be bolted
     for (var i = 0; i < tries.length && !partner; i++){
       if (tries[i] < 0 || tries[i] > 2) continue;
       partner = objectUnderOn(x, y, tries[i], 6);

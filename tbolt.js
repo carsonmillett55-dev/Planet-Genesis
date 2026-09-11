@@ -289,6 +289,15 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(() => window.__pg.paused(true));
 
   console.log('');
+  console.log('== a bolt reaches from Back to Front, with nothing in between ==');
+  await fresh();
+  await rect('wood', 0, X, Y, X+80, Y+80);
+  await rect('wood', 2, X+20, Y+20, X+100, Y+100);
+  await p.evaluate(() => { window.__pg.setLayer(2); window.__pg.setTool('bolt'); });
+  const nBF = await p.evaluate(([x,y]) => window.__pg.boltAt(x,y), [X+50, Y+50]);
+  ok('Front to Back bolts, two layers apart', nBF === 1, nBF);
+
+  console.log('');
   console.log('== a bolt can be dragged to a new spot ==');
   const mv = await postAndArm('motorbolt');
   await p.evaluate(id => window.__pg.boltSet(id, { speed: 0.09, dir: -1 }), mv.id);

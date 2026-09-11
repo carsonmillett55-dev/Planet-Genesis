@@ -303,6 +303,20 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('the bigger weight still hangs from it', wgt && wgt.pos.y > Y && wgt.pos.y < 2250 && Math.abs(rl2.span - rl2.length) < 40, { y: wgt && wgt.pos.y, span: rl2.span, length: rl2.length });
 
   console.log('');
+  console.log('== a stiff piston moves Back-layer scenery ==');
+  await fresh();
+  await rect('wood', 0, X-200, Y+100, X+300, Y+140);   // Back floor
+  await rect('metal', 0, X+100, Y-40, X+180, Y+40);    // a Back plate
+  const bpl = await place('piston', X, Y+120, X+140, Y);
+  await p.evaluate(id => window.__pg.linkSet(id, { min: 120, max: 300, time: 0.6, pause: 0 }), bpl.id);
+  const plate = () => stats().then(st => st.filter(o => o.pieces.some(pc => pc.indexOf('metal') === 0))[0].pos);
+  const bp0 = await plate();
+  await run(); await p.waitForTimeout(700);
+  const bp1 = await plate();
+  ok('a piston between two Back objects drives the far one, though neither has physics', Math.hypot(bp1.x - bp0.x, bp1.y - bp0.y) > 15, { from: bp0, to: bp1 });
+  await p.evaluate(() => window.__pg.paused(true));
+
+  console.log('');
   console.log('== an end of a piston can be dragged to another object ==');
   await twoBlocks();
   await rect('wood', 1, X+400, Y, X+480, Y+80);        // a third block, locked below

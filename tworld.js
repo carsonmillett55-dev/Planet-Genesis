@@ -60,6 +60,37 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(() => window.__pg.worldSet('waterLevel', null));
 
   console.log('');
+  console.log('== it needs water actually touching it, not a pool somewhere above ==');
+  await fresh();
+  await rect('wood', 1, X-380, Y+100, X+400, Y+140);          // floor
+  await rect('wood', 1, X-100, Y-60, X+200, Y-20);            // a shelf above, with walls, holding a pool
+  await rect('wood', 1, X-100, Y-160, X-60, Y-60);
+  await rect('wood', 1, X+160, Y-160, X+200, Y-60);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('watersensor'); });
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X+50, Y+102]);   // on the floor's top edge, under the shelf
+  await p.evaluate(([x,y]) => window.__pg.pour(x, y, 50, 1), [X+50, Y-110]);   // fill the shelf
+  await run(); await p.waitForTimeout(900);
+  ok('a pool on a shelf above it leaves it off', (await kind('watersensor')).out === 0, { out: (await kind('watersensor')).out });
+  await p.evaluate(([x,y]) => window.__pg.pour(x, y, 40, 1), [X+50, Y+70]);    // now pour on the floor, over it
+  await p.waitForTimeout(500);
+  ok('water on it turns it on', (await kind('watersensor')).out === 1, { out: (await kind('watersensor')).out });
+  await p.evaluate(() => window.__pg.paused(true));
+  // and on the Front layer, off an object there
+  await fresh();
+  await rect('wood', 2, X-100, Y+100, X+100, Y+140);       // a Front ledge to sit the sensor on
+  await rect('wood', 1, X-100, Y+100, X+100, Y+140);       // and Mid ground at the same spot for the water to rest on (water is Mid's)
+  await rect('wood', 1, X-380, Y+200, X+400, Y+240);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.setLayer(2); window.__pg.setTool('watersensor'); });
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X, Y+102]);
+  ok('a water sensor goes on the Front layer', (await kind('watersensor')).layer === 2, await kind('watersensor'));
+  await p.evaluate(([x,y]) => window.__pg.pour(x, y, 30, 1), [X, Y+80]);
+  await run(); await p.waitForTimeout(400);
+  ok('and reads the water at its spot there too', (await kind('watersensor')).out === 1);
+  await p.evaluate(() => window.__pg.paused(true));
+
+  console.log('');
   console.log('== the world changer dims the light while its signal is on ==');
   await fresh();
   await rect('wood', 1, X-380, Y+100, X+400, Y+140);
