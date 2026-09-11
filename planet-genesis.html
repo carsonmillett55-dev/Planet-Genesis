@@ -878,12 +878,13 @@
   canvas#game[data-tool="move"]:active{ cursor:grabbing; }
   canvas#game[data-tool="bolt"]{ cursor:cell; }
   canvas#game.glueMode{ cursor:copy; }
-  /* the brush footprint / grapple reticle is drawn into the canvas itself,
+  /* the brush footprint is drawn into the canvas itself,
      so the OS pointer is hidden wherever we draw our own */
   canvas#game.customCursor{ cursor:none; }
 
   #toast{
     position:absolute; top:12px; left:50%; transform:translate(-50%,-140%);
+    pointer-events:none;   /* a passing notice must never eat a click or a paint stroke */
     background:var(--ink); color:var(--stitch);
     font-family:'Patrick Hand',cursive;
     font-size:1.1rem;
@@ -1402,25 +1403,25 @@
   // one material that has no gravity at all: paint it into (or attach
   // it to) any object and the WHOLE object becomes fixed in place.
   var MATERIALS = {
-    wood:      { label:"Timber",       color:"#9C6B3E", dark:"#6E4A29", friction:0.9, restitution:0.05, density:0.006, ropeable:false, hazard:false, floatForce:0, tex:"grain" },
-    sponge:    { label:"Grip Sponge",  color:"#D9DD6B", dark:"#9BA23A", friction:0.95,restitution:0.1,  density:0.004, ropeable:true,  hazard:false, floatForce:0, tex:"dots" },
-    rubber:    { label:"Bounce",       color:"#E8567A", dark:"#B33455", friction:0.6, restitution:1.05, density:0.004, ropeable:false, hazard:false, floatForce:0, tex:"shine" },
-    metal:     { label:"Heavy Metal",  color:"#98A3B3", dark:"#5F6975", friction:0.5, restitution:0.02, density:0.03,  ropeable:false, hazard:false, floatForce:0, tex:"rivets" },
-    ice:       { label:"Ice",          color:"#BEE7F2", dark:"#7FB9CE", friction:0.02,restitution:0.05, density:0.005, ropeable:false, hazard:false, floatForce:0, tex:"crystal" },
-    dissolve:  { label:"Dissolve",     color:"#C9C2B4", dark:"#8B8374", friction:0.8, restitution:0.05, density:0.005, ropeable:false, hazard:false, floatForce:0, tex:"dashed", dissolve:true },
-    floaty:    { label:"Floaty",       color:"#8ED0E8", dark:"#4E9CBB", friction:0.3, restitution:0.4,  density:0.0018,ropeable:false, hazard:false, floatForce:2.1, tex:"bubble" },
-    hazard:    { label:"Zap Hazard",   color:"#F2B705", dark:"#1A1A1A", friction:0.8, restitution:0.1,  density:0.005, ropeable:false, hazard:true,  floatForce:0, warn:true },
-    darkmatter:{ label:"Dark Matter",  color:"#3A2E52", dark:"#1C1630", friction:0.6, restitution:0,    density:0.01,  ropeable:false, hazard:false, floatForce:0, isDarkMatter:true },
+    wood:      { label:"Timber",       color:"#9C6B3E", dark:"#6E4A29", friction:0.9, restitution:0.05, density:0.006, grabbable:false, hazard:false, floatForce:0, tex:"grain" },
+    sponge:    { label:"Grip Sponge",  color:"#D9DD6B", dark:"#9BA23A", friction:0.95,restitution:0.1,  density:0.004, grabbable:true,  hazard:false, floatForce:0, tex:"dots" },
+    rubber:    { label:"Bounce",       color:"#E8567A", dark:"#B33455", friction:0.6, restitution:1.05, density:0.004, grabbable:false, hazard:false, floatForce:0, tex:"shine" },
+    metal:     { label:"Heavy Metal",  color:"#98A3B3", dark:"#5F6975", friction:0.5, restitution:0.02, density:0.03,  grabbable:false, hazard:false, floatForce:0, tex:"rivets" },
+    ice:       { label:"Ice",          color:"#BEE7F2", dark:"#7FB9CE", friction:0.02,restitution:0.05, density:0.005, grabbable:false, hazard:false, floatForce:0, tex:"crystal" },
+    dissolve:  { label:"Dissolve",     color:"#C9C2B4", dark:"#8B8374", friction:0.8, restitution:0.05, density:0.005, grabbable:false, hazard:false, floatForce:0, tex:"dashed", dissolve:true },
+    floaty:    { label:"Floaty",       color:"#8ED0E8", dark:"#4E9CBB", friction:0.3, restitution:0.4,  density:0.0018,grabbable:false, hazard:false, floatForce:2.1, tex:"bubble" },
+    hazard:    { label:"Zap Hazard",   color:"#F2B705", dark:"#1A1A1A", friction:0.8, restitution:0.1,  density:0.005, grabbable:false, hazard:true,  floatForce:0, warn:true },
+    darkmatter:{ label:"Dark Matter",  color:"#3A2E52", dark:"#1C1630", friction:0.6, restitution:0,    density:0.01,  grabbable:false, hazard:false, floatForce:0, isDarkMatter:true },
     // See-through, and it doesn't hide what's behind it on any layer.
-    glass:     { label:"Glass",        color:"#C7EAF2", dark:"#6FA6B8", friction:0.25,restitution:0.2,  density:0.006, ropeable:false, hazard:false, floatForce:0, glass:true },
+    glass:     { label:"Glass",        color:"#C7EAF2", dark:"#6FA6B8", friction:0.25,restitution:0.2,  density:0.006, grabbable:false, hazard:false, floatForce:0, glass:true },
     // Not a solid at all: it glows, it holds itself up, and you walk
     // straight through it. Turn the world light down and it comes into
     // its own.
-    light:     { label:"Light",        color:"#FFE9A8", dark:"#E0B34A", friction:0.4, restitution:0.1,  density:0.002, ropeable:false, hazard:false, floatForce:0, emitter:true },
+    light:     { label:"Light",        color:"#FFE9A8", dark:"#E0B34A", friction:0.4, restitution:0.1,  density:0.002, grabbable:false, hazard:false, floatForce:0, emitter:true },
     // Water is not a solid at all — painting it pours into the fluid
     // grid instead of building a body. Its density is what everything
     // else floats or sinks against.
-    water:     { label:"Water",        color:"#4FA9D6", dark:"#2F86A6", friction:0.02,restitution:0,    density:0.009, ropeable:false, hazard:false, floatForce:0, tex:"wave", isFluid:true }
+    water:     { label:"Water",        color:"#4FA9D6", dark:"#2F86A6", friction:0.02,restitution:0,    density:0.009, grabbable:false, hazard:false, floatForce:0, tex:"wave", isFluid:true }
   };
   var MATERIAL_ORDER = ["wood","sponge","rubber","metal","ice","dissolve","floaty","hazard","darkmatter","glass","light","water"];
 
@@ -1496,7 +1497,7 @@
   // reads naturally instead of dumping raw material stats.
   var MATERIAL_INFO = {
     wood:       "Sturdy, reliable, and grippy — a great default building block. Medium weight, high friction, barely bounces.",
-    sponge:     "Extra grippy, and the only material your grapple rope can latch onto in Play mode. Light and very high friction.",
+    sponge:     "Extra grippy, and the only material you can grab — hold Shift or the right mouse button while touching it. Light and very high friction.",
     rubber:     "Springy — objects rebound hard off it. Low friction so things slide around, but they'll bounce while they do it.",
     metal:      "By far the heaviest material. Makes a great stable anchor or wrecking weight, but it's slippery and barely bounces.",
     ice:        "Nearly frictionless — anything touching it slides freely. Good for slippery slopes and skating puzzles.",
@@ -1738,6 +1739,7 @@
     { id:"down",      label:"Fly down",         def:["ArrowDown","KeyS"] },
     { id:"jump",      label:"Jump / fly toggle",def:["Space"] },
     { id:"interact",  label:"Use a lever",      def:["KeyF"] },
+    { id:"grab",      label:"Grab (hold)",      def:["ShiftLeft","ShiftRight"] },
     { id:"menu",      label:"Personal menu",    def:["KeyE"] },
     { id:"pauseMenu", label:"Pause menu",       def:["Escape"] },
     { id:"pause",     label:"Pause / resume",   def:["KeyP"] },
@@ -2382,9 +2384,9 @@
     });
     reanchorGadgets(obj);
     relinkAfterRebuild(obj, oldBody, newBody);
-    if (typeof ropeConstraint !== "undefined" && ropeConstraint){
-      if (oldBody && ropeConstraint.bodyA === oldBody) ropeConstraint.bodyA = newBody;
-      if (oldBody && ropeConstraint.bodyB === oldBody) ropeConstraint.bodyB = newBody;
+    if (typeof grabConstraint !== "undefined" && grabConstraint){
+      if (oldBody && grabConstraint.bodyA === oldBody) grabConstraint.bodyA = newBody;
+      if (oldBody && grabConstraint.bodyB === oldBody) grabConstraint.bodyB = newBody;
     }
     return true;
   }
@@ -3829,7 +3831,27 @@
   var charColor = localStorage.getItem("pg_char_color") || CHAR_COLORS[0];
   var grounded = false;
   var facing = 1;
-  var ropeConstraint = null;
+  /* ---- Grabbing, the LBP way ------------------------------------
+
+     No aiming and no rope. Hold GRAB while touching grabbable material
+     and your hands close on it where they are; let go and they open. If
+     what you grabbed is hanging — sponge on a rope, on a bolt, on a
+     piston — you swing with it. If it is loose on the ground you drag it.
+     Grab in mid-air to catch a swinging sponge.
+
+     Grab is a HELD key, as LBP's R1 is: hold Shift, or hold the right
+     mouse button in Play. The grip is a short stiff constraint from the
+     player's centre to the hold point on the object, the length it was at
+     the moment of the grab so nothing snaps, and the player dangles from
+     it. While holding, walking input pumps the swing instead of setting
+     the speed outright — setting it, as walking does, would kill the
+     swing's momentum the instant the key was released.
+
+     `grabConstraint` is the grip; `grabHeld` is the key; `grabProbe` is a
+     slightly-larger-than-the-player rectangle, never in the world, used
+     only to ask "is grabbable material within reach". */
+  var grabConstraint = null, grabHeld = false, grabMouse = false, grabProbe = null;
+  var GRAB_REACH = 16;
   var flying = false;
   var mouseWorld = { x: 0, y: 0 };
 
@@ -3917,7 +3939,7 @@
     }
     if (activeEmote) activeEmote = null;
     var stateId = "idle";
-    if (ropeConstraint) stateId = "swing";
+    if (grabConstraint) stateId = "swing";
     else if (player && !grounded && player.velocity.y < -1.2) stateId = "jump";
     else if (player && !grounded && player.velocity.y > 1.2) stateId = "fall";
     else if (input.left || input.right || (player && Math.abs(player.velocity.x) > 0.6)) stateId = "run";
@@ -3959,7 +3981,7 @@
   // space (already translated to the player's center). The body flips
   // to face whichever side of the world the cursor is on; the head
   // tilts (clamped) toward the cursor; arms & legs swing through a walk
-  // cycle while grounded and moving, and the arm nearest the grapple
+  // cycle while grounded and moving, and the arm nearest the hold
   // point reaches toward it instead of swinging.
   function drawRigCharacter(){
     var p = player.position;
@@ -3976,7 +3998,7 @@
     drawRigPartAt(ctx, "body", 0, 0, 0, false, scale);
 
     var armAngleR = -swing*0.5, armAngleL = swing*0.5;
-    if (ropeConstraint){
+    if (grabConstraint){
       var grabPt = ropeAnchorWorld();
       var dx = (grabPt.x - p.x) * bodyFacing, dy = grabPt.y - p.y;
       var reach = Math.max(-2.2, Math.min(2.2, Math.atan2(-dx, dy)));
@@ -4062,7 +4084,67 @@
   }
 
   function releaseRope(){
-    if (ropeConstraint){ World.remove(world, ropeConstraint); ropeConstraint = null; sfx("unrope"); }
+    if (grabConstraint){ World.remove(world, grabConstraint); grabConstraint = null; sfx("unrope"); }
+  }
+  function isGrabbing(){ return !!grabConstraint; }
+  /* Every grabbable part near the player, for the reach test and the
+     highlight: parts whose material grabs, on objects whose bounds come
+     within GRAB_REACH of the player's. */
+  function grabbablePartsNear(){
+    if (!player) return [];
+    var out = [], pb = player.bounds;
+    for (var i = 0; i < objects.length; i++){
+      var o = objects[i], ob = o.body && o.body.bounds;
+      if (!ob) continue;
+      if (ob.max.x < pb.min.x - GRAB_REACH || ob.min.x > pb.max.x + GRAB_REACH || ob.max.y < pb.min.y - GRAB_REACH || ob.min.y > pb.max.y + GRAB_REACH) continue;
+      for (var k = 0; k < o.parts.length; k++){
+        var m = o.parts[k].plugin && matOf(o.parts[k].plugin.materialId);
+        if (m && m.grabbable) out.push({ part: o.parts[k], obj: o });
+      }
+    }
+    return out;
+  }
+  /* The grabbable part the player is touching (or all but touching), and
+     where the hands would close. */
+  function grabTarget(){
+    var near = grabbablePartsNear();
+    if (!near.length || !player) return null;
+    if (!grabProbe) grabProbe = Bodies.rectangle(0, 0, PW + GRAB_REACH*2, PH + GRAB_REACH*2, { isSensor:true });
+    Body.setPosition(grabProbe, { x: player.position.x, y: player.position.y });
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < near.length; i++){
+      var col = Query.collides(grabProbe, [near[i].part]);
+      if (!col.length) continue;
+      var sup = col[0].supports && col[0].supports.length ? col[0].supports : [near[i].part.position];
+      var hx = 0, hy = 0;
+      for (var j = 0; j < sup.length; j++){ hx += sup[j].x; hy += sup[j].y; }
+      hx /= sup.length; hy /= sup.length;
+      var d = Math.hypot(hx - player.position.x, hy - player.position.y);
+      if (d < bestD){ bestD = d; best = { obj: near[i].obj, part: near[i].part, hold: { x: hx, y: hy } }; }
+    }
+    return best;
+  }
+  function tryGrab(){
+    if (!player || grabConstraint || flying) return false;
+    var t = grabTarget();
+    if (!t) return false;
+    var body = t.obj.body;
+    grabConstraint = Constraint.create({
+      bodyA: player, bodyB: body,
+      // Matter keeps this offset rotated to the body's current angle itself
+      pointB: { x: t.hold.x - body.position.x, y: t.hold.y - body.position.y },
+      stiffness: 0.9, damping: 0.1, length: Math.max(4, dist(t.hold, player.position))
+    });
+    World.add(world, grabConstraint);
+    sfx("rope");
+    puff(t.hold.x, t.hold.y, 5, { color:"#D9DD6B", speed:1.4, g:0.05 });
+    return true;
+  }
+  function setGrabHeld(v){
+    v = !!v;
+    if (v === grabHeld) return;
+    grabHeld = v;
+    if (!v) releaseRope();
   }
   // Matter stores a constraint's attachment point in the body's own
   // rotating frame, so converting in either direction has to undo /
@@ -4078,8 +4160,9 @@
     return { x: body.position.x + local.x*cs - local.y*sn, y: body.position.y + local.x*sn + local.y*cs };
   }
   function ropeAnchorWorld(){
-    if (!ropeConstraint) return null;
-    return toWorldPoint(ropeConstraint.bodyB, ropeConstraint.pointB || {x:0,y:0});
+    if (!grabConstraint) return null;
+    var b = grabConstraint.bodyB, pt = grabConstraint.pointB || {x:0,y:0};
+    return { x: b.position.x + pt.x, y: b.position.y + pt.y };   // already rotated, see bolts
   }
   function setFlying(v){
     flying = v;
@@ -4297,6 +4380,7 @@
       if (!e.repeat) handleJumpOrFlyToggle();
     }
     if (isAction("interact", e.code) && !e.repeat && runner.enabled){ if (useLever()) e.preventDefault(); }
+    if (isAction("grab", e.code)){ e.preventDefault(); setGrabHeld(true); }
     if (isAction("pauseMenu", e.code) && !e.repeat){
       e.preventDefault();
       // Esc backs out of whatever is half done before it means "menu".
@@ -4369,6 +4453,7 @@
     if (isAction("down", e.code)) input.down = false;
     if (isAction("glue", e.code)){ exitGlueMode(); }
     if (isAction("interact", e.code)) releaseLevers();
+    if (isAction("grab", e.code) && !grabMouse) setGrabHeld(false);
   });
   window.addEventListener("blur", function(){ exitGlueMode(); });
 
@@ -4387,12 +4472,24 @@
   // only fires while the sim is unpaused — collisions resolve normally). ----
   onStep("beforeUpdate", function(){
     if (!player || !runner.enabled) return;
+    if (grabHeld && !grabConstraint) tryGrab();
     var speed = flying ? FLY_SPEED : 4.2;
     var vx = 0;
     if (input.left) vx -= speed;
     if (input.right) vx += speed;
     if (vx !== 0) facing = vx > 0 ? 1 : -1;
 
+    if (grabConstraint){
+      // hanging on: left/right pump the swing, Space lets go and jumps
+      if (vx !== 0) Body.applyForce(player, player.position, { x: vx * player.mass * 0.0009, y: 0 });
+      if (input.jumpQueued){
+        input.jumpQueued = false;
+        releaseRope(); grabHeld = false;
+        Body.setVelocity(player, { x: player.velocity.x, y: Math.min(player.velocity.y, -11) });
+        sfx("jump");
+      }
+      return;
+    }
     if (flying){
       var vy = 0;
       if (input.up) vy -= FLY_SPEED;
@@ -4407,7 +4504,7 @@
       // instead: sink with Down, rise with Up, and Space is a stroke
       // upward that can breach the surface.
       var wet = playerWetness();
-      if (wet > 0.35 && !ropeConstraint){
+      if (wet > 0.35 && !grabConstraint){
         var vy = player.velocity.y;
         if (input.up) vy = -SWIM_SPEED;
         else if (input.down) vy = SWIM_SPEED;
@@ -4419,7 +4516,7 @@
         Body.setVelocity(player, { x: vx*0.74, y: vy });   // water drags on you
       } else {
         Body.setVelocity(player, { x: vx, y: player.velocity.y });
-        if (input.jumpQueued && grounded && !ropeConstraint){
+        if (input.jumpQueued && grounded && !grabConstraint){
           Body.setVelocity(player, { x: player.velocity.x, y: -14 });
           grounded = false;
           sfx("jump");
@@ -5862,20 +5959,28 @@
     if (flying){ p = { x:p.x, y:p.y + Math.sin(performance.now()/260)*3 }; }
     var squish = flying ? -0.12 : Math.min(1, Math.abs(player.velocity.y)/16) * (player.velocity.y>0?-1:1);
     drawCharacter(p, squish, flying);
-    if (ropeConstraint){
+    if (grabConstraint){
+      // hands closed on the hold
       var anchor = ropeAnchorWorld();
       ctx.save();
-      ctx.strokeStyle = "rgba(43,27,18,.65)"; ctx.lineWidth = 2.4;
-      ctx.beginPath();
-      var midx = (player.position.x + anchor.x)/2;
-      var midy = (player.position.y + anchor.y)/2 + 14; // a little floppy sag
-      ctx.moveTo(player.position.x,player.position.y);
-      ctx.quadraticCurveTo(midx, midy, anchor.x, anchor.y);
-      ctx.stroke();
-      // a little knot exactly where it grabbed
-      ctx.beginPath(); ctx.arc(anchor.x, anchor.y, 3.4, 0, Math.PI*2);
-      ctx.fillStyle = "#2B1B12"; ctx.fill();
+      ctx.beginPath(); ctx.arc(anchor.x, anchor.y, 5.5, 0, Math.PI*2);
+      ctx.fillStyle = "#F6ECD9"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.restore();
+    } else if (grabHeld && runner.enabled && !flying){
+      // hands open, reaching: light up what they could close on
+      var near = grabbablePartsNear();
+      if (near.length){
+        ctx.save();
+        ctx.globalAlpha = 0.55 + Math.sin(performance.now()/180) * 0.2;
+        ctx.strokeStyle = "#F6ECD9"; ctx.lineWidth = 3/camScale; ctx.lineJoin = "round";
+        near.forEach(function(n){
+          var v = n.part.vertices;
+          ctx.beginPath(); ctx.moveTo(v[0].x, v[0].y);
+          for (var i = 1; i < v.length; i++) ctx.lineTo(v[i].x, v[i].y);
+          ctx.closePath(); ctx.stroke();
+        });
+        ctx.restore();
+      }
     }
   }
 
@@ -5899,9 +6004,8 @@
   /* ---- Cursor overlays ----------------------------------------------
      Build shows the exact footprint the next dab will lay down, in the
      current brush's shape and size, so nothing is a surprise. Play
-     shows a grapple reticle: white when there is nothing to grab, green
-     when a shot would land, red when the sponge you are aiming at is
-     out of rope. ------------------------------------------------------ */
+     shows only a quiet dot; there is nothing to aim, since grabbing is
+     done by touching. ------------------------------------------------ */
   function anyOverlayOpen(){
     return pmOpen || !pauseOverlay.hidden || !charEditorOverlay.hidden ||
            !confirmOverlay.hidden || !loadOverlay.hidden || !nameOverlay.hidden;
@@ -5911,18 +6015,12 @@
     var showCustom = false;
     if (mouseOnCanvas && !anyOverlayOpen() && !camPan && !shapeDrag){
       if (mode === "play"){
-        var t = grappleTargetAt(mouseWorld);
-        var col = (t && t.near) ? (t.inReach ? "#5F9E5A" : "#D64545") : "#FFFFFF";
-        // sized in screen pixels, so the reticle stays the same size to
-        // the eye however far you're zoomed in or out
-        var rr = 8/camScale;
+        // nothing to aim any more; a quiet dot so you can still see where
+        // the mouse is
+        var rr = 4/camScale;
         ctx.save();
-        ctx.lineWidth = 2.2/camScale; ctx.strokeStyle = "rgba(43,27,18,.55)";
-        ctx.beginPath(); ctx.arc(mouseWorld.x, mouseWorld.y, rr*1.08, 0, Math.PI*2); ctx.stroke();
-        ctx.lineWidth = 2/camScale; ctx.strokeStyle = col;
+        ctx.lineWidth = 1.6/camScale; ctx.strokeStyle = "rgba(43,27,18,.5)";
         ctx.beginPath(); ctx.arc(mouseWorld.x, mouseWorld.y, rr, 0, Math.PI*2); ctx.stroke();
-        ctx.fillStyle = col; ctx.globalAlpha = 0.32;
-        ctx.beginPath(); ctx.arc(mouseWorld.x, mouseWorld.y, rr, 0, Math.PI*2); ctx.fill();
         ctx.restore();
         showCustom = true;
       } else if (isMaterialTool() && paintMode !== "brush"){
@@ -7002,7 +7100,6 @@
         function(v){ worldSettings.waterLevel = WORLD_H - v; },
         function(v){ return v <= 0 ? "empty" : (v >= WORLD_H ? "the whole world" : Math.round(v/WORLD_H*100) + "% deep"); }));
     }
-    el.appendChild(sliderRow("Rope Length", worldSettings.ropeLength, 80, 420, 10, function(v){ worldSettings.ropeLength=v; }, function(v){ return Math.round(v)+"px"; }));
     var mNote = document.createElement("div"); mNote.className = "noteText";
     mNote.textContent = "How fast motor bolts turn. Place a bolt, then right-click it to cycle Tight → Loose → Motor ↻ → Motor ↺. Motors only run in Play.";
     el.appendChild(mNote);
@@ -9377,7 +9474,7 @@
            puff(pt.x, pt.y, 10, { color:"#F6ECD9", speed:1.8, g:0.05 }); glueFirst = null; }
   }
 
-  // ---- The object box (Build) / grapple rope (Play) ----
+  // ---- The object box (Build) / grab (Play) ----
   /* Right-click used to open its own popup at the cursor with half the
      same buttons as the strip. Now both are the one box: right-click just
      makes sure the thing is selected and the box is showing. The caller
@@ -9468,58 +9565,6 @@
     } catch(e){}
   })();
 
-  function grappleTargetAt(pt){
-    if (!player) return null;
-    var best = null, bestOwner = null, bestD = Infinity;
-    objects.forEach(function(o){
-      var lp = null;
-      for (var i = 0; i < o.pieces.length; i++){
-        if (!matOf(o.pieces[i].m) || !matOf(o.pieces[i].m).ropeable) continue;
-        if (!lp) lp = worldPtToLocal(o, pt.x, pt.y);
-        var poly = o.pieces[i].poly;
-        var d = pgContains(poly, lp.x, lp.y) ? -1 : pgEdgeDist(poly, lp.x, lp.y, 260);
-        if (d < bestD){
-          bestD = d; bestOwner = o;
-          // aim at the nearest part carrying that material, so the rope
-          // still has a body to attach to
-          var bp = null, bpd = Infinity;
-          for (var k = 0; k < o.parts.length; k++){
-            if (o.parts[k].plugin.materialId !== o.pieces[i].m) continue;
-            var pd = dist(o.parts[k].position, pt);
-            if (pd < bpd){ bpd = pd; bp = o.parts[k]; }
-          }
-          best = bp || o.parts[0];
-        }
-      }
-    });
-    if (!best) return null;
-    if (!best) return null;
-    // grab exactly where the cursor is when it's actually over the
-    // sponge; otherwise the nearest bit of it
-    var anchor = bestD <= 0 ? pt : best.position;
-    return {
-      part: best, owner: bestOwner, anchor: anchor,
-      aimD: bestD,
-      inReach: dist(anchor, player.position) <= worldSettings.ropeLength,
-      near: bestD < 90
-    };
-  }
-  function startRope(pt){
-    if (!player) return;
-    releaseRope();
-    var t = grappleTargetAt(pt);
-    if (!t || !t.near){ showToast("No sponge here to grapple — aim at Grip Sponge."); sfx("deny"); return; }
-    if (!t.inReach){ showToast("That sponge is too far away."); sfx("deny"); return; }
-    ropeConstraint = Constraint.create({
-      bodyA: player, bodyB: t.owner.body,
-      pointB: toBodyLocal(t.owner.body, t.anchor),
-      stiffness: 0.7, damping: 0.2, length: dist(t.anchor, player.position)
-    });
-    World.add(world, ropeConstraint);
-    sfx("rope");
-    puff(t.anchor.x, t.anchor.y, 6, { color:"#D9DD6B", speed:1.6, g:0.06 });
-  }
-
   // ---- Camera panning: middle-drag anywhere, or drag empty space with
   // the Move tool. Panning takes the camera off your character until you
   // press the ⦿ button (or C) to hand it back. ----
@@ -9608,7 +9653,7 @@
           beginPan(e);
         }
       } else if (mode === "play"){
-        startRope(pt);
+        grabMouse = true; setGrabHeld(true);
       }
       return;
     }
@@ -9697,8 +9742,9 @@
   });
   window.addEventListener("pointerup", function(e){
     endPan();
-    if (e.button === 2 && mode === "play") releaseRope();
+    if (e.button === 2 && grabMouse){ grabMouse = false; setGrabHeld(false); }
   });
+  window.addEventListener("blur", function(){ grabMouse = false; setGrabHeld(false); });
 
   /* ============================================================
      6c. Pause / transport UI, the Escape menu, and Settings.

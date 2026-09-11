@@ -81,8 +81,7 @@ the whole object. Covered by `tsel.js`.
 - **Water material** needs work and polish.
 - **Ice must get slipperier on a slope.**
 - **Level size at least 4x larger** than now — as large as possible.
-- **Replace "rope grab" with a proper LBP-style grab.** See below — this
-  absorbed the old "floppy swingable rope" item.
+- **Replace "rope grab" with a proper LBP-style grab.** DONE — see below.
 - **Temporarily hide an object in a layer**, the way LBP does.
 - **Double jump toggle** in world settings.
 - **Inventory and popit menu** should match LBP's menus as closely as possible,
@@ -94,7 +93,12 @@ Carried over from the earlier near-term list in `CLAUDE.md`, still wanted:
   object in a layer.
 - **Sprint on shift.**
 
-### The grab (supersedes the floppy rope)
+### The grab (supersedes the floppy rope) — DONE
+
+Built 2026-09-10: hold Shift or the right mouse button while touching
+sponge and your hands close on it. Swing from a hanging one, drag a loose
+one, catch one mid-air, Space to let go and jump. Sponge within reach glows
+while the key is held. Covered by `tgrab.js`.
 
 Decided 2026-09-10. **The floppy swingable rope is not a player mechanic.**
 Carson dropped it in favour of doing LBP's grab properly:

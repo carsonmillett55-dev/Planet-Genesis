@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` | Playwright suites, 314 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` | Playwright suites, 331 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 314 checks + checkgeom, in order
+npm test                   # all 331 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -59,6 +59,7 @@ node tmenu.js              # 19 — the personal menu's sections, pages and grad
 node tbolt.js              # 50 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, save/load
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
 node tlink.js              # 49 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load
+node tgrab.js              # 17 — grabbing: by key or mouse, sponge only, swinging, dragging, letting go
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -507,6 +508,45 @@ screen you were. Both now use `canvas.getBoundingClientRect()`. The test
 hook `w2sPage` always did, which is why every suite kept meeting a 5.88px
 offset — that number is 5px at the default zoom, and it was the game.
 
+## Grabbing
+
+LBP's grab, not a grapple. **Hold grab while touching grabbable material
+and your hands close on it where they are; let go and they open.** Hanging
+sponge — on a rope, a bolt, a piston — you swing with; loose sponge on the
+ground you drag. Grab in mid-air to catch a swinging one. Grab is a held
+key, as LBP's R1 is: **Shift** (rebindable, `grab`), or the **right mouse
+button in Play** (`grabMouse`). No aiming: the mouse position means nothing
+to it. Space while holding lets go and jumps.
+
+The grip is `grabConstraint`, a short stiff constraint from the player's
+centre to the hold point, the length it was at the moment of the grab so
+nothing snaps. `grabTarget` finds it: `grabbablePartsNear` narrows by
+bounds to parts whose material is `grabbable` (the flag was `ropeable`),
+then `Query.collides` between `grabProbe` — a rectangle `GRAB_REACH` px
+bigger than the player on each side, never added to the world — and each
+part; the hold is the average of the collision's support points. `pointB` is
+the world offset, not `toBodyLocal`: Matter keeps it rotated itself (see
+Bolts), and the old grapple had that wrong.
+
+**While holding, walking pumps the swing rather than setting the speed.**
+The walk code sets the player's sideways velocity outright every step; on a
+grip that would kill the swing's momentum the instant the key was released.
+So the movement step returns early while grabbing, after applying a small
+sideways force from left/right.
+
+Grabbable material within reach glows while grab is held and nothing is
+held yet; hands are drawn closed on the hold while it is. The rig's arm
+already reached toward the hold and still does. `rebuildFromPieces`
+re-points the grip at a host's new body, so a sponge flipped or painted on
+under your hands stays held.
+
+Gone: `grappleTargetAt`, `startRope`, the reticle, the world-settings Rope
+Length slider (`worldSettings.ropeLength` remains in the save for
+compatibility and is unused).
+
+`#toast` is `pointer-events:none` — a passing notice was swallowing paint
+strokes that landed under it.
+
 ## Walking while paused
 
 The physics engine is not stepping while paused, so the player is moved by
@@ -673,9 +713,9 @@ Also still wanted from the earlier list: custom drawn materials (the save
 schema already reserves `u:<id>` keys — needs a drawing surface, property
 sliders, naming, and embedding into levels), layer peek, and sprint on shift.
 
-The floppy swingable rope is **superseded**: the player mechanic is an
-LBP-style grab, designed for keyboard and mouse rather than a held shoulder
-button. Ropes as level objects are unaffected.
+The floppy swingable rope is **superseded, and the grab is built**: hold
+Shift or the right mouse button while touching sponge. Ropes as level
+objects are a separate, built thing — see Links.
 
 Beyond that the project grows a hub world, several more creation surfaces
 (creatures, music, backgrounds, particles, a rollercoaster, a 2.5D mode), and
