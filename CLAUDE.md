@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` | Playwright suites, 252 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` | Playwright suites, 284 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 252 checks + checkgeom, in order
+npm test                   # all 284 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -58,6 +58,7 @@ node tctx.js               # 24 — the object box: opening, closing, moving, re
 node tmenu.js              # 19 — the personal menu's sections, pages and gradient
 node tbolt.js              # 46 — bolts: through the layers, four kinds, limits, the box, the ghost, save/load
 node tgadget.js            # 43 — player sensor, button, lever, wires, what they drive, paused walking
+node tlink.js              # 32 — pistons and rope: placing, cycling, stiff, wired modes, hanging, save/load
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -395,6 +396,54 @@ in hand.
 
 Snapshots (undo, mode switch) and level saves both carry gadgets and wires,
 by index. Entering Play resets buttons and held levers.
+
+## Links: pistons and rope
+
+A link joins two objects at two points, one on each — any layers, because a
+link is a length between two spots rather than a pin through one. `links[]`,
+placed with **two clicks** (first object, then the other; Esc between them
+cancels), selected by clicking the rod or rope, box on right-click.
+
+**Piston**: a rod that extends and retracts between `min` and `max`, `time`
+seconds per stroke, `pause` at each end. A Matter constraint with its
+`length` animated. Wired, `flipper` decides what the signal does — `off`:
+the cycling runs while the signal is on; `in` / `out`: the rod goes to that
+end while the signal is on and back when it drops.
+
+**Stiff is a rigid linkage, not a damping.** A single distance constraint
+cannot hold an angle at all — the rod swung to vertical under any load, 209px
+of droop either way, measured. `setPistonStiff` adds two constraints: `c2`
+parallel to the rod, `STIFF_OFF` px to one side in each body's frame (with
+the first, a parallelogram, which keeps the far body's orientation), and `c3`
+diagonal from A1 to B2 (which stops the parallelogram shearing). Two
+triangles: rigid in every way but the length, and all three lengths are kept
+in step each frame. 4px of droop after.
+
+**Rope**: `length` long. **The load is carried by one tether; the chain is
+for looks.** A chain of small bodies that bore the load stretched to half
+again its length under a metal block — the physics engine losing to a mass
+ratio of hundreds to one. So `l.constraint` is a single stiffness-1 tether
+between the anchors and `l.segs` is a chain of tiny non-colliding sensor
+bodies tied to each other and to the ends, which hangs, swings and sags and
+carries nothing.
+
+**The tether is made one-sided by switching it off, not by shortening it.**
+A distance constraint is a rod — it pushes as well as pulls — so setting its
+length to the current distance while slack made a rigid rod at whatever
+distance the rope happened to be, and it could never pay out. Each step:
+ends further apart than the rope is long → length = rope, stiffness 1;
+closer → stiffness and damping 0. The step where it first goes taut
+overshoots a few pixels and snaps back, which is the jerk of a rope catching.
+
+`relinkAfterRebuild` re-points every constraint of a link at a host's new
+body after a rebuild and re-derives the anchor from where it was;
+`carryLinks` maps anchors through resize and flip. Removing a host removes
+its links. Saves and snapshots carry links by object index, and wires can
+point at a piston (`toLink`).
+
+Also fixed on the way: `collisionActive` counted any overlap with the player
+as ground, sensors included — a rope, a Back-layer decoration, a walk-through
+light would have let you jump in mid-air. Only a solid counts now.
 
 ## Walking while paused
 

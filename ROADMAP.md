@@ -199,8 +199,10 @@ Nothing here needs a backend.
 **Started 2026-09-10.** Player sensor, button and lever exist, with wires
 that drive motor and wobble bolts. The signal system — `gadgets[]`, `wires[]`,
 an output per gadget and an input per receiver — is what the rest of the
-family plugs into. Pistons and rope are next. `emitter` in the code is still
-a material flag meaning "emits light", not a gadget.
+family plugs into. Pistons and rope followed the same day: two-click
+connectors between any two objects, the piston with LBP's full settings and
+three wired modes, the rope hanging from a one-sided tether. `emitter` in the
+code is still a material flag meaning "emits light", not a gadget.
 
 Carson's instruction for the whole family: research the real LBP system and
 implement it, including connected systems, rather than approximating.
@@ -211,6 +213,8 @@ implement it, including connected systems, rather than approximating.
 | **Buttons** (stepped on) | DONE. Sticky option. |
 | **Levers** (interact key) | DONE. F to flip; springs-back option. |
 | **Water sensors** | LBP behaviour. |
+| **Pistons** | DONE. Shortest/longest, seconds per stroke, pause, stiff, wired in/out/run. |
+| **Rope** | DONE. Length; hangs, swings, goes slack, holds. |
 | **Emitters** | Research the LBP emitter system specifically — it is deeper than it looks. |
 | **World changer** | Driven by activators (sensors, buttons). Adjusts world lighting, world water level, etc. |
 | **Mover** | See below. |

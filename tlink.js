@@ -1,0 +1,192 @@
+/* Links: pistons and rope. Two-click placement, the piston's cycle and its
+   wired modes, a rope that hangs and holds, the box, and save/load.
+   node tlink.js */
+const { launch, previewURL } = require('./tenv');
+let pass=0, fail=0;
+const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.log('  FAIL '+n+(e!==undefined?'  -> '+JSON.stringify(e):''));} };
+(async () => {
+  const b = await launch();
+  const p = await b.newPage({ viewport:{width:1280,height:760} });
+  const errs=[]; p.on('pageerror', e=>errs.push('PAGEERROR: '+e.message));
+  p.on('console', m=>{ if(m.type()==='error') errs.push('CONSOLE: '+m.text()); });
+  await p.goto(previewURL);
+  await p.waitForTimeout(1100);
+  await p.evaluate(() => { window.__pg.freezeCam(); window.__pg.setStick(false); window.__pg.setPaintMode('rect'); });
+  const cam = await p.evaluate(() => window.__pg.cam());
+  const X = cam.x + 400, Y = cam.y + 260;
+  const w2p = (x,y) => p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [x,y]);
+  async function rect(mat, layer, x0, y0, x1, y1){
+    await p.evaluate(([m,l]) => { window.__pg.setLayer(l); window.__pg.setTool(m); window.__pg.deselect(); }, [mat, layer]);
+    const a = await w2p(x0,y0), c = await w2p(x1,y1);
+    await p.mouse.move(a.x,a.y); await p.mouse.down(); await p.mouse.move(c.x,c.y,{steps:6}); await p.mouse.up();
+    await p.waitForTimeout(150);
+    await p.evaluate(() => window.__pg.deselect());
+  }
+  const linksNow = () => p.evaluate(() => window.__pg.links());
+  const gads = () => p.evaluate(() => window.__pg.gadgets());
+  const stats = () => p.evaluate(() => window.__pg.stats());
+  const fresh = async () => {
+    await p.evaluate(() => { window.__pg.setMode('build'); window.__pg.paused(true); window.__pg.clear(); window.__pg.starter(); window.__pg.setLayer(1); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
+    await p.waitForTimeout(200);
+  };
+  const lockAll = () => p.evaluate(() => { window.__pg.objects().forEach(o => { if (!o.body.isStatic){ window.__pg.select(o); window.__pg.anchor(); } }); window.__pg.deselect(); });
+  const run = () => p.evaluate(() => window.__pg.paused(false));
+  /* A locked block on the left and a free block to its right, on Mid. */
+  const twoBlocks = async () => {
+    await fresh();
+    await rect('wood', 1, X, Y, X+80, Y+80);
+    await lockAll();
+    await rect('metal', 1, X+200, Y+10, X+280, Y+70);
+  };
+  const place = async (tool, ax, ay, bx, by) => {
+    await p.evaluate(t => { window.__pg.setLayer(1); window.__pg.setTool(t); }, tool);
+    await p.evaluate(([x,y]) => window.__pg.linkAt(x,y), [ax, ay]);
+    await p.evaluate(([x,y]) => window.__pg.linkAt(x,y), [bx, by]);
+    return (await linksNow())[0];
+  };
+
+  console.log('');
+  console.log('== two clicks make a piston ==');
+  await twoBlocks();
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('piston'); });
+  const n0 = await p.evaluate(([x,y]) => window.__pg.linkAt(x,y), [X+40, Y+40]);
+  ok('the first click starts one and makes nothing yet', n0 === 0 && !!(await p.evaluate(() => window.__pg.linkDraft())));
+  const nSame = await p.evaluate(([x,y]) => window.__pg.linkAt(x,y), [X+60, Y+40]);
+  ok('a second click on the same object is refused', nSame === 0);
+  const n1 = await p.evaluate(([x,y]) => window.__pg.linkAt(x,y), [X+240, Y+40]);
+  const pist = (await linksNow())[0];
+  ok('the second click on the other object finishes it', n1 === 1 && pist && pist.kind === 'piston', pist);
+  ok('it spans the two points', Math.abs(pist.span - 200) < 6, pist.span);
+  ok('with a shortest and longest either side of that', pist.min < 200 && pist.max > 200, { min: pist.min, max: pist.max });
+  await p.evaluate(() => { window.__pg.setTool('piston'); });
+  await p.evaluate(([x,y]) => window.__pg.linkAt(x,y), [X+40, Y+40]);
+  await p.keyboard.press('Escape');          // with a draft in hand, Esc cancels it rather than opening the menu
+  await p.waitForTimeout(100);
+  ok('Esc cancels a half-made one', !(await p.evaluate(() => window.__pg.linkDraft())) && (await linksNow()).length === 1);
+  ok('and does not open the pause menu', await p.evaluate(() => document.getElementById('pauseOverlay').hidden));
+
+  console.log('');
+  console.log('== the piston cycles ==');
+  await twoBlocks();
+  const pc = await place('piston', X+40, Y+40, X+240, Y+40);
+  await p.evaluate(id => window.__pg.linkSet(id, { min: 120, max: 300, time: 0.6, pause: 0.1, going: 1 }), pc.id);
+  await run();
+  const spans = [];
+  for (let i = 0; i < 12; i++){ await p.waitForTimeout(120); spans.push((await linksNow())[0].span); }
+  const mx = Math.max(...spans), mn = Math.min(...spans);
+  console.log('   spans', spans.map(v => v.toFixed(0)).join(' '));
+  ok('it pushes out toward its longest', mx > 260, mx);
+  ok('and pulls back toward its shortest', mn < 170, mn);
+
+  console.log('');
+  console.log('== stiff holds the angle ==');
+  await twoBlocks();
+  const ps = await place('piston', X+40, Y+40, X+240, Y+40);
+  await p.evaluate(id => window.__pg.linkSet(id, { min: 190, max: 210, time: 5, stiff: false }), ps.id);
+  await run(); await p.waitForTimeout(1200);
+  const looseDrop = (await linksNow())[0].by - (await linksNow())[0].ay;
+  await twoBlocks();
+  const ps2 = await place('piston', X+40, Y+40, X+240, Y+40);
+  await p.evaluate(id => window.__pg.linkSet(id, { min: 190, max: 210, time: 5, stiff: true }), ps2.id);
+  await run(); await p.waitForTimeout(1200);
+  const stiffDrop = (await linksNow())[0].by - (await linksNow())[0].ay;
+  console.log('   the far end dropped', looseDrop.toFixed(0) + 'px loose,', stiffDrop.toFixed(0) + 'px stiff');
+  ok('a loose piston lets the hanging block swing down', looseDrop > 60, looseDrop);
+  ok('a stiff one holds it out much more', stiffDrop < looseDrop * 0.6, { looseDrop, stiffDrop });
+
+  console.log('');
+  console.log('== wired, the signal decides ==');
+  async function wiredPiston(flipper){
+    await fresh();
+    await rect('wood', 1, X, Y, X+80, Y+80);
+    await rect('wood', 1, X-200, Y+300, X, Y+340);     // a platform for the lever, off to the left
+    await lockAll();
+    await rect('metal', 1, X+200, Y+10, X+280, Y+70);  // the moving block, after the locking
+    const pl = await place('piston', X+40, Y+40, X+240, Y+40);
+    await p.evaluate(([id, fl]) => window.__pg.linkSet(id, { min: 120, max: 300, time: 0.5, pause: 0, flipper: fl, going: 1 }), [pl.id, flipper]);
+    await p.evaluate(() => window.__pg.setTool('lever'));
+    await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X-100, Y+302]);
+    const lv = (await gads())[0];
+    ok('a lever can be wired to a piston', await p.evaluate(([f,t]) => window.__pg.wire(f,t), [lv.id, pl.id]));
+    await p.evaluate(() => window.__pg.setFlying(false));
+    await run();
+    await p.evaluate(([x,y]) => window.__pg.playerTo(x,y), [X-100, Y+270]);
+    await p.waitForTimeout(400);
+    return { pl, lv };
+  }
+  let w = await wiredPiston('off');
+  await p.waitForTimeout(700);
+  const offSpan = (await linksNow())[0].span;
+  ok('"signal runs it": off, it sits still', Math.abs(offSpan - 200) < 12, offSpan);
+  await p.keyboard.press('KeyF'); await p.waitForTimeout(900);
+  const onSpans = []; for (let i = 0; i < 6; i++){ await p.waitForTimeout(120); onSpans.push((await linksNow())[0].span); }
+  ok('on, it cycles', Math.max(...onSpans) - Math.min(...onSpans) > 40, onSpans.map(v=>v.toFixed(0)));
+  w = await wiredPiston('out');
+  await p.waitForTimeout(700);
+  const outIdle = (await linksNow())[0].span;
+  await p.keyboard.press('KeyF'); await p.waitForTimeout(900);
+  const outOn = (await linksNow())[0].span;
+  await p.keyboard.press('KeyF'); await p.waitForTimeout(900);
+  const outOff = (await linksNow())[0].span;
+  console.log('   push out: idle', outIdle.toFixed(0), 'on', outOn.toFixed(0), 'off again', outOff.toFixed(0));
+  ok('"signal pushes out": it waits at its shortest', outIdle < 140, outIdle);
+  ok('goes to its longest while on', outOn > 280, outOn);
+  ok('and comes back when the signal drops', outOff < 140, outOff);
+  w = await wiredPiston('in');
+  await p.waitForTimeout(700);
+  const inIdle = (await linksNow())[0].span;
+  await p.keyboard.press('KeyF'); await p.waitForTimeout(900);
+  const inOn = (await linksNow())[0].span;
+  ok('"signal pulls in": it waits long and pulls short while on', inIdle > 280 && inOn < 140, { inIdle, inOn });
+
+  console.log('');
+  console.log('== a rope hangs and holds ==');
+  await fresh();
+  await rect('wood', 1, X, Y-40, X+80, Y+40);           // a locked post
+  await lockAll();
+  await rect('metal', 1, X+200, Y+140, X+260, Y+200);   // a weight, below and to the right
+  const rp = await place('rope', X+40, Y, X+230, Y+170);
+  ok('two clicks make a rope', rp && rp.kind === 'rope' && rp.segs >= 3, rp);
+  await p.evaluate(id => window.__pg.linkSet(id, { length: 320 }), rp.id);
+  ok('its length can be set, and it is rebuilt to match', (await linksNow())[0].length === 320 && (await linksNow())[0].segs >= 10, (await linksNow())[0]);
+  await run(); await p.waitForTimeout(2500);
+  const wt = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0];
+  const rl = (await linksNow())[0];
+  ok('the weight swings under the post rather than falling to the floor', wt && wt.pos.y < 2200 && wt.pos.y > Y, { y: wt && wt.pos.y });
+  ok('and the rope is about as long as it was told to be', Math.abs(rl.span - 320) < 60, rl.span);
+  const pts = await p.evaluate(id => window.__pg.ropePoints(id), rp.id);
+  ok('it is drawn through its own segments', pts && pts.length >= 12, pts && pts.length);
+
+  console.log('');
+  console.log('== it rides, saves, and undoes ==');
+  await twoBlocks();
+  const pr = await place('piston', X+40, Y+40, X+240, Y+40);
+  await p.evaluate(id => window.__pg.linkSet(id, { min: 150, max: 260, time: 2.5, pause: 0.7, stiff: true, flipper: 'out', going: -1 }), pr.id);
+  const data = await p.evaluate(() => window.__pg.serialize('l'));
+  ok('the save carries the piston and its settings', data.links.length === 1 && data.links[0].min === 150 && data.links[0].max === 260 && data.links[0].stiff === true && data.links[0].flipper === 'out', data.links[0]);
+  await p.evaluate(d => window.__pg.load(d), data);
+  await p.waitForTimeout(300);
+  const back = (await linksNow())[0];
+  ok('and it comes back', back && back.kind === 'piston' && back.min === 150 && back.flipper === 'out' && back.stiff === true, back);
+  await p.evaluate(id => window.__pg.selectLink(id), back.id);
+  await p.waitForTimeout(200);
+  ok('the box opens for it', await p.evaluate(() => window.__pg.ctxOpen()) && /Piston/.test(await p.evaluate(() => document.querySelector('#opHead .t').textContent)));
+  ok('with reach and timing', await p.evaluate(() => /shortest/i.test(document.getElementById('opBody').innerText) && /stroke/i.test(document.getElementById('opBody').innerText)));
+  await p.keyboard.press('Delete');
+  await p.waitForTimeout(250);
+  ok('Del removes it', (await linksNow()).length === 0);
+  await p.evaluate(() => window.__pg.undo());
+  await p.waitForTimeout(400);
+  ok('undo brings it back', (await linksNow()).length === 1 && (await linksNow())[0].flipper === 'out');
+  // Removing a host takes the link with it.
+  await p.evaluate(() => { window.__pg.setTool('move'); const o = window.__pg.objects().filter(q => !q.body.isStatic)[0]; window.__pg.select(o); });
+  await p.evaluate(() => window.__pg.deleteSel());
+  await p.waitForTimeout(300);
+  ok('deleting one of its objects removes the link too', (await linksNow()).length === 0);
+
+  console.log('');
+  console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
+  console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
+  await b.close();
+  process.exit(fail || errs.length ? 1 : 0);
+})();

@@ -2370,6 +2370,7 @@
       if (b.objB === obj) b.constraint.bodyB = newBody;
     });
     reanchorGadgets(obj);
+    relinkAfterRebuild(obj, oldBody, newBody);
     if (typeof ropeConstraint !== "undefined" && ropeConstraint){
       if (oldBody && ropeConstraint.bodyA === oldBody) ropeConstraint.bodyA = newBody;
       if (oldBody && ropeConstraint.bodyB === oldBody) ropeConstraint.bodyB = newBody;
@@ -2485,6 +2486,7 @@
     dropBitmap(obj);
     bolts.slice().forEach(function(b){ if (b.objA===obj || b.objB===obj) removeBolt(b); });
     gadgets.slice().forEach(function(g){ if (g.obj === obj) removeGadget(g); });
+    links.slice().forEach(function(l){ if (l.objA === obj || l.objB === obj) removeLink(l); });
     if (obj.body) World.remove(world, obj.body);
     objects.splice(idx,1);
     var si = selection.indexOf(obj);
@@ -2640,7 +2642,7 @@
       g.local = toBodyLocal(g.obj.body, g.pos);
     });
   }
-  function receiverById(id){ return boltById(id) || gadgetById(id); }
+  function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
   function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston"); }
   function addWire(from, to){
     if (!from || !to || from === to) return false;
@@ -2707,6 +2709,7 @@
     // Inputs: null when nothing is wired to you, else the strongest signal in.
     for (i = 0; i < bolts.length; i++) bolts[i].input = null;
     for (i = 0; i < gadgets.length; i++) gadgets[i].input = null;
+    for (i = 0; i < links.length; i++) links[i].input = null;
     for (i = 0; i < wires.length; i++){
       var src = gadgetById(wires[i].from), tgt = receiverById(wires[i].to);
       if (!src || !tgt) continue;
@@ -2716,6 +2719,286 @@
   function resetGadgetsForPlay(){
     gadgets.forEach(function(g){ if (g.kind === "button") g.on = false; g.held = false; });
   }
+
+  /* ---- Links: pistons and rope ----------------------------------
+
+     A link joins two objects at two points, one on each. Unlike a bolt the
+     two can be in any layers, because a link is a length between two
+     spots rather than a pin through one.
+
+       piston   a rigid rod that extends and retracts between MIN and MAX,
+                taking TIME seconds per stroke and PAUSING at each end.
+                STIFF holds the angle at both ends: a single distance
+                constraint cannot hold an angle at all — the rod just swung
+                to vertical under any load — so stiff is a rigid linkage of
+                three constraints, two parallel to the rod and one diagonal,
+                all sharing the animated length. Wired, FLIPPER decides what
+                the signal does: off = the cycling runs while the signal is
+                on; in / out = the rod goes to that end while the signal is
+                on and back when it drops.
+       rope     LENGTH long between the two points. The load is carried by
+                one strong tether, made one-sided by hand every step — its
+                length is the rope's when the ends are further apart than
+                that and the current distance otherwise, so it pulls but
+                never pushes and goes slack. The floppy chain of small
+                non-colliding bodies is what you see; it hangs, swings and
+                sags, and carries nothing. A chain that bore the load
+                stretched to half again its length under a metal block,
+                which is the physics engine losing to a mass ratio of
+                hundreds to one.
+
+     Placed with two clicks: the first on one object, the second on the
+     other. Esc between them cancels. */
+  var LINK_KINDS = ["piston","rope"];
+  var LINK_LABEL = { piston:"Piston", rope:"Rope" };
+  var LINK_TOOL_KIND = { piston:"piston", rope:"rope" };
+  var links = [], linkCounter = 1;
+  var selectedLink = null;
+  var linkDraft = null;           // { kind, obj, pt, layer } after the first click
+  var ROPE_SEG = 22;
+  function isLinkTool(){ return !!LINK_TOOL_KIND[currentTool]; }
+  function linkById(id){ for (var i = 0; i < links.length; i++) if (links[i].id === id) return links[i]; return null; }
+  /* The object under the point on the layer being built on, or failing
+     that on any layer — a link may reach across layers. */
+  function objectUnderAny(x, y, slack){
+    var o = objectUnderOn(x, y, buildLayer, slack);
+    for (var l = 0; l < 3 && !o; l++) if (l !== buildLayer) o = objectUnderOn(x, y, l, slack);
+    return o;
+  }
+  function linkAnchor(l, which){
+    var c = l.constraint, body = which === "A" ? c.bodyA : c.bodyB, pt = which === "A" ? c.pointA : c.pointB;
+    return { x: body.position.x + pt.x, y: body.position.y + pt.y };
+  }
+  function linkEnds(l){
+    return { a: linkAnchor(l, "A"), b: linkAnchor(l, "B") };
+  }
+  function linkAnchorOfEnd(l, which){
+    var c = which === "A" ? l.endA : l.endB;
+    var body = which === "A" ? c.bodyA : c.bodyB, pt = which === "A" ? c.pointA : c.pointB;
+    return { x: body.position.x + pt.x, y: body.position.y + pt.y };
+  }
+  function addLink(kind, objA, ptA, objB, ptB, extra){
+    if (LINK_KINDS.indexOf(kind) < 0 || !objA || !objB || objA === objB) return null;
+    extra = extra || {};
+    var d = Math.max(8, dist(ptA, ptB));
+    var l = { id:"k"+(linkCounter++), kind:kind, objA:objA, objB:objB,
+              layer: extra.layer != null ? +extra.layer : Math.max(objA.layer, objB.layer),
+              visible: extra.visible != null ? !!extra.visible : true, input:null,
+              min: extra.min != null ? +extra.min : Math.max(10, Math.round(d * 0.5)),
+              max: extra.max != null ? +extra.max : Math.round(d * 1.5),
+              time: extra.time != null ? +extra.time : 1.5,
+              pause: extra.pause != null ? +extra.pause : 0.3,
+              stiff: !!extra.stiff, flipper: extra.flipper || "off",
+              going: extra.going === -1 ? -1 : 1, wait: 0,
+              len: extra.len != null ? +extra.len : d,
+              length: extra.length != null ? +extra.length : Math.round(d * 1.15),
+              segs: null, joints: null, endA: null, endB: null, constraint: null };
+    if (kind === "piston"){
+      l.len = Math.max(l.min, Math.min(l.max, l.len));
+      l.constraint = Constraint.create({
+        bodyA: objA.body, pointA: { x: ptA.x - objA.body.position.x, y: ptA.y - objA.body.position.y },
+        bodyB: objB.body, pointB: { x: ptB.x - objB.body.position.x, y: ptB.y - objB.body.position.y },
+        length: l.len, stiffness: 0.9, damping: 0.2
+      });
+      World.add(world, l.constraint);
+      if (l.stiff){ l.stiff = false; setPistonStiff(l, true); }
+    } else {
+      l.constraint = Constraint.create({
+        bodyA: objA.body, pointA: { x: ptA.x - objA.body.position.x, y: ptA.y - objA.body.position.y },
+        bodyB: objB.body, pointB: { x: ptB.x - objB.body.position.x, y: ptB.y - objB.body.position.y },
+        length: d, stiffness: d >= l.length ? 1 : 0, damping: 0
+      });
+      World.add(world, l.constraint);
+      buildRope(l, ptA, ptB);
+    }
+    links.push(l);
+    return l;
+  }
+  /* Stiff: two more constraints. A2/B2 sit `off` px to one side of the
+     rod, in each body's frame, and c2 keeps them the rod's length apart —
+     with c1 that is a parallelogram, which keeps the far body's orientation.
+     c3 is a diagonal, A1 to B2, which stops the parallelogram shearing.
+     Two triangles: rigid, in every way but the length. */
+  var STIFF_OFF = 22;
+  function setPistonStiff(l, on){
+    if (l.kind !== "piston" || !l.constraint) return;
+    if (!!l.stiff === !!on) return;
+    l.stiff = !!on;
+    if (!on){
+      if (l.c2) World.remove(world, l.c2);
+      if (l.c3) World.remove(world, l.c3);
+      l.c2 = null; l.c3 = null; l.off = 0;
+      return;
+    }
+    var c = l.constraint, A = c.bodyA, B = c.bodyB;
+    var a1 = { x: A.position.x + c.pointA.x, y: A.position.y + c.pointA.y };
+    var b1 = { x: B.position.x + c.pointB.x, y: B.position.y + c.pointB.y };
+    var L = Math.max(1, dist(a1, b1)), ux = (b1.x - a1.x)/L, uy = (b1.y - a1.y)/L;
+    var px = -uy * STIFF_OFF, py = ux * STIFF_OFF;
+    l.off = STIFF_OFF;
+    l.c2 = Constraint.create({ bodyA: A, pointA: { x: c.pointA.x + px, y: c.pointA.y + py },
+                               bodyB: B, pointB: { x: c.pointB.x + px, y: c.pointB.y + py },
+                               length: l.len, stiffness: 0.9, damping: 0.2 });
+    l.c3 = Constraint.create({ bodyA: A, pointA: { x: c.pointA.x, y: c.pointA.y },
+                               bodyB: B, pointB: { x: c.pointB.x + px, y: c.pointB.y + py },
+                               length: Math.hypot(l.len, STIFF_OFF), stiffness: 0.9, damping: 0.2 });
+    World.add(world, [l.c2, l.c3]);
+  }
+  /* The rope is N small sensor bodies in a line from A to B, each tied to
+     the next, the first tied to object A and the last to object B. Sensor
+     so it passes through everything, as LBP's string does, but it still has
+     mass and falls, which is what makes it hang. */
+  function buildRope(l, ptA, ptB){
+    var n = Math.max(3, Math.min(40, Math.round(l.length / ROPE_SEG)));
+    var segLen = l.length / n;
+    var segs = [], joints = [], i;
+    for (i = 0; i < n; i++){
+      var t = (i + 0.5) / n;
+      var sb = Bodies.circle(ptA.x + (ptB.x - ptA.x) * t, ptA.y + (ptB.y - ptA.y) * t, 3,
+        { isSensor:true, frictionAir:0.04, density:0.0006, collisionFilter:{ group:-7 }, plugin:{ isRope:true } });
+      segs.push(sb);
+    }
+    World.add(world, segs);
+    for (i = 1; i < n; i++){
+      joints.push(Constraint.create({ bodyA: segs[i-1], bodyB: segs[i], length: segLen, stiffness: 0.9, damping: 0.1 }));
+    }
+    l.endA = Constraint.create({ bodyA: l.objA.body, pointA: { x: ptA.x - l.objA.body.position.x, y: ptA.y - l.objA.body.position.y },
+                                 bodyB: segs[0], length: segLen/2, stiffness: 0.9, damping: 0.1 });
+    l.endB = Constraint.create({ bodyA: segs[n-1], bodyB: l.objB.body, pointB: { x: ptB.x - l.objB.body.position.x, y: ptB.y - l.objB.body.position.y },
+                                 length: segLen/2, stiffness: 0.9, damping: 0.1 });
+    World.add(world, joints); World.add(world, [l.endA, l.endB]);
+    l.segs = segs; l.joints = joints;
+  }
+  function tearDownRope(l){
+    if (l.joints) World.remove(world, l.joints);
+    if (l.endA) World.remove(world, l.endA);
+    if (l.endB) World.remove(world, l.endB);
+    if (l.segs) World.remove(world, l.segs);
+    l.segs = null; l.joints = null; l.endA = null; l.endB = null;
+  }
+  function setRopeLength(l, len){
+    var ends = linkEnds(l);
+    l.length = Math.max(20, +len || 20);
+    tearDownRope(l);
+    buildRope(l, ends.a, ends.b);
+  }
+  function removeLink(l){
+    var i = links.indexOf(l);
+    if (i < 0) return;
+    if (l.constraint) World.remove(world, l.constraint);
+    if (l.c2) World.remove(world, l.c2);
+    if (l.c3) World.remove(world, l.c3);
+    tearDownRope(l);
+    links.splice(i, 1);
+    wires = wires.filter(function(w){ return w.to !== l.id; });
+    if (selectedLink === l) selectedLink = null;
+  }
+  function segDist(px, py, ax, ay, bx, by){
+    var dx = bx - ax, dy = by - ay, L2 = dx*dx + dy*dy;
+    var t = L2 ? Math.max(0, Math.min(1, ((px-ax)*dx + (py-ay)*dy) / L2)) : 0;
+    return Math.hypot(px - (ax + dx*t), py - (ay + dy*t));
+  }
+  function linkAt(x, y, maxD){
+    maxD = maxD || 10;
+    var best = null, bestD = maxD;
+    links.forEach(function(l){
+      var d;
+      if (l.kind === "rope" && l.segs){
+        d = Infinity;
+        var pts = ropePoints(l);
+        for (var i = 1; i < pts.length; i++) d = Math.min(d, segDist(x, y, pts[i-1].x, pts[i-1].y, pts[i].x, pts[i].y));
+      } else {
+        var e = linkEnds(l);
+        d = segDist(x, y, e.a.x, e.a.y, e.b.x, e.b.y);
+      }
+      if (d < bestD){ bestD = d; best = l; }
+    });
+    return best;
+  }
+  function ropePoints(l){
+    var e = linkEnds(l), pts = [e.a];
+    l.segs.forEach(function(sb){ pts.push({ x: sb.position.x, y: sb.position.y }); });
+    pts.push(e.b);
+    return pts;
+  }
+  /* A host was rebuilt with a new body: point the link's ends at it and
+     re-derive the anchor from where it was in the world. */
+  function relinkAfterRebuild(obj, oldBody, newBody){
+    links.forEach(function(l){
+      if (l.objA !== obj && l.objB !== obj) return;
+      var cs = l.kind === "piston" ? [l.constraint, l.c2, l.c3] : [l.constraint, l.endA, l.endB];
+      cs.forEach(function(c){
+        if (!c) return;
+        if (c.bodyA === oldBody){ var wa = { x: oldBody.position.x + c.pointA.x, y: oldBody.position.y + c.pointA.y };
+          c.bodyA = newBody; c.pointA = { x: wa.x - newBody.position.x, y: wa.y - newBody.position.y }; c.angleA = newBody.angle; }
+        if (c.bodyB === oldBody){ var wb = { x: oldBody.position.x + c.pointB.x, y: oldBody.position.y + c.pointB.y };
+          c.bodyB = newBody; c.pointB = { x: wb.x - newBody.position.x, y: wb.y - newBody.position.y }; c.angleB = newBody.angle; }
+      });
+    });
+  }
+  function carryLinks(list, mapPt){
+    links.forEach(function(l){
+      var cs = l.kind === "piston" ? [l.constraint, l.c2, l.c3] : [l.constraint, l.endA, l.endB];
+      cs.forEach(function(c){
+        if (!c) return;
+        [["A", l.objA], ["B", l.objB]].forEach(function(pair){
+          var obj = pair[1]; if (list.indexOf(obj) < 0) return;
+          var body = pair[0] === "A" ? c.bodyA : c.bodyB;
+          if (body !== obj.body) return;
+          var pt = pair[0] === "A" ? c.pointA : c.pointB;
+          var w = mapPt({ x: body.position.x + pt.x, y: body.position.y + pt.y });
+          var np = { x: w.x - body.position.x, y: w.y - body.position.y };
+          if (pair[0] === "A"){ c.pointA = np; c.angleA = body.angle; } else { c.pointB = np; c.angleB = body.angle; }
+        });
+      });
+    });
+  }
+  onStep("beforeUpdate", function(){
+    if (!runner.enabled) return;
+    var dt = 1/60;
+    for (var i = 0; i < links.length; i++){
+      var l = links[i];
+      if (l.kind !== "piston" || !l.constraint) continue;
+      var span = Math.max(1, l.max - l.min), rate = span / Math.max(0.1, l.time) * dt;
+      var run = l.input == null ? true : l.input > 0;
+      if (l.flipper === "in" || l.flipper === "out"){
+        // the signal picks an end; the rod goes there and comes back
+        var on = l.input != null && l.input > 0;
+        var want = (l.flipper === "in") === on ? l.min : l.max;
+        if (l.len < want) l.len = Math.min(want, l.len + rate); else if (l.len > want) l.len = Math.max(want, l.len - rate);
+      } else if (run){
+        if (l.wait > 0){ l.wait -= dt; }
+        else {
+          l.len += l.going * rate;
+          if (l.len >= l.max){ l.len = l.max; l.going = -1; l.wait = l.pause; }
+          else if (l.len <= l.min){ l.len = l.min; l.going = 1; l.wait = l.pause; }
+        }
+      }
+      l.constraint.length = l.len;
+      if (l.c2){ l.c2.length = l.len; l.c3.length = Math.hypot(l.len, l.off || STIFF_OFF); }
+    }
+  });
+  /* The rope's tether, made one-sided. A distance constraint is a rod: it
+     pulls the ends together AND pushes them apart to keep its length, so
+     setting its length to the current distance while slack made a rigid
+     rod at whatever distance the rope happened to be — it could never pay
+     out to its full length. Instead the tether is switched OFF (stiffness
+     and damping zero) while the ends are closer than the rope is long, and
+     on, at the rope's length, once they are not. The step where it first
+     goes taut overshoots by a few pixels and snaps back: that is the jerk
+     of a rope catching, and it is right. */
+  onStep("beforeUpdate", function(){
+    for (var i = 0; i < links.length; i++){
+      var l = links[i];
+      if (l.kind !== "rope" || !l.constraint) continue;
+      var e = linkEnds(l), d = dist(e.a, e.b);
+      if (d >= l.length - 0.5){
+        l.constraint.length = l.length; l.constraint.stiffness = 1; l.constraint.damping = 0.05;
+      } else {
+        l.constraint.length = d; l.constraint.stiffness = 0; l.constraint.damping = 0;
+      }
+    }
+  });
 
   /* ---- Bolts -------------------------------------------------------
 
@@ -2971,6 +3254,8 @@
     objects = [];
     bolts.slice().forEach(removeBolt);
     bolts = [];
+    links.slice().forEach(removeLink);
+    links = []; selectedLink = null; linkDraft = null;
     gadgets = []; wires = []; selectedGadget = null; wiring = null;
   }
 
@@ -3752,7 +4037,9 @@
   onStep("collisionActive", function(ev){
     if (!player) return;
     ev.pairs.forEach(function(p){
-      if (p.bodyA === player || p.bodyB === player) groundedNext = true;
+      // Sensors overlap without holding anything up — a rope, a Back-layer
+      // decoration, a walk-through light. Only a solid counts as ground.
+      if ((p.bodyA === player || p.bodyB === player) && !p.bodyA.isSensor && !p.bodyB.isSensor) groundedNext = true;
     });
   });
   onStep("collisionStart", function(ev){
@@ -3879,7 +4166,9 @@
     if (!charEditorOverlay.hidden || !pauseOverlay.hidden){
       if (isAction("pauseMenu", e.code) && !e.repeat){
       e.preventDefault();
-      if (wiring){ wiring = null; showToast("Wiring cancelled."); } else onEscape();
+      if (wiring){ wiring = null; showToast("Wiring cancelled."); }
+      else if (linkDraft){ linkDraft = null; showToast("Cancelled."); }
+      else onEscape();
     }
       return;
     }
@@ -3895,6 +4184,9 @@
       if (e.code === "Equal" || e.code === "NumpadAdd"){ e.preventDefault(); zoomAround(camCenterWorld(), 1.25); updateViewHud(); return; }
       if (e.code === "Minus" || e.code === "NumpadSubtract"){ e.preventDefault(); zoomAround(camCenterWorld(), 0.8); updateViewHud(); return; }
       return;
+    }
+    if ((e.code === "Delete" || e.code === "Backspace") && selectedLink && mode === "build" && !e.repeat){
+      e.preventDefault(); deleteSelectedLink(); return;
     }
     if ((e.code === "Delete" || e.code === "Backspace") && selectedGadget && mode === "build" && !e.repeat){
       e.preventDefault(); deleteSelectedGadget(); return;
@@ -3934,7 +4226,13 @@
       if (!e.repeat) handleJumpOrFlyToggle();
     }
     if (isAction("interact", e.code) && !e.repeat && runner.enabled){ if (useLever()) e.preventDefault(); }
-    if (isAction("pauseMenu", e.code) && !e.repeat){ e.preventDefault(); onEscape(); }
+    if (isAction("pauseMenu", e.code) && !e.repeat){
+      e.preventDefault();
+      // Esc backs out of whatever is half done before it means "menu".
+      if (wiring){ wiring = null; showToast("Wiring cancelled."); }
+      else if (linkDraft){ linkDraft = null; showToast("Cancelled."); }
+      else onEscape();
+    }
     if (isAction("layerDown", e.code) && !e.repeat) setBuildLayer(buildLayer - 1);
     if (isAction("layerUp", e.code) && !e.repeat) setBuildLayer(buildLayer + 1);
     if (isAction("menu", e.code) && !e.repeat){ e.preventDefault(); togglePersonalMenu(); }
@@ -4243,13 +4541,20 @@
       return { kind:g.kind, o:objIndex[g.obj.id], x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale };
     });
+    var linkSnaps = links.map(function(l){
+      var e = linkEnds(l);
+      return { kind:l.kind, a:objIndex[l.objA.id], b:objIndex[l.objB.id], ax:e.a.x, ay:e.a.y, bx:e.b.x, by:e.b.y, layer:l.layer,
+               min:l.min, max:l.max, time:l.time, pause:l.pause, stiff:l.stiff, flipper:l.flipper, going:l.going,
+               len:l.len, length:l.length, visible:l.visible };
+    });
+    var lIdx = {}; links.forEach(function(l, i){ lIdx[l.id] = i; });
     var gIdx = {}; gadgets.forEach(function(g, i){ gIdx[g.id] = i; });
     var bIdx = {}; bolts.forEach(function(b, i){ bIdx[b.id] = i; });
     var wireSnaps = wires.map(function(w){
-      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to] };
-    }).filter(function(w){ return w.from != null && (w.toBolt != null || w.toGadget != null); });
+      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to], toLink: lIdx[w.to] };
+    }).filter(function(w){ return w.from != null && (w.toBolt != null || w.toGadget != null || w.toLink != null); });
     return {
-      objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps,
+      objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps, links: linkSnaps,
       checkpoints: checkpoints.map(function(c){ return { x:c.x, y:c.y }; }),
       goal: goalPoint ? { x:goalPoint.x, y:goalPoint.y } : null,
       bubbles: bubbles.map(function(b){ return { x:b.x, y:b.y }; }),
@@ -4281,8 +4586,12 @@
       var host = newObjs[gs.o];
       if (host) addGadget(gs.kind, host, { x:+gs.x||0, y:+gs.y||0 }, gs);
     });
+    (Array.isArray(snap.links) ? snap.links : []).forEach(function(ls){
+      var oa = newObjs[ls.a], ob = newObjs[ls.b];
+      if (oa && ob) addLink(ls.kind, oa, { x:+ls.ax||0, y:+ls.ay||0 }, ob, { x:+ls.bx||0, y:+ls.by||0 }, ls);
+    });
     (Array.isArray(snap.wires) ? snap.wires : []).forEach(function(ws){
-      var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : gadgets[ws.toGadget];
+      var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : (ws.toLink != null ? links[ws.toLink] : gadgets[ws.toGadget]);
       if (src && tgt) addWire(src, tgt);
     });
     checkpoints = snap.checkpoints.map(function(c){ return { x:c.x, y:c.y, reached:false }; });
@@ -5186,6 +5495,66 @@
     ctx.strokeText("use", total/2 - tw/2, 0); ctx.fillText("use", total/2 - tw/2, 0);
     ctx.restore();
   }
+  function drawLinkGlyph(l, alpha){
+    var e = linkEnds(l);
+    ctx.globalAlpha = alpha == null ? 1 : alpha;
+    if (l.kind === "rope"){
+      var pts = ropePoints(l);
+      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+      for (var i = 1; i < pts.length - 1; i++){
+        var mx = (pts[i].x + pts[i+1].x)/2, my = (pts[i].y + pts[i+1].y)/2;
+        ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+      }
+      ctx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.lineWidth = 6; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.lineWidth = 3.4; ctx.strokeStyle = "#C4A46A"; ctx.stroke();
+      [pts[0], pts[pts.length-1]].forEach(function(q){
+        ctx.beginPath(); ctx.arc(q.x, q.y, 4.5, 0, Math.PI*2);
+        ctx.fillStyle = "#98A3B3"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      });
+    } else {
+      var ang = Math.atan2(e.b.y - e.a.y, e.b.x - e.a.x), L = dist(e.a, e.b);
+      ctx.save();
+      ctx.translate(e.a.x, e.a.y); ctx.rotate(ang);
+      // inner rod, then the sleeve over the near part of it
+      ctx.beginPath(); ctx.rect(0, -4, L, 8);
+      ctx.fillStyle = "#C9CED6"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      var sleeve = Math.max(12, Math.min(L - 8, l.min * 0.85));
+      ctx.beginPath(); ctx.rect(0, -8, sleeve, 16);
+      ctx.fillStyle = "#98A3B3"; ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sleeve - 6, -8); ctx.lineTo(sleeve - 6, 8); ctx.stroke();
+      ctx.restore();
+      [e.a, e.b].forEach(function(q){
+        ctx.beginPath(); ctx.arc(q.x, q.y, 6, 0, Math.PI*2);
+        ctx.fillStyle = "#F2B705"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+        ctx.beginPath(); ctx.arc(q.x, q.y, 2.2, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
+      });
+    }
+    ctx.globalAlpha = 1;
+  }
+  function drawLinks(layer){
+    links.forEach(function(l){
+      if (l.layer !== layer) return;
+      if (mode === "play" && l.visible === false) return;
+      ctx.save();
+      if (l === selectedLink && mode === "build"){
+        var e = linkEnds(l);
+        ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
+        ctx.lineWidth = 14/camScale; ctx.strokeStyle = "rgba(242,183,5,0.35)"; ctx.lineCap = "round"; ctx.stroke();
+      }
+      drawLinkGlyph(l, 1);
+      ctx.restore();
+    });
+    // the half-made one follows the cursor
+    if (linkDraft && mode === "build"){
+      ctx.save();
+      ctx.beginPath(); ctx.moveTo(linkDraft.pt.x, linkDraft.pt.y); ctx.lineTo(mouseWorld.x, mouseWorld.y);
+      ctx.lineWidth = 3/camScale; ctx.strokeStyle = "#F2B705"; ctx.setLineDash([8/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(linkDraft.pt.x, linkDraft.pt.y, 6, 0, Math.PI*2); ctx.fillStyle = "#F2B705"; ctx.fill();
+      ctx.restore();
+    }
+  }
   function drawWires(){
     if (mode !== "build") return;
     ctx.save();
@@ -5193,7 +5562,9 @@
     wires.forEach(function(w){
       var src = gadgetById(w.from), tgt = receiverById(w.to);
       if (!src || !tgt) return;
-      var a = gadgetWorld(src), b = tgt.constraint ? boltWorldPoint(tgt) : (tgt.pos || gadgetWorld(tgt));
+      var a = gadgetWorld(src), b;
+      if (LINK_LABEL[tgt.kind]){ var le = linkEnds(tgt); b = { x:(le.a.x+le.b.x)/2, y:(le.a.y+le.b.y)/2 }; }
+      else b = tgt.constraint ? boltWorldPoint(tgt) : (tgt.pos || gadgetWorld(tgt));
       ctx.beginPath(); ctx.moveTo(a.x, a.y);
       var mx = (a.x + b.x)/2, my = (a.y + b.y)/2 - 30;
       ctx.quadraticCurveTo(mx, my, b.x, b.y);
@@ -5413,6 +5784,17 @@
         ctx.fillStyle = matOf(currentTool).color;
         ctx.globalAlpha = 0.9;
         ctx.beginPath(); ctx.arc(mouseWorld.x, mouseWorld.y, 3/camScale, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+        showCustom = true;
+      } else if (isLinkTool()){
+        var lhost = objectUnderAny(mouseWorld.x, mouseWorld.y, 6);
+        var okEnd = lhost && (!linkDraft || lhost !== linkDraft.obj);
+        ctx.save();
+        ctx.translate(mouseWorld.x, mouseWorld.y);
+        ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI*2);
+        ctx.lineWidth = 2.4/camScale; ctx.strokeStyle = okEnd ? "#5F9E5A" : "#D64545";
+        ctx.globalAlpha = 0.85; ctx.stroke();
+        ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI*2); ctx.fillStyle = okEnd ? "#5F9E5A" : "#D64545"; ctx.globalAlpha = 0.5; ctx.fill();
         ctx.restore();
         showCustom = true;
       } else if (isGadgetTool()){
@@ -5804,9 +6186,9 @@
     // and its markers, THEN Front decoration on top — so anything you
     // paint on the front layer correctly covers the player, LBP-style.
     drawLayer(0);
-    drawBolts(0); drawGadgets(0);
+    drawBolts(0); drawLinks(0); drawGadgets(0);
     drawLayer(1);
-    drawBolts(1); drawGadgets(1);
+    drawBolts(1); drawLinks(1); drawGadgets(1);
     drawBubbles();
     checkpoints.forEach(function(cp, i){ drawFlag(cp, i===0 ? "#5F9E5A" : "#2F86A6", i===0 ? "start" : "checkpoint"); });
     drawFlag(goalPoint, "#F2B705", "goal");
@@ -5814,7 +6196,7 @@
     drawParticles();
     drawMaterialWater();
     drawLayer(2);
-    drawBolts(2); drawGadgets(2);
+    drawBolts(2); drawLinks(2); drawGadgets(2);
     drawWires();
     drawUsePrompt();
     drawWorldWaterOverlay();
@@ -6353,6 +6735,7 @@
     var h = document.createElement("h3"); h.textContent = "Tools"; el.appendChild(h);
     var grid = document.createElement("div"); grid.className = "catalogGrid";
     var defs = [["move","🕹","Move"],["bolt","🔩","Bolt"],["sprungbolt","🌀","Sprung bolt"],["motorbolt","⚙","Motor bolt"],["wobblebolt","↔","Wobble bolt"],
+                ["piston","🔩","Piston"],["rope","➰","Rope"],
                 ["sensor","👁","Player sensor"],["button","🔴","Button"],["lever","🎚","Lever"],
                 ["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]];
     defs.forEach(function(d){
@@ -7063,6 +7446,24 @@
     if (!partner) return null;
     return { front: front, partner: partner, layer: Math.max(buildLayer, pl) };
   }
+  /* Two clicks. The first picks an object and remembers the point; the
+     second picks the other and makes the link. */
+  function placeLinkAt(pt){
+    var kind = LINK_TOOL_KIND[currentTool];
+    var o = objectUnderAny(pt.x, pt.y, 6);
+    if (!linkDraft){
+      if (!o){ showToast("Start on something — click one object, then the other."); sfx("deny"); return; }
+      linkDraft = { kind: kind, obj: o, pt: { x:pt.x, y:pt.y } };
+      showToast("Now click the other object. Esc cancels.");
+      sfx("tick");
+      return;
+    }
+    if (!o || o === linkDraft.obj){ showToast(o ? "The other end has to be on a different object." : "Point at the other object."); sfx("deny"); return; }
+    pushUndo("placing a " + LINK_LABEL[linkDraft.kind].toLowerCase());
+    var l = addLink(linkDraft.kind, linkDraft.obj, linkDraft.pt, o, pt);
+    linkDraft = null;
+    if (l){ selectLink(l); showToast("🔗 " + LINK_LABEL[l.kind] + " placed — right-click it to set it up."); sfx("bolt"); }
+  }
   function placeGadgetAt(pt){
     var kind = GADGET_TOOL_KIND[currentTool];
     var host = objectUnderOn(pt.x, pt.y, buildLayer, 6);
@@ -7327,6 +7728,7 @@
     if (currentTool === "goal"){ goalPoint = pt; sfx("place"); return; }
     if (isBoltTool()){ if (!lastPaint){ placeBoltAt(pt); lastPaint = pt; } return; }
     if (isGadgetTool()){ if (!lastPaint){ placeGadgetAt(pt); lastPaint = pt; } return; }
+    if (isLinkTool()){ if (!lastPaint){ placeLinkAt(pt); lastPaint = pt; } return; }
     if (currentTool.indexOf("stamp:") === 0){
       stampObject(currentTool.slice(6), pt);
       currentTool = "move"; canvas.dataset.tool = "move";
@@ -7701,6 +8103,7 @@
     selection = [];
     selectedBolt = null;
     selectedGadget = null;
+    selectedLink = null;
     /* Hide first, bail second. removeObject nulls `selected` before it
        calls this, so an early return above the hide would leave the box
        open with nothing in it — which is exactly what happened. The guard
@@ -7720,6 +8123,21 @@
     selectedGadget = g;
     sfx("tick");
   }
+  function selectLink(l){
+    clearSelection();
+    selectedLink = l;
+    sfx("tick");
+  }
+  function deleteSelectedLink(){
+    var l = selectedLink;
+    if (!l || links.indexOf(l) < 0) return;
+    pushUndo("removing a " + LINK_LABEL[l.kind].toLowerCase());
+    var e = linkEnds(l);
+    removeLink(l);
+    puff((e.a.x+e.b.x)/2, (e.a.y+e.b.y)/2, 8, { color:"#98A3B3", speed:1.6, g:0.06 });
+    clearSelection();
+    sfx("delete");
+  }
   function deleteSelectedGadget(){
     var g = selectedGadget;
     if (!g || gadgets.indexOf(g) < 0) return;
@@ -7736,7 +8154,7 @@
   function finishWire(pt){
     if (!wiring) return false;
     var from = wiring.from;
-    var tgt = boltAt(pt.x, pt.y, 22) || gadgetAt(pt.x, pt.y, 22);
+    var tgt = boltAt(pt.x, pt.y, 22) || gadgetAt(pt.x, pt.y, 22) || linkAt(pt.x, pt.y, 14);
     wiring = null;
     if (!tgt || !canReceive(tgt)){ showToast("That cannot be driven — wire to a motor bolt, wobble bolt or piston."); sfx("deny"); return true; }
     pushUndo("wiring a " + GADGET_LABEL[from.kind].toLowerCase());
@@ -7804,6 +8222,7 @@
   function selectObject(o){
     selectedBolt = null;
     selectedGadget = null;
+    selectedLink = null;
     if (selected === o && selection.length <= 1){ selection = [o]; renderSelBar(); return; }
     selected = o;
     selection = [o];
@@ -7947,7 +8366,7 @@
     var outs = wiresFrom(g);
     outs.forEach(function(w){
       var t = receiverById(w.to);
-      var lbl = t ? (t.kind ? (BOLT_KIND_LABEL[t.kind] || GADGET_LABEL[t.kind] || t.kind) : "?") : "?";
+      var lbl = t ? (t.kind ? (BOLT_KIND_LABEL[t.kind] || GADGET_LABEL[t.kind] || LINK_LABEL[t.kind] || t.kind) : "?") : "?";
       opBtn(ws, "✕ " + lbl, "Remove this wire", function(){
         pushUndo("removing a wire"); wires = wires.filter(function(q){ return q !== w; }); renderSelBar(); sfx("delete");
       }, "wide");
@@ -7963,7 +8382,55 @@
     opBtn(ac, "🗑 Remove", "Take it off (Del)", function(){ deleteSelectedGadget(); }, "red wide");
     objPanelEl.hidden = false;
   }
+  function renderLinkBox(){
+    var l = selectedLink;
+    opBodyEl.innerHTML = "";
+    opTitleEl.textContent = LINK_LABEL[l.kind];
+    var info = document.createElement("div"); info.className = "opInfo";
+    var an = matOf(l.objA.pieces[0] ? l.objA.pieces[0].m : "wood"), bn = matOf(l.objB.pieces[0] ? l.objB.pieces[0].m : "wood");
+    info.innerHTML = "<b>" + escapeHtml((an ? an.label : "?") + " ↔ " + (bn ? bn.label : "?")) + "</b>" +
+      (l.kind === "piston" ? " · " + Math.round(l.len) + "px now" : " · " + Math.round(l.length) + "px");
+    opBodyEl.appendChild(info);
+    function slider(sec, label, val, min, max, step, set, fmt, undoLabel){
+      var pushed = false;
+      var sl = sliderRow(label, val, min, max, step, function(v){ if (!pushed){ pushUndo(undoLabel); pushed = true; } set(v); }, fmt);
+      sl.style.flexBasis = "100%"; sec.appendChild(sl);
+    }
+    var px = function(v){ return Math.round(v) + "px"; }, sec = function(v){ return (+v).toFixed(1) + "s"; };
+    if (l.kind === "piston"){
+      var rg = opSection("Reach");
+      slider(rg, "Shortest", l.min, 10, 800, 5, function(v){ l.min = Math.min(v, l.max - 5); }, px, "changing a piston");
+      slider(rg, "Longest", l.max, 15, 900, 5, function(v){ l.max = Math.max(v, l.min + 5); }, px, "changing a piston");
+      var tm = opSection("Timing");
+      slider(tm, "Seconds per stroke", l.time, 0.2, 8, 0.1, function(v){ l.time = v; }, sec, "changing a piston");
+      slider(tm, "Pause at each end", l.pause, 0, 4, 0.1, function(v){ l.pause = v; }, sec, "changing a piston");
+      var bh = opSection("Behaviour");
+      opBtn(bh, l.stiff ? "▬ Stiff" : "⌇ Loose ends", l.stiff ? "The rod holds its angle at both ends" : "The ends can swivel",
+        function(){ pushUndo("changing a piston"); setPistonStiff(l, !l.stiff); renderSelBar(); sfx("tick"); }, l.stiff ? "on" : "");
+      opBtn(bh, l.going === 1 ? "→ Starts extending" : "← Starts retracting", "",
+        function(){ pushUndo("changing a piston"); l.going = -l.going; renderSelBar(); sfx("tick"); });
+      var fl = opSection("When wired");
+      [["off","Signal runs it"],["out","Signal pushes out"],["in","Signal pulls in"]].forEach(function(pair){
+        opBtn(fl, pair[1], "", function(){ pushUndo("changing a piston"); l.flipper = pair[0]; renderSelBar(); sfx("tick"); }, l.flipper === pair[0] ? "on" : "");
+      });
+    } else {
+      slider(opSection("Rope"), "Length", l.length, 20, 1200, 10, function(v){ setRopeLength(l, v); renderSelBar(); }, px, "changing a rope");
+    }
+    var vis = opSection("In play");
+    opBtn(vis, l.visible === false ? "🙈 Hidden in Play" : "👁 Visible in Play",
+      l.visible === false ? "Not drawn while playing — it still works" : "Drawn while playing",
+      function(){ pushUndo("changing a link"); l.visible = l.visible === false; renderSelBar(); sfx("tick"); }, l.visible === false ? "" : "on");
+    var ac = opSection("Actions");
+    opBtn(ac, "🗑 Remove", "Take it out (Del)", function(){ deleteSelectedLink(); }, "red wide");
+    objPanelEl.hidden = false;
+  }
   function renderSelBar(){
+    if (selectedLink){
+      if (links.indexOf(selectedLink) < 0){ clearSelection(); return; }
+      if (mode !== "build" || !opWanted){ objPanelEl.hidden = true; return; }
+      renderLinkBox();
+      return;
+    }
     if (selectedGadget){
       if (gadgets.indexOf(selectedGadget) < 0){ clearSelection(); return; }
       if (mode !== "build" || !opWanted){ objPanelEl.hidden = true; return; }
@@ -8074,6 +8541,7 @@
   /* The panel is docked, so nothing to position — but this runs every frame
      and is the place that notices the selection has gone. */
   function updateSelBarPos(){
+    if (selectedLink && links.indexOf(selectedLink) < 0){ clearSelection(); return; }
     if (selectedGadget && gadgets.indexOf(selectedGadget) < 0){ clearSelection(); return; }
     if (selectedBolt && bolts.indexOf(selectedBolt) < 0){ clearSelection(); return; }
     if (!selected || objPanelEl.hidden) return;
@@ -8219,6 +8687,7 @@
     var scaleMap = function(pt){ return { x: pivot.x + (pt.x - pivot.x)*k, y: pivot.y + (pt.y - pivot.y)*k }; };
     carryBolts(list, scaleMap);
     carryGadgets(list, scaleMap, k);
+    carryLinks(list, scaleMap);
     renderSelBar();
     sfx("glue");
   }
@@ -8336,6 +8805,7 @@
     var flipMap = function(pt){ return { x: 2*cx - pt.x, y: pt.y }; };
     carryBolts(list, flipMap);
     carryGadgets(list, flipMap, 1);
+    carryLinks(list, flipMap);
     renderSelBar();
     sfx("glue");
   }
@@ -8484,6 +8954,8 @@
       if (gh){ dragging = null; selectGadget(gh); renderSelBar(); return; }
       var bh = boltAt(pt.x, pt.y);
       if (bh){ dragging = null; selectBolt(bh); renderSelBar(); return; }
+      var lh = linkAt(pt.x, pt.y);
+      if (lh){ dragging = null; selectLink(lh); renderSelBar(); return; }
     }
     if (goalPoint && dist(goalPoint, pt) < 34){ dragging = { type:"goal" }; clearSelection(); return; }
     for (var i = checkpoints.length - 1; i >= 0; i--){
@@ -8609,10 +9081,11 @@
      object has to remember the box exists. The camera no longer matters —
      the box is docked, not pinned to a spot on the level. */
   function pruneObjCtxMenu(){
+    if (selectedLink && links.indexOf(selectedLink) < 0){ clearSelection(); return; }
     if (selectedGadget && gadgets.indexOf(selectedGadget) < 0){ clearSelection(); return; }
     if (selectedBolt && bolts.indexOf(selectedBolt) < 0){ clearSelection(); return; }
     if (objPanelEl.hidden) return;
-    if (selectedBolt || selectedGadget) return;
+    if (selectedBolt || selectedGadget || selectedLink) return;
     if (!selected || objects.indexOf(selected) < 0) clearSelection();
   }
 
@@ -8809,6 +9282,8 @@
         if (gadHit){ selectGadget(gadHit); opWanted = true; renderSelBar(); return; }
         var boltHit = boltAt(pt.x, pt.y);
         if (boltHit){ selectBolt(boltHit); opWanted = true; renderSelBar(); return; }
+        var linkHit = linkAt(pt.x, pt.y);
+        if (linkHit){ selectLink(linkHit); opWanted = true; renderSelBar(); return; }
         var hitObj = objectAt(pt.x, pt.y);
         if (hitObj){
           selectedRegion = regionAt(pt.x, pt.y);
@@ -9246,11 +9721,18 @@
       return { kind:g.kind, o:objIndex[g.obj.id], x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale };
     });
+    var linkSnaps = links.map(function(l){
+      var e = linkEnds(l);
+      return { kind:l.kind, a:objIndex[l.objA.id], b:objIndex[l.objB.id], ax:e.a.x, ay:e.a.y, bx:e.b.x, by:e.b.y, layer:l.layer,
+               min:l.min, max:l.max, time:l.time, pause:l.pause, stiff:l.stiff, flipper:l.flipper, going:l.going,
+               len:l.len, length:l.length, visible:l.visible };
+    });
+    var lIdx = {}; links.forEach(function(l, i){ lIdx[l.id] = i; });
     var gIdx = {}; gadgets.forEach(function(g, i){ gIdx[g.id] = i; });
     var bIdx = {}; bolts.forEach(function(b, i){ bIdx[b.id] = i; });
     var wireSnaps = wires.map(function(w){
-      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to] };
-    }).filter(function(w){ return w.from != null && (w.toBolt != null || w.toGadget != null); });
+      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to], toLink: lIdx[w.to] };
+    }).filter(function(w){ return w.from != null && (w.toBolt != null || w.toGadget != null || w.toLink != null); });
     var boltSnaps = bolts.map(function(b){ var wp = boltWorldPoint(b);
       return { a:objIndex[b.objA.id], b:objIndex[b.objB.id], x:wp.x, y:wp.y, tight:b.tight, mode:b.mode,
                layer:b.layer, tightness:b.tightness, speed:b.speed, kind:b.kind, dir:b.dir,
@@ -9260,7 +9742,7 @@
       checkpoints: checkpoints.map(function(c){ return { x:c.x, y:c.y }; }),
       goal: goalPoint,
       bubbles: bubbles.map(function(b){ return { x:b.x, y:b.y }; }),
-      objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps,
+      objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps, links: linkSnaps,
       water: packWaterSparse(),
       world: { gravity: worldSettings.gravity, waterLevel: worldSettings.waterLevel, ropeLength: worldSettings.ropeLength, motorSpeed: worldSettings.motorSpeed, light: worldSettings.light }
     };
@@ -9293,8 +9775,12 @@
         var host = newObjs[gs.o];
         if (host) addGadget(gs.kind, host, { x:+gs.x||0, y:+gs.y||0 }, gs);
       });
-        (Array.isArray(data.wires) ? data.wires : []).forEach(function(ws){
-        var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : gadgets[ws.toGadget];
+        (Array.isArray(data.links) ? data.links : []).forEach(function(ls){
+        var oa = newObjs[ls.a], ob = newObjs[ls.b];
+        if (oa && ob) addLink(ls.kind, oa, { x:+ls.ax||0, y:+ls.ay||0 }, ob, { x:+ls.bx||0, y:+ls.by||0 }, ls);
+      });
+      (Array.isArray(data.wires) ? data.wires : []).forEach(function(ws){
+        var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : (ws.toLink != null ? links[ws.toLink] : gadgets[ws.toGadget]);
         if (src && tgt) addWire(src, tgt);
       });
       if (data.world){
