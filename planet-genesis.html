@@ -1934,6 +1934,53 @@
       });
     }
   }
+  /* ---- Particles with pictures: an emitter gadget's own ---- */
+  var sprites = [];
+  var SPRITES_MAX = 600;
+  function emitFrom(g, k){
+    if (!runner.enabled || !g.skin || !skinStateHasArt(g.skin, "particle")) return;
+    var on = g.input != null ? g.input > 0 : true;
+    if (!on) return;
+    g.acc += g.rate * k / 60;                     // k is in 1/60s frames; rate is a second
+    while (g.acc >= 1 && sprites.length < SPRITES_MAX){
+      g.acc -= 1;
+      var a = (g.angle - 90 + (Math.random() - 0.5) * g.spread) * Math.PI / 180;
+      var sp = g.pspeed * (0.8 + Math.random() * 0.4) / 60;   // px a frame
+      sprites.push({ x: g.pos.x, y: g.pos.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, gr: g.grav * 0.12,
+                     age: 0, life: g.life * (0.85 + Math.random() * 0.3) * 60, size: g.psize * (0.85 + Math.random() * 0.3),
+                     rot: Math.random() * Math.PI * 2, vrot: (Math.random() - 0.5) * 2 * g.spin * Math.PI / 180 / 60,
+                     g: g, layer: g.layer, t0: performance.now() });
+    }
+    if (g.acc > 4) g.acc = 0;
+  }
+  function stepSprites(k){
+    for (var i = gadgets.length - 1; i >= 0; i--) if (gadgets[i].kind === "emitter") emitFrom(gadgets[i], k);
+    for (var j = sprites.length - 1; j >= 0; j--){
+      var q = sprites[j];
+      q.x += q.vx * k; q.y += q.vy * k; q.vy += q.gr * k; q.rot += q.vrot * k;
+      q.age += k;
+      if (q.age >= q.life || gadgets.indexOf(q.g) < 0) sprites.splice(j, 1);
+    }
+  }
+  function drawSprites(layer){
+    if (!sprites.length) return;
+    ctx.save();
+    for (var i = 0; i < sprites.length; i++){
+      var q = sprites[i];
+      if (q.layer !== layer) continue;
+      var u = q.age / q.life, sk = q.g.skin, frames = sk.states.particle;
+      var n = frames.length, idx = n > 1 ? Math.min(n - 1, Math.floor(u * n)) : 0;
+      var f = frames[idx];
+      if (!drawingHasArt(f)) continue;
+      var cv = drawingCanvas(f, Math.min(512, Math.round(q.size * 2)), Math.min(512, Math.round(q.size * 2)));
+      ctx.save();
+      ctx.globalAlpha = u > 0.6 ? (1 - u) / 0.4 : 1;
+      ctx.translate(q.x, q.y); ctx.rotate(q.rot);
+      ctx.drawImage(cv, -q.size / 2, -q.size / 2, q.size, q.size);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
   function stepParticles(k){
     for (var i = particles.length - 1; i >= 0; i--){
       var p = particles[i];
@@ -2292,6 +2339,11 @@
       Body.setMass(b, want);
     }
   }
+  // an animated object set to have no collision at all
+  function objectWalkThrough(obj){
+    for (var i = 0; i < gadgets.length; i++) if (gadgets[i].kind === "anim" && gadgets[i].obj === obj && gadgets[i].ghost) return true;
+    return false;
+  }
   function refreshObjectPhysics(obj){
     if (!obj.body) return;                 // still waiting on a batched rebuild
     applyObjectWeight(obj);
@@ -2321,7 +2373,7 @@
     // painting should sag, roll away or explode out from under the brush.
     // It goes live the moment the mouse button comes up.
     setBodyStatic(obj.body, (decorative || obj.drawing) ? true : !!obj.holdsStill);
-    var ghost = decorative || (allGlow && !obj.lightSolid);
+    var ghost = decorative || (allGlow && !obj.lightSolid) || objectWalkThrough(obj);
     obj.body.isSensor = ghost;
     obj.body.collisionFilter = ghost ? { category: CAT_LAYER[obj.layer], mask: 0, group: 0 } : layerFilter(obj.layer);
     obj.body.label = "object";
@@ -2691,7 +2743,60 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye"];
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter"];
+
+  /* ---- Skins: drawn, animated looks on things -----------------------
+     A creature, an animated object or a particle carries a SKIN: a set of
+     drawn states, each a list of frames, drawn in the studio like a
+     character. A creature's skin replaces its host's material look, drawn
+     over the host's own shape (which stays the hitbox); a particle's is
+     the little picture each one is. `action` is the state a wire plays —
+     Carson's "animations that can be triggered by levers or buttons or
+     sensors". */
+  var SKIN_STATES = {
+    eye:     [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"move", label:"Moving", emoji:"🏃" }, { id:"action", label:"Action", emoji:"⚡" }],
+    anim:    [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"action", label:"Action", emoji:"⚡" }],
+    emitter: [{ id:"particle", label:"Particle", emoji:"✨" }]
+  };
+  var SKIN_TITLE = { eye:"🐾 Creature", anim:"🎞 Animated object", emitter:"✨ Particle" };
+  function newSkin(kind){
+    var st = {}, fps = {};
+    (SKIN_STATES[kind] || []).forEach(function(d){ st[d.id] = [blankDrawing()]; fps[d.id] = d.id === "move" ? 8 : (d.id === "particle" ? 12 : 4); });
+    return { states: st, fps: fps };
+  }
+  function normalizeSkin(raw, kind){
+    var sk = newSkin(kind);
+    if (!raw || typeof raw !== "object" || !raw.states) return sk;
+    (SKIN_STATES[kind] || []).forEach(function(d){
+      var src = Array.isArray(raw.states[d.id]) ? raw.states[d.id] : [];
+      var out = [];
+      for (var i = 0; i < src.length && i < CHAR_MAX_FRAMES; i++) out.push(normalizeDrawing(src[i], 10, 14));
+      if (out.length) sk.states[d.id] = out;
+      if (raw.fps && typeof raw.fps[d.id] === "number") sk.fps[d.id] = Math.max(1, Math.min(30, raw.fps[d.id]));
+    });
+    return sk;
+  }
+  function skinStateHasArt(sk, st){ var a = sk && sk.states[st]; return !!a && a.some(drawingHasArt); }
+  function skinHasArt(sk){ return !!sk && Object.keys(sk.states).some(function(st){ return skinStateHasArt(sk, st); }); }
+  function packSkin(sk){ return sk ? JSON.parse(JSON.stringify({ states: sk.states, fps: sk.fps })) : null; }
+  /* The frame to show: the state's frame for the time (looping), or, for
+     a once-through, the frame for the time since it started, held at the
+     end. A state with nothing drawn falls back to idle. */
+  function skinFrame(sk, st, t0, once){
+    if (!sk) return null;
+    var frames = sk.states[st];
+    if (!frames || !frames.some(drawingHasArt)){ st = st === "idle" ? null : "idle"; frames = st ? sk.states[st] : null; }
+    if (!frames || !frames.some(drawingHasArt)) return null;
+    var n = frames.length, fps = Math.max(1, sk.fps[st] || 4), now = performance.now();
+    var idx = 0;
+    if (n > 1){
+      var k = Math.floor((now - (t0 || 0)) / (1000 / fps));
+      idx = once ? Math.min(n - 1, k) : ((k % n) + n) % n;
+    }
+    var f = frames[idx];
+    if (!drawingHasArt(f)) for (var i = 0; i < n; i++) if (drawingHasArt(frames[i])){ f = frames[i]; break; }
+    return f;
+  }
   /* Painting a creature's weak spot or danger: `maskPaint` names the
      creature and which area, and the brush becomes one of two pseudo-
      materials (never in the catalogue) so every stroke, shape and
@@ -2732,8 +2837,8 @@
     if (matOf(currentTool) && matOf(currentTool).isMask){ currentTool = "move"; canvas.dataset.tool = "move"; }
     renderSelBar();
   }
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye" };
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Animated object", emitter:"Particles" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   var gadgets = [], gadgetCounter = 1;
   var wires = [];                 // { from: gadget id, to: bolt or gadget id }
@@ -2783,6 +2888,36 @@
       if (g.danger && !g.danger.length) g.danger = null;
       g.color = typeof extra.color === "string" && /^#[0-9a-fA-F]{6}$/.test(extra.color) ? extra.color : "#2B1B12";
       g.homeAngle = null; g.look = { x: 1, y: 0 };
+      g.skin = extra.skin ? normalizeSkin(extra.skin, "eye") : null;   // a drawn creature, if one was drawn
+      g.actionMode = extra.actionMode === "once" ? "once" : "loop";
+      g.face = 1; g.actT0 = 0; g.wasOn = false;
+    }
+    if (kind === "anim"){
+      /* An animated object: its host is drawn with a skin instead of its
+         material. Idle loops; a wire plays the action — looping while on,
+         or once through and held with `actionMode` "once". `ghost` makes
+         the host walk-through: an animated thing with no collision at all. */
+      g.skin = extra.skin ? normalizeSkin(extra.skin, "anim") : newSkin("anim");
+      g.actionMode = extra.actionMode === "once" ? "once" : "loop";
+      g.ghost = !!extra.ghost;
+      g.actT0 = 0; g.wasOn = false;
+      g.visible = extra.visible != null ? !!extra.visible : false;   // the glyph is the maker's; the drawing is what players see
+    }
+    if (kind === "emitter"){
+      /* Particles: little drawn pictures thrown out of this spot. Rate a
+         second, speed, direction (0 is up, clockwise), spread, gravity,
+         life, size. Emits while its signal is on; unwired, always. */
+      g.skin = extra.skin ? normalizeSkin(extra.skin, "emitter") : newSkin("emitter");
+      g.rate = extra.rate != null ? Math.max(0.2, Math.min(80, +extra.rate)) : 8;
+      g.pspeed = extra.pspeed != null ? Math.max(0, Math.min(1500, +extra.pspeed)) : 160;
+      g.angle = extra.angle != null ? +extra.angle : 0;
+      g.spread = extra.spread != null ? Math.max(0, Math.min(360, +extra.spread)) : 40;
+      g.grav = extra.grav != null ? Math.max(-3, Math.min(3, +extra.grav)) : 0.4;
+      g.life = extra.life != null ? Math.max(0.1, Math.min(20, +extra.life)) : 1.4;
+      g.psize = extra.psize != null ? Math.max(4, Math.min(400, +extra.psize)) : 28;
+      g.spin = extra.spin != null ? Math.max(0, Math.min(720, +extra.spin)) : 0;
+      g.acc = 0;
+      g.visible = extra.visible != null ? !!extra.visible : false;
     }
     if (kind === "changer"){
       /* The World changer — LBP2's global tweakers, as one gadget: while
@@ -2892,7 +3027,7 @@
     });
   }
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer"); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter"); }
   function addWire(from, to){
     if (!from || !to || from === to) return false;
     if (!canReceive(to)) return false;
@@ -3019,7 +3154,13 @@
         g.out = (g.sticky ? g.on : pressed) ? 1 : 0;
       } else if (g.kind === "lever"){
         g.out = (g.springs ? g.held : g.on) ? 1 : 0;
-      } else if (g.kind === "watersensor"){
+      } else if (g.kind === "anim" || g.kind === "emitter" || g.kind === "eye"){
+        // a wire's rising edge starts the action animation over
+        var on = g.input != null && g.input > 0;
+        if (on && !g.wasOn) g.actT0 = performance.now();
+        g.wasOn = on;
+      }
+      if (g.kind === "watersensor"){
         // on while water is actually touching it: a wet cell within its
         // reach, or the world's water above it. It used to ask the column's
         // top surface, so a pool on a shelf above read as "under water"
@@ -3062,12 +3203,15 @@
       if (!sees) return;
       var sx0 = (b.bounds.max.x - b.bounds.min.x) / 2 + PW / 2 + 8, sy0 = (b.bounds.max.y - b.bounds.min.y) / 2 + PH / 2 + 8;
       var mx = Math.abs(dx) > sx0 ? (dx > 0 ? v : -v) : 0, my = g.fly && Math.abs(dy) > sy0 ? (dy > 0 ? v : -v) : 0;
+      if (Math.abs(dx) > 4) g.face = dx > 0 ? 1 : -1;
+      g.moving = !!(mx || my);
       if (mx || my) Body.setPosition(b, { x: b.position.x + mx, y: b.position.y + my });
       return;
     }
     if (b.isStatic) return;                       // a locked creature only watches
     if (g.homeAngle == null) g.homeAngle = b.angle;
     var vx = b.velocity.x, vy = b.velocity.y;
+    if (sees && Math.abs(dx) > 4) g.face = dx > 0 ? 1 : -1;
     if (sees){
       var stopX = (b.bounds.max.x - b.bounds.min.x) / 2 + PW / 2 + 8;   // stop short of the player
       vx = Math.abs(dx) > stopX ? (dx > 0 ? v : -v) : 0;
@@ -5378,7 +5522,9 @@
                line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce,
                setLight: g.setLight, light: g.light, setWater: g.setWater, water: g.water, secs: g.secs, latch: g.latch,
                range: g.range, fly: g.fly, deadly: g.weakMode !== "none", weakMode: g.weakMode, color: g.color,
-               weak: g.weak ? pgPack(g.weak) : null, danger: g.danger ? pgPack(g.danger) : null };
+               weak: g.weak ? pgPack(g.weak) : null, danger: g.danger ? pgPack(g.danger) : null,
+               skin: g.skin ? packSkin(g.skin) : null, actionMode: g.actionMode, ghost: g.ghost,
+               rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -6341,9 +6487,47 @@
     return "rgba(" + ((v>>16)&255) + "," + ((v>>8)&255) + "," + (v&255) + "," + a.toFixed(3) + ")";
   }
 
+  /* The skin that dresses an object, if one does: the first creature or
+     animated object on it that has something drawn. */
+  function objectSkinGadget(obj){
+    for (var i = 0; i < gadgets.length; i++){
+      var g = gadgets[i];
+      if ((g.kind === "eye" || g.kind === "anim") && g.obj === obj && g.skin && skinHasArt(g.skin)) return g;
+    }
+    return null;
+  }
+  function skinStateFor(g){
+    var on = g.input != null && g.input > 0;
+    if (on) return "action";
+    if (g.kind === "eye"){
+      var b = g.obj && g.obj.body;
+      var moving = g.obj && g.obj.decorative ? !!g.moving : (b && !b.isStatic && Math.abs(b.velocity.x) > 0.25);
+      return moving ? "move" : "idle";
+    }
+    return "idle";
+  }
+  function drawSkinOn(obj, g, depth){
+    var b = obj.body, paths = objectPaths(obj), box = paths.box;
+    if (!box) return false;
+    var st = skinStateFor(g);
+    var frame = skinFrame(g.skin, st, g.actT0, st === "action" && g.actionMode === "once");
+    if (!frame) return false;
+    var w = Math.max(1, box.x2 - box.x), h = Math.max(1, box.y2 - box.y);
+    var cv = drawingCanvas(frame, Math.min(2048, w * 2), Math.min(2048, h * 2));
+    ctx.save();
+    ctx.translate(b.position.x, b.position.y);
+    ctx.rotate(b.angle);
+    ctx.globalAlpha = depth.a;
+    if (g.kind === "eye" && g.face === -1){ ctx.translate(box.x + w/2, 0); ctx.scale(-1, 1); ctx.translate(-(box.x + w/2), 0); }
+    ctx.drawImage(cv, box.x, box.y, w, h);
+    ctx.restore();
+    return true;
+  }
   function drawObject(obj){
     var b = obj.body, g = objectPaths(obj), depth = layerDepth(obj.layer);
     if (!g.regions.length) return;
+    var sg = objectSkinGadget(obj);
+    if (sg && drawSkinOn(obj, sg, depth)) return;
     ctx.save();
     ctx.translate(b.position.x, b.position.y);
     ctx.rotate(b.angle);
@@ -6441,6 +6625,19 @@
       ctx.fillStyle = "#5C3A26"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.beginPath(); ctx.rect(-w/2, -3 - h, w, h);
       ctx.fillStyle = on ? "#B3261E" : "#E4574B"; ctx.fill(); ctx.stroke();
+    } else if (g.kind === "anim"){
+      // a little film frame
+      ctx.beginPath(); ctx.rect(-11, -8, 22, 16);
+      ctx.fillStyle = on ? "#F2B705" : "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.fillStyle = "#F6ECD9";
+      for (var fi = -8; fi <= 8; fi += 4){ ctx.fillRect(fi - 1, -7, 2, 2); ctx.fillRect(fi - 1, 5, 2, 2); }
+      ctx.beginPath(); ctx.moveTo(-3, -3); ctx.lineTo(4, 0); ctx.lineTo(-3, 3); ctx.closePath(); ctx.fill();
+    } else if (g.kind === "emitter"){
+      // a spout with sparks
+      ctx.beginPath(); ctx.moveTo(-8, 8); ctx.lineTo(8, 8); ctx.lineTo(4, -2); ctx.lineTo(-4, -2); ctx.closePath();
+      ctx.fillStyle = on ? "#F2B705" : "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.fillStyle = "#F6ECD9";
+      [[0,-9,2.4],[-6,-13,1.6],[6,-14,1.8],[2,-18,1.4]].forEach(function(sp){ ctx.beginPath(); ctx.arc(sp[0], sp[1], sp[2], 0, Math.PI*2); ctx.fill(); });
     } else if (g.kind === "eye"){
       // a googly eye: white, a dark rim, and a big pupil in the maker's
       // colour that rolls toward the player
@@ -7515,7 +7712,7 @@
     updateCamera();
     freeMoveIfPaused(now);
     tickWater(now);
-    stepParticles(frameK);
+    stepParticles(frameK); stepSprites(frameK);
     bmpFrame++;
     sweepBitmaps();
     // A knock rather than a wobble: it decays fast and is applied to the
@@ -7537,9 +7734,9 @@
     // and its markers, THEN Front decoration on top — so anything you
     // paint on the front layer correctly covers the player, LBP-style.
     drawLayer(0);
-    drawBolts(0); drawLinks(0); drawGadgets(0);
+    drawBolts(0); drawLinks(0); drawGadgets(0); drawSprites(0);
     drawLayer(1);
-    drawBolts(1); drawLinks(1); drawGadgets(1);
+    drawBolts(1); drawLinks(1); drawGadgets(1); drawSprites(1);
     drawBubbles();
     checkpoints.forEach(function(cp, i){ drawFlag(cp, i===0 ? "#5F9E5A" : "#2F86A6", i===0 ? "start" : "checkpoint"); });
     drawFlag(goalPoint, "#F2B705", "goal");
@@ -7547,7 +7744,7 @@
     drawParticles();
     drawMaterialWater();
     drawLayer(2);
-    drawBolts(2); drawLinks(2); drawGadgets(2);
+    drawBolts(2); drawLinks(2); drawGadgets(2); drawSprites(2);
     drawWires();
     drawUsePrompt();
     drawWorldWaterOverlay();
@@ -8176,7 +8373,7 @@
                   note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
     logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["changer","🌗","World changer"]],
                   note:"Put them on something. Right-click one and Connect it to a motor, a piston, a camera, a mover or a world changer — it drives that while it is on." },
-    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
+    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["anim","🎞","Animated object"],["emitter","✨","Particles"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
                   note:"A camera shows its shot while the player is in its zone. A mover carries an object along a line. A creature eye makes an object chase the player." }
   };
   function renderToolsTab(el, pageId){
@@ -8392,6 +8589,73 @@
       extraRight: function(el){ ceCharacterExtras(el); }
     };
   }
+  /* A gadget's skin in the studio. The drawing box is the host's own
+     bounding box, so what is drawn lands exactly on the object, and the
+     host's shape sits faint behind the drawing so the artist paints
+     within the hitbox. Saved looks live in My Creatures / Objects /
+     Particles, on this device, like characters. */
+  function ceSkinSubject(g){
+    var kind = g.kind, host = g.obj;
+    var sub = {
+      kind: "skin", g: g, title: SKIN_TITLE[kind] || "Drawing",
+      states: function(){ return SKIN_STATES[kind]; },
+      frames: function(st){ if (!g.skin.states[st]) g.skin.states[st] = [blankDrawing()]; return g.skin.states[st]; },
+      count: function(st){ return sub.frames(st).length; },
+      setCount: function(st, n){ var a = sub.frames(st); while (a.length < n) a.push(blankDrawing()); a.length = Math.max(1, n); },
+      fps: function(st){ return g.skin.fps[st]; },
+      setFps: function(st, v){ g.skin.fps[st] = v; },
+      aspect: function(){
+        if (kind === "emitter" || !host || !host.body) return 1;
+        var box = objectPaths(host).box; if (!box) return 1;
+        return Math.max(0.2, Math.min(5, (box.x2 - box.x) / Math.max(1, box.y2 - box.y)));
+      },
+      persist: function(){},
+      hint: function(){ return kind === "emitter" ? "Draw one particle. Several frames play over its life." : (kind === "eye" ? "Idle, Moving, and an Action a wire can play. The faint shape is the creature's body — your drawing goes over it." : "Idle loops; a wire plays the Action. The faint shape is the object."); },
+      previewLabel: kind === "emitter" ? "One particle" : "On the object",
+      backdrop: function(c2, w, h){
+        if (kind === "emitter" || !host || !host.body) return;
+        var paths = objectPaths(host), box = paths.box; if (!box) return;
+        c2.save();
+        c2.translate(0, 0); c2.scale(w / (box.x2 - box.x), h / (box.y2 - box.y)); c2.translate(-box.x, -box.y);
+        c2.fillStyle = "rgba(43,27,18,0.14)";
+        for (var i = 0; i < paths.regions.length; i++) c2.fill(paths.regions[i].path);
+        c2.restore();
+      },
+      extraRight: function(el){ ceSkinExtras(el, g); },
+      onClose: function(){ if (objects.indexOf(host) >= 0){ /* the drawing is live; nothing to rebuild */ } renderSelBar(); }
+    };
+    return sub;
+  }
+  var mySkins = {};
+  try { mySkins = JSON.parse(localStorage.getItem("pg_my_skins") || "{}"); } catch(e){ mySkins = {}; }
+  function persistMySkins(){ try { localStorage.setItem("pg_my_skins", JSON.stringify(mySkins)); } catch(e){ showToast("Couldn't save — storage is full."); } }
+  function ceSkinExtras(el, g){
+    var kind = g.kind, label = kind === "eye" ? "My Creatures" : (kind === "anim" ? "My Animations" : "My Particles");
+    ceH4(label, el);
+    el.appendChild(ceBtn("💾 Save this drawing", "", function(){
+      askName("Name it", "", function(name){
+        if (!name) return;
+        if (!mySkins[kind]) mySkins[kind] = [];
+        mySkins[kind].push({ id: "s" + Date.now(), name: name, data: packSkin(g.skin) });
+        persistMySkins(); renderCharEditorPanels(); showToast("Saved '" + name + "'");
+      });
+    }));
+    var list = mySkins[kind] || [];
+    if (!list.length){ var em = document.createElement("div"); em.className = "noteText"; em.textContent = "Saved drawings show up here, on any level."; el.appendChild(em); }
+    list.forEach(function(c){
+      var row = document.createElement("div"); row.className = "myCharRow";
+      var nm = document.createElement("div"); nm.className = "nm"; nm.textContent = c.name;
+      var load = ceBtn("Load", "ghost", function(){ g.skin = normalizeSkin(c.data, kind); ceHistory.undo.length = 0; ceHistory.redo.length = 0; renderCharEditorPanels(); ceLayout(); showToast("Loaded '" + c.name + "'"); });
+      var del = ceBtn("✕", "red", function(){ mySkins[kind] = (mySkins[kind] || []).filter(function(x){ return x.id !== c.id; }); persistMySkins(); renderCharEditorPanels(); });
+      row.appendChild(nm); row.appendChild(load); row.appendChild(del);
+      el.appendChild(row);
+    });
+  }
+  function openSkinStudio(g){
+    if (!g.skin) g.skin = newSkin(g.kind);
+    pushUndo("drawing on a " + GADGET_LABEL[g.kind].toLowerCase());
+    ceOpenWith(ceSkinSubject(g));
+  }
   function ceStates(){ return ceSubject.states(); }
   function ceFramesOf(st){ return ceSubject.frames(st); }
   function ceTargetDrawing(){
@@ -8506,6 +8770,7 @@
     ceCtx.fillStyle = "rgba(255,255,255,0.55)"; ceCtx.fillRect(v.x, v.y, v.w, v.h);
     ceCtx.restore();
     var rw = Math.min(4096, Math.round(v.w)), rh = Math.min(4096, Math.round(v.h));
+    if (ceSubject.backdrop){ ceCtx.save(); ceCtx.translate(v.x, v.y); ceSubject.backdrop(ceCtx, v.w, v.h); ceCtx.restore(); }
     var prev = ceOnionDrawing(-1), next = ceOnionDrawing(1);
     if (prev){ ceCtx.save(); ceCtx.globalAlpha = 0.22; ceCtx.drawImage(drawingCanvas(prev, rw, rh), v.x, v.y, v.w, v.h); ceCtx.restore(); }
     if (next){ ceCtx.save(); ceCtx.globalAlpha = 0.12; ceCtx.drawImage(drawingCanvas(next, rw, rh), v.x, v.y, v.w, v.h); ceCtx.restore(); }
@@ -10101,6 +10366,41 @@
         function(){ pushUndo("changing a button"); g.sticky = !g.sticky; g.on = false; renderSelBar(); sfx("tick"); }, g.sticky ? "on" : "");
       slider(opSection("Size"), "Width", g.size, 24, 200, 4, function(v){ g.size = v; }, function(v){ return Math.round(v) + "px"; }, "changing a button");
     }
+    if (g.kind === "eye" || g.kind === "anim"){
+      var dr = opSection(g.kind === "eye" ? "Its look" : "Its drawing");
+      opBtn(dr, (g.skin && skinHasArt(g.skin) ? "🎨 Edit the drawing" : "🎨 Draw " + (g.kind === "eye" ? "this creature" : "this object")),
+        g.kind === "eye" ? "Draw and animate the creature over its body — Idle, Moving, and an Action a wire can play" : "Draw and animate it — Idle loops, a wire plays the Action",
+        function(){ openSkinStudio(g); }, "wide" + (g.skin && skinHasArt(g.skin) ? " on" : ""));
+      if (g.skin && skinHasArt(g.skin)) opBtn(dr, "✕ Back to the plain look", "Drop the drawing; the object shows its material again", function(){ pushUndo("removing a drawing"); g.skin = g.kind === "anim" ? newSkin("anim") : null; renderSelBar(); sfx("delete"); }, "wide");
+      var am = opSection("When wired on");
+      opBtn(am, "🔁 Action loops while the signal is on", "", function(){ pushUndo("changing an animation"); g.actionMode = "loop"; renderSelBar(); sfx("tick"); }, "wide" + (g.actionMode !== "once" ? " on" : ""));
+      opBtn(am, "1️⃣ Action plays once and holds its last frame", "A door opening, a switch flipping", function(){ pushUndo("changing an animation"); g.actionMode = "once"; renderSelBar(); sfx("tick"); }, "wide" + (g.actionMode === "once" ? " on" : ""));
+    }
+    if (g.kind === "anim"){
+      var hb = opSection("Body");
+      opBtn(hb, g.ghost ? "👻 No collision — walk straight through" : "🧱 Solid — the painted shape is the hitbox", g.ghost ? "Click to make it solid again" : "Click to make it decoration that nothing touches",
+        function(){ pushUndo("changing an animated object"); g.ghost = !g.ghost; if (g.obj) refreshObjectPhysics(g.obj); renderSelBar(); sfx("tick"); }, "wide" + (g.ghost ? " on" : ""));
+      var an = document.createElement("div"); an.className = "noteText";
+      an.textContent = "The drawing covers the object exactly, so paint the object in the shape you want the hitbox to be, then draw the look over it.";
+      an.style.flexBasis = "100%"; opSection(null).appendChild(an);
+    }
+    if (g.kind === "emitter"){
+      var pd = opSection("The particle");
+      opBtn(pd, skinStateHasArt(g.skin, "particle") ? "🎨 Edit the particle" : "🎨 Draw the particle", "Draw what each particle looks like; several frames play over its life", function(){ openSkinStudio(g); }, "wide" + (skinStateHasArt(g.skin, "particle") ? " on" : ""));
+      var pr = opSection("Emits");
+      slider(pr, "How many a second", g.rate, 0.2, 80, 0.2, function(v){ g.rate = v; }, function(v){ return (+v).toFixed(1); }, "changing particles");
+      slider(pr, "Speed", g.pspeed, 0, 1500, 5, function(v){ g.pspeed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing particles");
+      slider(pr, "Direction", g.angle, -180, 180, 5, function(v){ g.angle = v; }, function(v){ return v === 0 ? "straight up" : (Math.abs(v) === 180 ? "straight down" : Math.round(Math.abs(v)) + "° to the " + (v > 0 ? "right" : "left")); }, "changing particles");
+      slider(pr, "Spread", g.spread, 0, 360, 5, function(v){ g.spread = v; }, function(v){ return Math.round(v) + "°"; }, "changing particles");
+      var pf = opSection("Each one");
+      slider(pf, "Lives for", g.life, 0.1, 20, 0.1, function(v){ g.life = v; }, function(v){ return (+v).toFixed(1) + "s"; }, "changing particles");
+      slider(pf, "Size", g.psize, 4, 400, 2, function(v){ g.psize = v; }, function(v){ return Math.round(v) + "px"; }, "changing particles");
+      slider(pf, "Gravity", g.grav, -3, 3, 0.1, function(v){ g.grav = v; }, function(v){ return v < -0.05 ? "floats up" : (v > 0.05 ? (+v).toFixed(1) + "× falls" : "none"); }, "changing particles");
+      slider(pf, "Spin", g.spin, 0, 720, 10, function(v){ g.spin = v; }, function(v){ return v <= 0 ? "none" : Math.round(v) + "°/s"; }, "changing particles");
+      var pn = document.createElement("div"); pn.className = "noteText";
+      pn.textContent = g.input != null ? "Wired: it emits while its signal is on." : "It emits all the time. Wire a switch to it and it emits only while the signal is on.";
+      pn.style.flexBasis = "100%"; opSection(null).appendChild(pn);
+    }
     if (g.kind === "eye"){
       var em = opSection("Moves");
       opBtn(em, "↔ Left and right, on the ground", "", function(){ pushUndo("changing a creature"); g.fly = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.fly ? " on" : ""));
@@ -10232,7 +10532,7 @@
       }, "wide");
     });
     opBtn(ws, wiring && wiring.from === g ? "… click what it should drive (Esc cancels)" : "🔌 Connect to…",
-      "Then click a motor bolt, wobble bolt, piston, camera, mover or world changer",
+      "Then click a motor bolt, wobble bolt, piston, camera, mover, world changer, creature, animated object or particles",
       function(){ wiring = wiring && wiring.from === g ? null : { from: g }; renderSelBar(); sfx("tick"); }, "wide" + (wiring && wiring.from === g ? " on" : ""));
     var vis = opSection("In play");
     opBtn(vis, g.visible === false ? "🙈 Hidden in Play" : "👁 Visible in Play",
@@ -11786,7 +12086,9 @@
                line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce,
                setLight: g.setLight, light: g.light, setWater: g.setWater, water: g.water, secs: g.secs, latch: g.latch,
                range: g.range, fly: g.fly, deadly: g.weakMode !== "none", weakMode: g.weakMode, color: g.color,
-               weak: g.weak ? pgPack(g.weak) : null, danger: g.danger ? pgPack(g.danger) : null };
+               weak: g.weak ? pgPack(g.weak) : null, danger: g.danger ? pgPack(g.danger) : null,
+               skin: g.skin ? packSkin(g.skin) : null, actionMode: g.actionMode, ghost: g.ghost,
+               rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);

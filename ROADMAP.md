@@ -278,16 +278,25 @@ started feature: **the save schema already reserves `u:<id>` keys.** Needs a
 drawing surface, property sliders, naming, and embedding into levels so a
 level carries its own custom materials.
 
-### Create a creature
+### Create a creature — DONE 2026-09-11
 
 Draw and animate a creature the way you draw and animate a character. Simple or
 animated. Adjustable hitbox. Save custom creatures. Carries the same settings as
 the creature eye ("dies when stepped on", etc).
 
-### Animated object
+Built: a Creature eye's box opens the studio for it — Idle, Moving, and an
+Action a wire plays — drawn over the creature's painted body, which stays the
+hitbox. My Creatures saves them. The studio itself was rebuilt for all of this
+(undo/redo, an artist's tools, 48 frames, playback); the rig mode is gone.
+
+### Animated object — DONE 2026-09-11
 
 Draw an animated object with either a **custom hand-drawn hitbox** or **no
 collision at all**.
+
+Built: the Animated object gadget. Paint the object in the shape you want the
+hitbox to be, draw the look over it (Idle loops; a wire plays Action, looping
+or once-and-hold), or set it to no collision.
 
 ### Rollercoaster
 
@@ -314,9 +323,13 @@ Piano, drums, guitar, bass.
 
 Create and save custom level backgrounds in a paint mode. Eventually sellable.
 
-### Custom particles
+### Custom particles — DONE 2026-09-11
 
 Author your own particle effects.
+
+Built: the Particles gadget — draw the particle (several frames play over its
+life), then rate, speed, direction, spread, gravity, life, size, spin; wired,
+it emits while the signal is on.
 
 ### Character improvements
 

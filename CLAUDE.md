@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` | Playwright suites, 598 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` | Playwright suites, 658 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 598 checks + checkgeom, in order
+npm test                   # all 658 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -65,6 +65,8 @@ node tmover.js             # 22 — the Mover: two-click placing, once and bounc
 node tworld.js             # 22 — the Water sensor (touching, not a pool above; on Front), and the World changer's light and water, wired, latched, saved
 node tcreature.js          # 32 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, painted weak spot and danger, colour, a Back-layer creature, save/load
 node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
+node tstudio.js            # 34 — the studio: strokes, undo/redo, the tools, frames, playback, no rig
+node tskins.js             # 26 — drawn creatures, animated objects (action by wire, walk-through), particles with pictures
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -420,7 +422,9 @@ Each gadget has an **output**, 0 or 1:
 | **mover** | drives its host along a line — see The Mover | line, speed, bounce |
 | **watersensor** | water is touching it: a wet cell within 12px, or the world's flood above it (`waterTouching`) — not "somewhere up this column", which read a pool on a shelf above as under water | — |
 | **changer** | while wired on (unwired: always; `latch`: for good once it has been), the world's light and/or water level move to its values over `secs` — see The live world | setLight, light, setWater, water, secs, latch |
-| **eye** | its host is a creature — see Creatures | range, speed, fly, deadly |
+| **eye** | its host is a creature — see Creatures | range, speed, fly, weak spot, danger, colour, skin, actionMode |
+| **anim** | its host is drawn with a skin: Idle loops, a wire plays Action — see Skins | skin, actionMode, ghost |
+| **emitter** | throws out drawn particles while on (unwired: always) — see Skins | skin, rate, pspeed, angle, spread, grav, life, psize, spin |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
 
@@ -850,6 +854,97 @@ toward the player, floating, left and right only unless `fly`.
 **The eye is a googly eye** — white, a dark rim, a big pupil in `g.color`
 (the box has a palette; default black) that rolls toward the player,
 with a highlight. The pop's spray takes the colour too.
+
+## The studio
+
+One drawing-and-animation editor for everything drawn — `#charEditorOverlay`,
+the old character creator, rebuilt around a **subject**: `ceSubject` says
+what is being drawn (its `states()`, `frames(st)`, `count`/`setCount`,
+`fps`/`setFps`, `aspect()`, `persist()`, a `hint`, optional `modes`, an
+optional `backdrop(ctx,w,h)` drawn faint under the art, an `extraRight(el)`
+for its own controls, an `onClose`). `ceCharacterSubject()` is the
+character; `ceSkinSubject(g)` is a gadget's skin. Everything else is the
+studio's.
+
+**Undo/redo** (`ceHistory`): whole-frame snapshots, one per change —
+`ceBeginChange` before a stroke or edit, `ceEndChange` after, which pushes
+`{st, fr, before, after}` only if something changed (80 deep). Undo and
+redo jump to the frame they belong to. Inserting, deleting or moving a
+frame clears the history rather than trying to reconcile indices.
+Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z, Ctrl+C/V copy and paste a frame.
+
+**Tools**: brush; straight line (`ceTool = "line"`, or Shift while
+brushing — the stroke keeps only its first point and the cursor);
+eraser (a stroke with `c: null`); eyedropper (`cePickAt` reads the
+drawing's own raster, not the guides or onion skins); any colour (a
+native colour input, the palette, and `ceRecent`, the last ten used);
+opacity (`a` on the stroke, honoured by `paintDrawing`); symmetry
+(`ceStroke2`, the mirror stroke, pushed alongside); a stabiliser
+(`ceSmooth`: the point lags the hand by half); centre guides; brush down
+to 0.6% of the box. **Zoom** (`ceZoom`, `ceCX/CY`): the wheel zooms about
+the cursor, Space-drag or the middle button pans, `0` resets; the
+drawing is rasterised at the zoomed size and the view rect drawn, so the
+box edge stays visible. `ceNorm` takes the view into account, so strokes
+land where the cursor is at any zoom.
+
+**Frames**: insert blank or a copy after this one, delete, move either
+way, up to `CHAR_MAX_FRAMES` (48, was 12); arrows step; **playback** (P)
+cycles at the state's speed — `charFps` per state for the character
+(default 8 for run, 2 otherwise), used by the game too
+(`currentCharAnim`), saved in the character and in `pg_char_fps`.
+Onion skin: the frame before at 0.22 and, if wanted, the one after at
+0.12. Keys while open: B E L I X O G [ ] 0 P, the arrows, Space to pan.
+
+**The rig ("Simple Animated") mode is gone**, at Carson's ask — the
+four-part procedurally posed character, its editor, `rigSprites`,
+`rigAnchors`, `RIG_*`. A saved character with `mode: "rig"` loads as
+`animated`. `charMode` is `preset`, `simple` or `animated`.
+
+## Skins
+
+A **skin** is a set of drawn states, each a list of frames, with a speed
+per state — the character's art model on a gadget: `{ states: {id:
+[drawing…]}, fps: {id: n} }`, `newSkin(kind)`, `normalizeSkin`,
+`packSkin`, saved on the gadget as `skin` in snapshots and the level
+file. `SKIN_STATES` per kind: a creature has Idle, Moving, Action; an
+animated object Idle, Action; a particle just Particle. `skinFrame(sk,
+st, t0, once)` picks the frame for the time — looping, or once through
+and held at the last frame — and falls back to Idle for a state with
+nothing drawn. `action` is the state a wire plays: Carson's "animations
+that can be triggered by levers or buttons or sensors, and even
+creatures". The gadget step watches the wire's rising edge (`wasOn`,
+`actT0`) so a once-through starts over each time it comes on.
+
+**A creature or animated object with a skin is drawn with it instead of
+its material** — `drawObject` asks `objectSkinGadget(obj)` first and
+`drawSkinOn` draws the current frame stretched over the host's own local
+bounding box (`objectPaths(obj).box`) in the host's frame, so the drawing
+lands exactly on the shape and the painted shape stays the hitbox
+(Carson's "custom hand-drawn hitbox"). A creature is mirrored when it
+faces left (`g.face`, from the way it moves); `skinStateFor` picks
+Action while wired on, else Moving when the body moves (or a decorative
+one is being moved by hand), else Idle. The eye's own glyph still draws
+on top. The studio for a skin (`ceSkinSubject`) uses the host's box
+aspect and draws the host's shape faint underneath (`backdrop`) so the
+artist paints within the hitbox; a particle's box is square. **My
+Creatures / Animations / Particles** (`mySkins`, `pg_my_skins`) save and
+load looks on this device.
+
+**Animated object** (`kind:"anim"`, Gameplay page): a skin, `actionMode`
+(`loop` while on, or `once` and hold), and `ghost` — "no collision at
+all": `objectWalkThrough(obj)` folds into `refreshObjectPhysics`'s ghost
+test, so the host becomes a sensor with an empty mask like decoration.
+
+**Particles** (`kind:"emitter"`): `sprites[]`, capped at 600, stepped in
+the render loop (`stepSprites`, `frameK` in 1/60s frames) and drawn
+after the gadgets of their layer (`drawSprites(layer)`). `emitFrom`
+accumulates `rate/60` a frame and throws one per whole: direction
+`angle` (0 up, clockwise, ±180 down) with `spread`, `pspeed` px/s with
+±20%, `grav`, `life` seconds ±15%, `psize` ±15%, `spin`. A particle's
+frames play over its life (frame = progress × count), and it fades over
+the last 40%. Nothing comes out until a particle is drawn; wired, it
+emits only while the signal is on; paused Build emits nothing. A
+particle whose emitter is gone is dropped.
 
 ## The live world
 
