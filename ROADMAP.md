@@ -225,6 +225,7 @@ implement it, including connected systems, rather than approximating.
 | **World changer** | Driven by activators (sensors, buttons). Adjusts world lighting, world water level, etc. |
 | **Mover** | See below. |
 | **Creature eye** | See below. |
+| **Camera** | DONE 2026-09-11. LBP2's Game Camera: zone, zoom, tracking, speed; wired, the switch decides. Play has its own fixed zoom, set in World. |
 
 ### Mover
 

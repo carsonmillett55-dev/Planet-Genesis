@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` | Playwright suites, 398 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` | Playwright suites, 436 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 398 checks + checkgeom, in order
+npm test                   # all 436 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -56,11 +56,12 @@ node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 19 — the personal menu's sections, pages and gradient
-node tbolt.js              # 52 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, typed rpm, save/load
+node tbolt.js              # 56 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, typed rpm, painting onto a bolted wall, save/load
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
 node tlink.js              # 59 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
 node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint; the weight slider
 node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
+node tcam.js               # 34 — Play's own zoom, zooming on the cursor, Camera gadgets, walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -344,6 +345,21 @@ Two physics-engine facts shaped the rest, both **measured, not assumed**:
   Not `Body.rotate`: with `updateVelocity` it sets `positionPrev` to the old
   position and the Verlet step moves the body a second time.
 
+**A rebuild keeps every bolt where it is in the world.** `rebuildFromPieces`
+reads each bolt's world point off the OLD body before it goes
+(`boltWorldPoint`), re-points the constraint at the new body, and
+`refreshBoltAnchors(b, true)` rebuilds both offsets from that point. Before
+this, only the body reference was swapped and the anchor offsets were left
+as they were — measured from the old centre — so any rebuild that moved the
+centroid moved every bolt by the same amount. Carson painted a big slab onto
+the left of a wall of motor-bolted sponges and every sponge jumped left with
+the wall's new centre: 190px in the probe. The `keepRest` flag matters: the
+new body starts square with its old turn baked into the polygons, so `rest`
+is moved by that turn (`-=` for the A side, `+=` for B) to keep the same
+relative pose, rather than re-read as "wherever it happens to be" — a sprung
+bolt mid-swing goes on springing to where it did. `carryBolts` (resize,
+flip) still re-reads rest, as before.
+
 **Angle limits** (`limit`, `minA`, `maxA`, degrees either side of rest) are a
 hard stop: past the edge the free body is turned back to it about the pivot
 with `Body.rotate` *without* `updateVelocity` — so `positionPrev` moves with
@@ -396,6 +412,7 @@ Each gadget has an **output**, 0 or 1:
 | gadget | on when | settings |
 | --- | --- | --- |
 | **sensor** | the player is within `radius` (Play only) | radius |
+| **camera** | takes over the Play camera while the player is in `radius`, or while wired on — see The camera | zoom, tracking, speed, radius |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
 
@@ -410,7 +427,7 @@ unwired receiver behaves as it always did — that is the whole compatibility
 story. The gadget step is registered before the bolt step so the inputs are
 fresh when bolts read them.
 
-What takes an input today (`canReceive`): a **motor bolt** — the signal is
+What takes an input today (`canReceive`): a **camera** (see The camera); a **motor bolt** — the signal is
 the throttle, and off holds firm like a tight bolt (zeroing the velocity
 alone let gravity creep the arm 3.5° in half a second, so the stop angle is
 held and turned back to); a **wobble bolt** — wired, it is a *flipper*:
@@ -782,6 +799,56 @@ which replaced the slider under the cursor mid-drag and under the keys
 mid-nudge; it updates that span in place now. The global key handlers
 already ignore any focused `INPUT`, so A/D on a slider never walk the
 player.
+
+## The camera
+
+**Build zooms on the cursor.** `zoomAround` (the wheel, Ctrl +/−) keeps the
+world point under the cursor where it is — and lets go of the character to
+do it (`camFollow = false`), since following would snap the view straight
+back onto them and the cursor would mean nothing. The home button brings
+it back. `buildZoom` is the editor's zoom, persisted as `pg_zoom`;
+`applyCamScale` only writes it outside Play.
+
+**Play has the level's own zoom.** `worldSettings.playZoom` (World →
+Camera, with a "use the zoom I have now" button), applied on entering Play
+and swapped back for `buildZoom` on leaving. The wheel does nothing in Play
+(`zoomAround` returns).
+
+**Camera gadgets** — LBP2's Game Camera, researched: a zone, a view (angle
+and zoom), tracking ("how much it moves toward the player, or ignores
+them"), and speed. Here: `kind:"camera"` in `gadgets[]`, placed on an
+object like any gadget, hidden in Play by default. Settings in its box:
+`zoom` (0.3–3), `tracking` (0 fixed on the camera … 1 follows the player),
+`speed` (0 slow … 1 instant), `radius` (the zone). In Build a selected
+camera, or any with the tool in hand, draws its zone and the frame it will
+show at its zoom. It takes an input (`canReceive`): **wired, the signal
+decides and the zone is ignored** — my call, since a camera a switch
+turns on for a far-off door is the useful case and a huge radius covers the
+other; LBP2's own rule here was not findable. Unwired, the zone decides.
+Several active at once: the nearest wins (`activeCamera`).
+
+`updatePlayCamera` runs from `updateCamera` in Play: target zoom is the
+active camera's or `playZoom`; the target centre is the camera's spot
+pulled toward the player by `tracking`; both ease at `0.03 + 0.27 *
+speed` a frame while a camera is or was involved (`playCam.easing`), and
+**snap exactly onto the character when none ever was** — every existing
+test reads the camera as exact-follow, and levels without cameras play as
+they always did. `resetPlayCamera` on entering Play. Zone membership is
+read every frame off `gadgetWorld`, so a camera on a moving object moves
+its zone with it.
+
+**Player settings** live in World too: `walkSpeed` (a multiplier, 25–300%),
+`sprintSpeed` (100–300% *of walking*), `grabReach` (2–120px). `walkSpeedNow()`
+and `grabReach()` read them with `worldNum`, which fills the default for a
+level saved before the setting existed. `grabProbe` is rebuilt when the
+reach changes. `WORLD_DEFAULTS` is the one list; `starterLevel` resets to
+it (it used to leave gravity and light from the previous level);
+`packWorldSettings` / `unpackPlayerSettings` are the save and both loads.
+What is changed in Play is discarded with Play, like everything else.
+
+**Test note:** never start a drag off the screen in a suite. Playwright
+loses the button on a negative page coordinate and the *next* drag ends
+after its first step — an hour of "why is this rect 1/6 the size".
 
 ## The hover label
 

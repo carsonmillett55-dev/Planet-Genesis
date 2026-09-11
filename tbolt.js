@@ -259,6 +259,36 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('the joint is still closed after a flip', after.gap < 2, { before: before.gap, after: after.gap });
 
   console.log('');
+  console.log('== painting more onto a bolted wall leaves the bolts where they are ==');
+  // Carson's bug: a wall of motor-bolted sponges, then a big slab painted onto
+  // the wall's left, and every sponge jumped left with the wall's new centre.
+  await fresh();
+  await rect('wood', 0, X, Y-60, X+160, Y+120);          // Back: the wall
+  const spIds = [];
+  for (let i = 0; i < 3; i++){
+    await rect('sponge', 1, X+10 + i*50, Y, X+50 + i*50, Y+40);   // Mid: three sponges on it
+    await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('motorbolt'); });
+    await p.evaluate(([x,y]) => window.__pg.boltAt(x,y), [X+30 + i*50, Y+20]);
+  }
+  await p.evaluate(() => window.__pg.paused(false)); await p.waitForTimeout(400);   // let them spin a little
+  const spBefore = (await p.evaluate(() => window.__pg.stats())).filter(o => !o.static && o.pos.y < 2300).map(o => ({ id:o.id, x:o.pos.x, y:o.pos.y }));
+  const gapsBefore = (await boltsNow()).map(b => p.evaluate(id => window.__pg.boltGap(id), b.id));
+  ok('three sponges, each on a motor bolt', spBefore.length === 3 && (await boltsNow()).length === 3, { sponges: spBefore.length, bolts: (await boltsNow()).length });
+  await p.evaluate(() => window.__pg.paused(true));
+  await rect('wood', 0, X-380, Y-60, X+10, Y+120);        // a big slab painted onto the wall's left: same material, same layer, so it merges
+  await p.waitForTimeout(200);
+  const spWalls = (await p.evaluate(() => window.__pg.stats())).filter(o => o.pos.y < 2300 && o.layer === 0).length;
+  ok('the slab merged into the wall', spWalls === 1, spWalls);
+  await p.evaluate(() => window.__pg.paused(false)); await p.waitForTimeout(400);
+  const spAfter = (await p.evaluate(() => window.__pg.stats())).filter(o => !o.static && o.pos.y < 2300).map(o => ({ id:o.id, x:o.pos.x, y:o.pos.y }));
+  const spMoved = spBefore.map(b => { const a = spAfter.find(q => q.id === b.id); return a ? Math.hypot(a.x - b.x, a.y - b.y) : 9999; });
+  console.log('   sponges moved', spMoved.map(m => m.toFixed(1)).join(', '), 'px');
+  ok('none of the sponges shifted', spMoved.every(m => m < 4), spMoved);
+  const spGaps = await Promise.all((await boltsNow()).map(b => p.evaluate(id => window.__pg.boltGap(id), b.id)));
+  ok('and every bolt still holds tight', spGaps.every(g => g != null && g < 1), spGaps);
+  await p.evaluate(() => window.__pg.paused(true));
+
+  console.log('');
   console.log('== a bolt can be dragged to a new spot ==');
   const mv = await postAndArm('motorbolt');
   await p.evaluate(id => window.__pg.boltSet(id, { speed: 0.09, dir: -1 }), mv.id);

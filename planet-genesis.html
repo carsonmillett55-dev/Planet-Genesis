@@ -2034,7 +2034,16 @@
   World.add(world, walls);
 
   // World settings (Tools > World Settings) — live-tunable.
-  var worldSettings = { gravity: 1, waterLevel: null, ropeLength: 220, motorSpeed: 0.06, light: 1 };
+  /* grabReach px; walkSpeed and sprintSpeed are multipliers (sprint on top
+     of walk); playZoom is the camera's zoom in Play, set from Build. */
+  var WORLD_DEFAULTS = { gravity: 1, waterLevel: null, ropeLength: 220, motorSpeed: 0.06, light: 1,
+                         grabReach: 16, walkSpeed: 1, sprintSpeed: 1.45, playZoom: 1 };
+  var worldSettings = {};
+  function resetWorldSettings(){ for (var k in WORLD_DEFAULTS) worldSettings[k] = WORLD_DEFAULTS[k]; }
+  resetWorldSettings();
+  /* Reads with the default filled in, so a level saved before a setting
+     existed plays exactly as it did. */
+  function worldNum(k){ var v = worldSettings[k]; return (v == null || !isFinite(+v)) ? WORLD_DEFAULTS[k] : +v; }
 
   // ---- Layers ----
   var LAYER_NAMES = ["Back","Mid","Front"];
@@ -2396,6 +2405,15 @@
     var vel = oldBody ? { x: oldBody.velocity.x, y: oldBody.velocity.y } : { x:0, y:0 };
     var angVel = oldBody ? oldBody.angularVelocity : 0;
     var wasStatic = oldBody ? oldBody.isStatic : false;
+    var oldAngle = oldBody ? oldBody.angle : 0;
+    /* Where every bolt on this object is in the world, read off the OLD
+       body before it goes. The new body's centre is the new centroid, so
+       an anchor kept as an offset from the old centre would be off by the
+       whole shift — paint a big slab onto the left of a wall and every
+       sponge bolted to it jumped left with the centroid. That was Carson's
+       "all the sponges shifted wayyy over". */
+    var myBolts = bolts.filter(function(b){ return b.objA === obj || b.objB === obj; });
+    myBolts.forEach(function(b){ b.point = boltWorldPoint(b); });
     if (oldBody) World.remove(world, oldBody);
     obj.body = newBody;
     World.add(world, newBody);
@@ -2413,9 +2431,16 @@
       Body.setVelocity(newBody, vel);
       Body.setAngularVelocity(newBody, angVel);
     }
-    bolts.forEach(function(b){
+    myBolts.forEach(function(b){
       if (b.objA === obj) b.constraint.bodyA = newBody;
       if (b.objB === obj) b.constraint.bodyB = newBody;
+      // the new body starts square (its old turn is baked into the
+      // polygons), so the rest angle moves by that turn to keep the same
+      // relative pose — a sprung bolt mid-swing goes on springing to where
+      // it did, rather than adopting wherever it happened to be
+      if (b.objA === obj) b.rest -= oldAngle;
+      if (b.objB === obj) b.rest += oldAngle;
+      refreshBoltAnchors(b, true);
     });
     reanchorGadgets(obj);
     relinkAfterRebuild(obj, oldBody, newBody);
@@ -2629,9 +2654,9 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever"];
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever" };
+  var GADGET_KINDS = ["sensor","button","lever","camera"];
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera" };
   var gadgets = [], gadgetCounter = 1;
   var wires = [];                 // { from: gadget id, to: bolt or gadget id }
   var selectedGadget = null;
@@ -2651,6 +2676,15 @@
               sticky: !!extra.sticky, springs: !!extra.springs,
               scale: extra.scale != null ? +extra.scale : 1,
               visible: extra.visible != null ? !!extra.visible : true };
+    if (kind === "camera"){
+      /* LBP2's Game Camera: a zone, a view, how much it tracks the player
+         and how fast it moves. The view is centred on the camera itself. */
+      g.radius = extra.radius != null ? +extra.radius : 320;
+      g.zoom = extra.zoom != null ? Math.max(CAM_ZOOM_MIN, Math.min(CAM_ZOOM_MAX, +extra.zoom)) : 1;
+      g.tracking = extra.tracking != null ? Math.max(0, Math.min(1, +extra.tracking)) : 0.5;
+      g.speed = extra.speed != null ? Math.max(0, Math.min(1, +extra.speed)) : 0.5;
+      g.visible = extra.visible != null ? !!extra.visible : false;   // a camera is scenery only to its maker
+    }
     if (extra.on) g.on = true;
     gadgets.push(g);
     return g;
@@ -2692,7 +2726,7 @@
     });
   }
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston"); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera"); }
   function addWire(from, to){
     if (!from || !to || from === to) return false;
     if (!canReceive(to)) return false;
@@ -3240,7 +3274,7 @@
      both are set together — after a rebuild resets the body's angle to 0,
      leaving the old angle in there would rotate the anchor by the
      difference on the next step. That was the flip-drifts-bolts bug. */
-  function refreshBoltAnchors(b){
+  function refreshBoltAnchors(b, keepRest){
     var c = b.constraint;
     if (!c) return;
     if (b.objA && c.bodyA){
@@ -3251,7 +3285,7 @@
       c.pointB = { x: b.point.x - c.bodyB.position.x, y: b.point.y - c.bodyB.position.y };
       c.angleB = c.bodyB.angle;
     }
-    b.rest = c.bodyA.angle - c.bodyB.angle;
+    if (!keepRest) b.rest = c.bodyA.angle - c.bodyB.angle;
   }
   function boltsTouching(list){
     return bolts.filter(function(b){ return list.indexOf(b.objA) >= 0 || list.indexOf(b.objB) >= 0; });
@@ -3371,6 +3405,7 @@
   function starterLevel(){
     clearAllObjects();
     clearWater();
+    resetWorldSettings(); applyWorldSettings();
     buildLayer = MID_LAYER;
     // one plank, one rectangle, four corners
     var fy = WORLD_H - 45, fy2 = WORLD_H - 15;
@@ -3888,6 +3923,8 @@
      only to ask "is grabbable material within reach". */
   var grabConstraint = null, grabHeld = false, grabMouse = false, grabProbe = null;
   var WALK_SPEED = 4.2;
+  // the level's own walking and sprinting pace, from World settings
+  function walkSpeedNow(){ return WALK_SPEED * worldNum("walkSpeed") * (input.sprint ? worldNum("sprintSpeed") : 1); }
   /* Carrying. A grabbed object that is LIGHT ENOUGH — up to about one and a
      half of the player's own weight — is not pinned to; it is picked up.
      While held it floats to wherever the cursor is, within arm's reach of
@@ -3955,7 +3992,9 @@
      always outside the body. It starts at the true distance (no snap) and
      grows to that over a few steps. */
   function grabMinLen(){ var ch = 16; return Math.hypot(Math.max(0, PW/2 - ch), Math.max(0, PH/2 - ch)) + ch + 2; }
-  var GRAB_REACH = 16;
+  var GRAB_REACH = 16;   // the default; the level's own is worldSettings.grabReach
+  function grabReach(){ return worldNum("grabReach"); }
+  var grabProbeReach = -1;
   var flying = false;
   var mouseWorld = { x: 0, y: 0 };
 
@@ -4221,7 +4260,8 @@
     for (var i = 0; i < objects.length; i++){
       var o = objects[i], ob = o.body && o.body.bounds;
       if (!ob) continue;
-      if (ob.max.x < pb.min.x - GRAB_REACH || ob.min.x > pb.max.x + GRAB_REACH || ob.max.y < pb.min.y - GRAB_REACH || ob.min.y > pb.max.y + GRAB_REACH) continue;
+      var gr = grabReach();
+      if (ob.max.x < pb.min.x - gr || ob.min.x > pb.max.x + gr || ob.max.y < pb.min.y - gr || ob.min.y > pb.max.y + gr) continue;
       for (var k = 0; k < o.parts.length; k++){
         var m = o.parts[k].plugin && matOf(o.parts[k].plugin.materialId);
         // an object can be made grabbable whatever it is made of, or not,
@@ -4237,7 +4277,7 @@
   function grabTarget(){
     var near = grabbablePartsNear();
     if (!near.length || !player) return null;
-    if (!grabProbe) grabProbe = Bodies.rectangle(0, 0, PW + GRAB_REACH*2, PH + GRAB_REACH*2, { isSensor:true });
+    if (!grabProbe || grabProbeReach !== grabReach()){ grabProbeReach = grabReach(); grabProbe = Bodies.rectangle(0, 0, PW + grabProbeReach*2, PH + grabProbeReach*2, { isSensor:true }); }
     Body.setPosition(grabProbe, { x: player.position.x, y: player.position.y });
     var best = null, bestD = Infinity;
     for (var i = 0; i < near.length; i++){
@@ -4643,7 +4683,7 @@
     if (grabHeld && !grabConstraint) tryGrab();
     // Sprint is a bit quicker, not a dash — LBP has no sprint at all, so
     // this stays modest enough that levels built at walking pace still work.
-    var speed = flying ? FLY_SPEED : (input.sprint ? WALK_SPEED * 1.45 : WALK_SPEED);
+    var speed = flying ? FLY_SPEED : walkSpeedNow();
     var vx = 0;
     if (input.left) vx -= speed;
     if (input.right) vx += speed;
@@ -4766,7 +4806,7 @@
     lastFreeMoveT = now;
     if (!player || runner.enabled){ pausedVy = 0; return; }
     var k = dt/16.666;
-    var speed = (flying ? FLY_SPEED : (input.sprint ? WALK_SPEED * 1.45 : WALK_SPEED)) * k;
+    var speed = (flying ? FLY_SPEED : walkSpeedNow()) * k;
     var dx = 0, dy = 0;
     if (input.left) dx -= speed;
     if (input.right) dx += speed;
@@ -4914,7 +4954,8 @@
     var gadgetSnaps = gadgets.map(function(g){
       var wp = gadgetWorld(g);
       return { kind:g.kind, o:objIndex[g.obj.id], x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
-               sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale };
+               sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
+               zoom:g.zoom, tracking:g.tracking, speed:g.speed };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -4934,7 +4975,7 @@
       goal: goalPoint ? { x:goalPoint.x, y:goalPoint.y } : null,
       bubbles: bubbles.map(function(b){ return { x:b.x, y:b.y }; }),
       activeCheckpoint: activeCheckpoint,
-      world: { gravity: worldSettings.gravity, waterLevel: worldSettings.waterLevel, ropeLength: worldSettings.ropeLength, motorSpeed: worldSettings.motorSpeed, light: worldSettings.light },
+      world: packWorldSettings(),
       // A byte per cell, but only when there IS water — otherwise every
       // snapshot of every dry level would carry 45KB of zeroes for
       // nothing, and undo takes a lot of snapshots.
@@ -4977,6 +5018,7 @@
       worldSettings.gravity = snap.world.gravity; worldSettings.waterLevel = snap.world.waterLevel; worldSettings.ropeLength = snap.world.ropeLength;
       if (snap.world.motorSpeed != null) worldSettings.motorSpeed = snap.world.motorSpeed;
       if (snap.world.light != null) worldSettings.light = snap.world.light;
+      unpackPlayerSettings(snap.world);
       applyWorldSettings();
     }
     unpackWaterBytes(snap.water);
@@ -5050,7 +5092,16 @@
   }
 
   function applyWorldSettings(){
-    engine.gravity.y = BASE_GRAVITY * worldSettings.gravity;
+    engine.gravity.y = BASE_GRAVITY * worldNum("gravity");
+  }
+  function packWorldSettings(){
+    var w = {}; for (var k in WORLD_DEFAULTS) w[k] = worldSettings[k]; return w;
+  }
+  function unpackPlayerSettings(w){
+    worldSettings.grabReach = w.grabReach != null ? Math.max(2, Math.min(200, +w.grabReach)) : WORLD_DEFAULTS.grabReach;
+    worldSettings.walkSpeed = w.walkSpeed != null ? Math.max(0.1, Math.min(5, +w.walkSpeed)) : WORLD_DEFAULTS.walkSpeed;
+    worldSettings.sprintSpeed = w.sprintSpeed != null ? Math.max(1, Math.min(5, +w.sprintSpeed)) : WORLD_DEFAULTS.sprintSpeed;
+    worldSettings.playZoom = w.playZoom != null ? Math.max(CAM_ZOOM_MIN, Math.min(CAM_ZOOM_MAX, +w.playZoom)) : WORLD_DEFAULTS.playZoom;
   }
 
   /* ============================================================
@@ -5071,6 +5122,7 @@
   var camZoom = parseFloat(localStorage.getItem("pg_zoom") || "1") || 1;
   var CAM_ZOOM_MIN = 0.3, CAM_ZOOM_MAX = 3;
   var camFollow = true;
+  var buildZoom = camZoom;   // the editor's zoom, kept while Play uses the level's own
 
   function applyCamScale(){
     /* Zooming out past the size of the map would centre the view and show
@@ -5082,7 +5134,7 @@
     }
     camZoom = Math.max(floorZ, Math.min(CAM_ZOOM_MAX, camZoom));
     camScale = baseScale * camZoom;
-    localStorage.setItem("pg_zoom", String(camZoom));
+    if (typeof mode === "undefined" || mode !== "play"){ buildZoom = camZoom; localStorage.setItem("pg_zoom", String(camZoom)); }
     if (zoomValEl) zoomValEl.textContent = Math.round(camZoom*100) + "%";
   }
   /* Sized and measured from the CANVAS, not its wrapper. The wrapper has a
@@ -5114,9 +5166,53 @@
     camX = clampCam(camX, WORLD_W, visW);
     camY = clampCam(camY, WORLD_H, visH);
   }
+  /* ---- The Play camera --------------------------------------------
+     Play looks at the character at the level's own zoom
+     (worldSettings.playZoom, set in Build), never the editor's. A Camera
+     gadget whose zone holds the player — or whose wire is on — takes
+     over: its zoom, and a view centre that is its own spot pulled toward
+     the player by its tracking. Moves between views ease at the camera's
+     speed; with no camera ever involved the view sits exactly on the
+     character, as it always did, so nothing built on that changes. */
+  var playCam = { cx:0, cy:0, zoom:1, ever:false, easing:false, lastSpeed:0.5, active:null };
+  function activeCamera(){
+    if (!player) return null;
+    var best = null, bestD = Infinity;
+    for (var i = 0; i < gadgets.length; i++){
+      var g = gadgets[i];
+      if (g.kind !== "camera") continue;
+      var gp = gadgetWorld(g), d = dist(gp, player.position);
+      var on = g.input != null ? g.input > 0 : d < g.radius;
+      if (on && d < bestD){ bestD = d; best = g; }
+    }
+    return best;
+  }
+  function resetPlayCamera(){ playCam.ever = false; playCam.easing = false; playCam.active = null; }
+  function updatePlayCamera(){
+    var cg = activeCamera();
+    playCam.active = cg;
+    var wantZoom = cg ? cg.zoom : worldNum("playZoom");
+    var wx = player.position.x, wy = player.position.y;
+    if (cg){
+      var gp = gadgetWorld(cg), t = cg.tracking;
+      wx = gp.x + (wx - gp.x) * t; wy = gp.y + (wy - gp.y) * t;
+      playCam.lastSpeed = cg.speed; playCam.easing = true;
+    }
+    var k = playCam.easing ? 0.03 + 0.27 * playCam.lastSpeed : 1;
+    if (!playCam.ever){ playCam.cx = wx; playCam.cy = wy; playCam.zoom = wantZoom; playCam.ever = true; k = 1; }
+    playCam.cx += (wx - playCam.cx) * k; playCam.cy += (wy - playCam.cy) * k;
+    playCam.zoom += (wantZoom - playCam.zoom) * k;
+    if (!cg && Math.abs(wx - playCam.cx) < 0.3 && Math.abs(wy - playCam.cy) < 0.3 && Math.abs(wantZoom - playCam.zoom) < 0.0005) playCam.easing = false;
+    if (Math.abs(playCam.zoom - camZoom) > 1e-6){ camZoom = playCam.zoom; applyCamScale(); }
+    var visW = viewRectW / camScale, visH = viewRectH / camScale;
+    camX = clampCam(playCam.cx - visW/2, WORLD_W, visW);
+    camY = clampCam(playCam.cy - visH/2, WORLD_H, visH);
+  }
   function updateCamera(){
     var visW = viewRectW / camScale, visH = viewRectH / camScale;
-    if (camFollow && player){
+    if (camFollow && player && mode === "play"){
+      updatePlayCamera();
+    } else if (camFollow && player){
       camX = clampCam(player.position.x - visW/2, WORLD_W, visW);
       camY = clampCam(player.position.y - visH/2, WORLD_H, visH);
     } else {
@@ -5124,21 +5220,23 @@
     }
   }
   // Zoom about a fixed world point, so whatever is under the cursor
-  // stays under the cursor.
+  // stays under the cursor. Zooming is the editor's: in Play the zoom is
+  // the level's own and the wheel does nothing.
   function zoomAround(worldPt, factor){
+    if (mode === "play") return;
     var before = camZoom;
     camZoom *= factor;
     applyCamScale();
     if (camZoom === before) return;
     if (worldPt){
-      var visW = viewRectW / camScale, visH = viewRectH / camScale;
+      // zooming toward the cursor lets go of the character — otherwise the
+      // view snaps straight back to centre on them and the cursor means
+      // nothing. The home button brings it back.
+      if (camFollow){ camFollow = false; updateViewHud(); }
       // keep worldPt at the same fraction across the viewport
       camX = worldPt.x - (worldPt.x - camX) * (before / camZoom);
       camY = worldPt.y - (worldPt.y - camY) * (before / camZoom);
-      if (camFollow && player){
-        camX = clampCam(player.position.x - visW/2, WORLD_W, visW);
-        camY = clampCam(player.position.y - visH/2, WORLD_H, visH);
-      } else clampCamNow();
+      clampCamNow();
     }
   }
   function recenterCamera(){
@@ -5806,6 +5904,13 @@
       ctx.fillStyle = "#5C3A26"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.beginPath(); ctx.rect(-w/2, -3 - h, w, h);
       ctx.fillStyle = on ? "#B3261E" : "#E4574B"; ctx.fill(); ctx.stroke();
+    } else if (g.kind === "camera"){
+      ctx.beginPath(); ctx.rect(-12, -8, 20, 16);
+      ctx.fillStyle = on ? "#F2B705" : "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(8, -2); ctx.lineTo(16, -7); ctx.lineTo(16, 7); ctx.lineTo(8, 2); ctx.closePath();
+      ctx.fillStyle = on ? "#F2B705" : "#5C6B7A"; ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(-2, 0, 4.5, 0, Math.PI*2); ctx.fillStyle = "#F6ECD9"; ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(-2, 0, 1.8, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
     } else if (g.kind === "lever"){
       ctx.beginPath(); ctx.rect(-9, -3, 18, 7);
       ctx.fillStyle = "#5C3A26"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
@@ -5834,6 +5939,19 @@
         ctx.beginPath(); ctx.arc(0, 0, g.radius, 0, Math.PI*2);
         ctx.fillStyle = "rgba(127,212,217,0.12)"; ctx.fill();
         ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#2A7B8C"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.restore();
+      }
+      if (mode === "build" && g.kind === "camera" && (g === selectedGadget || isGadgetTool())){
+        // the zone that wakes it, and the frame it will show — as LBP
+        // draws a camera's view while you set it up
+        ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
+        ctx.beginPath(); ctx.arc(0, 0, g.radius, 0, Math.PI*2);
+        ctx.fillStyle = "rgba(242,183,5,0.10)"; ctx.fill();
+        ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#B3870A"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+        var fw = viewRectW / (baseScale * g.zoom), fh = viewRectH / (baseScale * g.zoom);
+        ctx.beginPath(); ctx.rect(-fw/2, -fh/2, fw, fh);
+        ctx.lineWidth = 2.5/camScale; ctx.strokeStyle = "#F2B705"; ctx.stroke();
+        ctx.lineWidth = 1/camScale; ctx.strokeStyle = "rgba(43,27,18,0.6)"; ctx.stroke();
         ctx.restore();
       }
       if (g === selectedGadget && mode === "build"){
@@ -7310,7 +7428,7 @@
     var grid = document.createElement("div"); grid.className = "catalogGrid";
     var defs = [["move","🕹","Move"],["bolt","🔩","Bolt"],["sprungbolt","🌀","Sprung bolt"],["motorbolt","⚙","Motor bolt"],["wobblebolt","↔","Wobble bolt"],
                 ["piston","🔩","Piston"],["rope","➰","Rope"],
-                ["sensor","👁","Player sensor"],["button","🔴","Button"],["lever","🎚","Lever"],
+                ["sensor","👁","Player sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["camera","🎥","Camera"],
                 ["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]];
     defs.forEach(function(d){
       var chip = document.createElement("div"); chip.className = "chip" + (currentTool===d[0] ? " active" : "");
@@ -7381,9 +7499,22 @@
         function(v){ worldSettings.waterLevel = WORLD_H - v; },
         function(v){ return v <= 0 ? "empty" : (v >= WORLD_H ? "the whole world" : Math.round(v/WORLD_H*100) + "% deep"); }));
     }
-    var mNote = document.createElement("div"); mNote.className = "noteText";
-    mNote.textContent = "How fast motor bolts turn. Place a bolt, then right-click it to cycle Tight → Loose → Motor ↻ → Motor ↺. Motors only run in Play.";
-    el.appendChild(mNote);
+    var ph = document.createElement("h3"); ph.textContent = "Player"; el.appendChild(ph);
+    el.appendChild(sliderRow("Walking speed", worldNum("walkSpeed"), 0.25, 3, 0.05, function(v){ worldSettings.walkSpeed = v; }, function(v){ return Math.round(v*100) + "%"; }));
+    el.appendChild(sliderRow("Sprint", worldNum("sprintSpeed"), 1, 3, 0.05, function(v){ worldSettings.sprintSpeed = v; }, function(v){ return Math.round(v*100) + "% of walking"; }));
+    el.appendChild(sliderRow("Grab reach", worldNum("grabReach"), 2, 120, 1, function(v){ worldSettings.grabReach = v; }, function(v){ return Math.round(v) + "px"; }));
+    var gNote = document.createElement("div"); gNote.className = "noteText";
+    gNote.textContent = "How far from the character's body a grabbable thing can be and still be caught. Small is LittleBigPlanet's touch-it-to-hold-it; bigger is more forgiving.";
+    el.appendChild(gNote);
+    var ch = document.createElement("h3"); ch.textContent = "Camera"; el.appendChild(ch);
+    var pzRow = sliderRow("Zoom in Play", worldNum("playZoom"), CAM_ZOOM_MIN, CAM_ZOOM_MAX, 0.05, function(v){ worldSettings.playZoom = v; }, function(v){ return Math.round(v*100) + "%"; });
+    el.appendChild(pzRow);
+    var pzBtn = document.createElement("button"); pzBtn.className = "btn tiny"; pzBtn.textContent = "Use the zoom I have now (" + Math.round(camZoom*100) + "%)";
+    pzBtn.addEventListener("click", function(){ worldSettings.playZoom = camZoom; renderPersonalMenu(); sfx("tick"); });
+    el.appendChild(pzBtn);
+    var cNote = document.createElement("div"); cNote.className = "noteText";
+    cNote.textContent = "Play always looks at the character at this zoom — the scroll wheel does nothing in Play. For a different view in one part of the level, put down a Camera from Tools.";
+    el.appendChild(cNote);
   }
   /* ============================================================
      6b. Character creator — a full-screen studio with a real brush.
@@ -8928,6 +9059,21 @@
         function(){ pushUndo("changing a button"); g.sticky = !g.sticky; g.on = false; renderSelBar(); sfx("tick"); }, g.sticky ? "on" : "");
       slider(opSection("Size"), "Width", g.size, 24, 200, 4, function(v){ g.size = v; }, function(v){ return Math.round(v) + "px"; }, "changing a button");
     }
+    if (g.kind === "camera"){
+      var pct = function(v){ return Math.round(v*100) + "%"; };
+      slider(opSection("View"), "Zoom", g.zoom, CAM_ZOOM_MIN, CAM_ZOOM_MAX, 0.05, function(v){ g.zoom = v; }, pct, "changing a camera");
+      var cz = opSection(null);
+      opBtn(cz, "Use the zoom I have now (" + Math.round(camZoom*100) + "%)", "Set the camera's zoom to what the editor is showing right now",
+        function(){ pushUndo("changing a camera"); g.zoom = Math.max(CAM_ZOOM_MIN, Math.min(CAM_ZOOM_MAX, camZoom)); renderSelBar(); sfx("tick"); }, "wide");
+      slider(opSection("Tracking"), "Follows the player", g.tracking, 0, 1, 0.05, function(v){ g.tracking = v; },
+        function(v){ return v <= 0.001 ? "not at all — fixed" : (v >= 0.999 ? "fully" : pct(v)); }, "changing a camera");
+      slider(opSection("Speed"), "Moves to its view", g.speed, 0, 1, 0.05, function(v){ g.speed = v; },
+        function(v){ return v <= 0.001 ? "slowly" : (v >= 0.999 ? "instantly" : pct(v)); }, "changing a camera");
+      slider(opSection("Zone"), "Radius", g.radius, 60, 1500, 10, function(v){ g.radius = v; }, function(v){ return Math.round(v) + "px"; }, "changing a camera");
+      var zn = document.createElement("div"); zn.className = "noteText";
+      zn.textContent = g.input != null ? "Wired: it takes over while its signal is on, wherever the player is." : "It takes over while the player is inside the zone. Wire it to a switch and the switch decides instead.";
+      zn.style.flexBasis = "100%"; opSection(null).appendChild(zn);
+    }
     if (g.kind === "lever"){
       var ls = opSection("Behaviour");
       opBtn(ls, g.springs ? "↩ Springs back when let go" : "⇅ Flips on, flips off", "",
@@ -8945,7 +9091,7 @@
       }, "wide");
     });
     opBtn(ws, wiring && wiring.from === g ? "… click what it should drive (Esc cancels)" : "🔌 Connect to…",
-      "Then click a motor bolt, wobble bolt or piston",
+      "Then click a motor bolt, wobble bolt, piston or camera",
       function(){ wiring = wiring && wiring.from === g ? null : { from: g }; renderSelBar(); sfx("tick"); }, "wide" + (wiring && wiring.from === g ? " on" : ""));
     var vis = opSection("In play");
     opBtn(vis, g.visible === false ? "🙈 Hidden in Play" : "👁 Visible in Play",
@@ -10302,6 +10448,9 @@
     // Play never wants a detached camera — you'd be steering a character
     // you can't see.
     camFollow = true;
+    if (m === "play"){ resetPlayCamera(); camZoom = worldNum("playZoom"); applyCamScale(); }
+    else { camZoom = buildZoom; applyCamScale(); }
+    updateViewHud();
     particles.length = 0;
     sfx("mode");
     input.left = input.right = input.up = input.down = false;
@@ -10400,7 +10549,8 @@
     var gadgetSnaps = gadgets.map(function(g){
       var wp = gadgetWorld(g);
       return { kind:g.kind, o:objIndex[g.obj.id], x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
-               sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale };
+               sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
+               zoom:g.zoom, tracking:g.tracking, speed:g.speed };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -10425,7 +10575,7 @@
       bubbles: bubbles.map(function(b){ return { x:b.x, y:b.y }; }),
       objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps, links: linkSnaps,
       water: packWaterSparse(),
-      world: { gravity: worldSettings.gravity, waterLevel: worldSettings.waterLevel, ropeLength: worldSettings.ropeLength, motorSpeed: worldSettings.motorSpeed, light: worldSettings.light }
+      world: packWorldSettings()
     };
   }
   function loadLevelData(data){
@@ -10470,6 +10620,7 @@
         worldSettings.ropeLength = data.world.ropeLength || 220;
         worldSettings.motorSpeed = data.world.motorSpeed != null ? data.world.motorSpeed : 0.06;
         worldSettings.light = data.world.light != null ? Math.max(0, Math.min(1, +data.world.light)) : 1;
+        unpackPlayerSettings(data.world);
         applyWorldSettings();
       }
     } else if (Array.isArray(data.blocks)){
