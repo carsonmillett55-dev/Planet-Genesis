@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` | Playwright suites, 364 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` | Playwright suites, 374 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 364 checks + checkgeom, in order
+npm test                   # all 374 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -60,6 +60,7 @@ node tbolt.js              # 50 — bolts: through the layers, four kinds, limit
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
 node tlink.js              # 49 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load
 node tgrab.js              # 50 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint
+node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -617,6 +618,29 @@ compatibility and is unused).
 
 `#toast` is `pointer-events:none` — a passing notice was swallowing paint
 strokes that landed under it.
+
+## The jump
+
+**Ground is what is under you.** `collisionActive` used to count any
+touch with a solid as footing, so pressing against a wall made you
+"grounded" and hammering Space climbed it — 409px up an 300px wall in
+the test, and over. Now the contact's normal has to be mostly vertical
+(`|n.y| >= 0.55`: a floor, or a slope up to about 57° that you could
+stand on) and its support points have to sit below the player's middle
+(a floor, not a ceiling you bumped). Only `|n.y|` is used, so which way
+Matter happens to point the normal does not matter.
+
+**And it is forgiving at both ends.** `grounded` is exact — one step off
+a ledge and it is false — which Carson felt as "I can't jump if I'm half
+a pixel off the ground". `canJumpNow()` allows a jump for `COYOTE_MS`
+(120) after the last grounded step, provided you are not already on the
+way up (`velocity.y > -1`), so it is never a second jump. And a press up
+to `JUMP_BUFFER_MS` (130) before landing fires on landing instead of
+being thrown away: `input.jumpBufferUntil` is set with `jumpQueued` and
+cleared by a jump, by hanging on a grab, and by a mode switch.
+`tjump.js` has both, plus the controls: too late off the ledge is just a
+fall, a press long before landing does nothing, a second press mid-jump
+adds nothing.
 
 ## Walking while paused
 

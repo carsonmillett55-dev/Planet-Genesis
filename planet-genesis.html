@@ -4280,10 +4280,23 @@
 
   var groundedNext = false;
   var lastFallSpeed = 0;
+  /* Forgiveness. `grounded` is exact — one step off a ledge and it is
+     false — which read as "I can't jump if I'm half a pixel off the
+     ground". So a jump is allowed for COYOTE_MS after the last grounded
+     step (as long as you are not already on the way up from a jump), and
+     a press up to JUMP_BUFFER_MS before landing fires on landing instead
+     of being thrown away. Both are what platformers do; LBP is generous
+     about it too. */
+  var COYOTE_MS = 120, JUMP_BUFFER_MS = 130, lastGroundedAt = -1e9;
+  function canJumpNow(){
+    if (grounded) return true;
+    return performance.now() - lastGroundedAt < COYOTE_MS && player.velocity.y > -1;
+  }
   onStep("beforeUpdate", function(){
     var wasGrounded = grounded;
     grounded = groundedNext;
     groundedNext = false;
+    if (grounded) lastGroundedAt = performance.now();
     // a landing worth hearing: you were airborne, coming down fast, and
     // now you're not
     if (player && !wasGrounded && grounded && lastFallSpeed > 5 && !flying){
@@ -4302,6 +4315,16 @@
       if (p.bodyA.isSensor || p.bodyB.isSensor) return;
       // (What you are carrying never gets here: it shares CARRY_GROUP with
       // the player and does not collide with it, so it cannot be footing.)
+      // And only what is UNDER you is footing. Any touch used to count, so
+      // pressing against a wall made you "grounded" and you could jump your
+      // way up it. The contact has to face mostly up or down (a floor, or a
+      // slope you could stand on) and sit below your middle (a floor, not a
+      // ceiling you bumped).
+      var c = p.collision, n = c.normal;
+      if (Math.abs(n.y) < 0.55) return;
+      var sup = c.supports, sy = 0, sn = 0;
+      for (var si = 0; si < sup.length; si++){ if (sup[si]){ sy += sup[si].y; sn++; } }
+      if (sn && sy / sn < player.position.y + PH * 0.2) return;
       groundedNext = true;
     });
   });
@@ -4404,7 +4427,7 @@
   /* ============================================================
      4. Input
      ============================================================ */
-  var input = { left:false, right:false, up:false, down:false, jumpQueued:false, sprint:false };
+  var input = { left:false, right:false, up:false, down:false, jumpQueued:false, jumpBufferUntil:0, sprint:false };
   var lastSpaceTime = 0;
   var DOUBLE_TAP_MS = 320;
   var glueMode = false;
@@ -4418,7 +4441,7 @@
     // a quick double-tap still has to jump — swallowing it meant every
     // other press did nothing when you were hammering the key.
     if (isDouble && mode === "build"){ setFlying(!flying); return; }
-    if (!flying) input.jumpQueued = true;
+    if (!flying){ input.jumpQueued = true; input.jumpBufferUntil = performance.now() + JUMP_BUFFER_MS; }
   }
 
   window.addEventListener("keydown", function(e){
@@ -4633,7 +4656,7 @@
       if (grabConstraint.length < gml) grabConstraint.length = Math.min(gml, grabConstraint.length + 1.5);
       var sv = player.velocity, sm = Math.hypot(sv.x, sv.y);
       if (sm > SWING_MAX_SPEED) Body.setVelocity(player, { x: sv.x * SWING_MAX_SPEED / sm, y: sv.y * SWING_MAX_SPEED / sm });
-      input.jumpQueued = false;
+      input.jumpQueued = false; input.jumpBufferUntil = 0;
       return;
     }
     if (flying){
@@ -4662,9 +4685,9 @@
         Body.setVelocity(player, { x: vx*0.74, y: vy });   // water drags on you
       } else {
         Body.setVelocity(player, { x: vx, y: player.velocity.y });
-        if (input.jumpQueued && grounded && !grabConstraint){
+        if ((input.jumpQueued || performance.now() < input.jumpBufferUntil) && canJumpNow() && !grabConstraint){
           Body.setVelocity(player, { x: player.velocity.x, y: -14 * carryJumpScale() });
-          grounded = false;
+          grounded = false; lastGroundedAt = -1e9; input.jumpBufferUntil = 0;
           sfx("jump");
           puff(player.position.x, player.position.y + PH/2, 5,
                { color:"#E8DCC0", speed:1.5, g:0.08, angle:Math.PI/2, spread:2.4, life:20 });
@@ -10142,7 +10165,7 @@
     particles.length = 0;
     sfx("mode");
     input.left = input.right = input.up = input.down = false;
-    input.jumpQueued = false;
+    input.jumpQueued = false; input.jumpBufferUntil = 0;
     exitGlueMode();
     closeObjCtxMenu();
     closePauseMenu();
