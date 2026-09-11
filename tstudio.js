@@ -1,0 +1,132 @@
+/* The studio: drawing strokes, undo and redo, the tools an artist wants,
+   frames and playback, and no rig mode.  node tstudio.js */
+const { launch, previewURL } = require('./tenv');
+let pass=0, fail=0;
+const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.log('  FAIL '+n+(e!==undefined?'  -> '+JSON.stringify(e):''));} };
+(async () => {
+  const b = await launch();
+  const p = await b.newPage({ viewport:{width:1280,height:760} });
+  const errs=[]; p.on('pageerror', e=>errs.push('PAGEERROR: '+e.message));
+  p.on('console', m=>{ if(m.type()==='error') errs.push('CONSOLE: '+m.text()); });
+  await p.goto(previewURL);
+  await p.waitForTimeout(1100);
+  const st = (cmd, a, b2) => p.evaluate(([c, x, y]) => window.__pg.studio(c, x, y), [cmd, a, b2]);
+  const drawing = () => st('drawing');
+  const where = () => st('where');
+  // a stroke on the canvas from one fraction of it to another
+  const stroke = async (fx0, fy0, fx1, fy1, mods) => {
+    const r = await st('canvasRect');
+    const a = { x: r.x + r.w * fx0, y: r.y + r.h * fy0 }, c = { x: r.x + r.w * fx1, y: r.y + r.h * fy1 };
+    if (mods) await p.keyboard.down(mods);
+    await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(c.x, c.y, { steps: 8 }); await p.mouse.up();
+    if (mods) await p.keyboard.up(mods);
+    await p.waitForTimeout(80);
+  };
+
+  console.log('');
+  console.log('== the studio opens; the rig mode is gone ==');
+  await p.evaluate(() => { localStorage.clear(); });
+  await p.reload(); await p.waitForTimeout(1100);
+  ok('it opens', await st('open'));
+  const chips = await st('chips');
+  ok('two kinds of character: Simple and Animated', chips.length === 2 && chips.includes('Simple') && chips.includes('Animated') && !chips.some(c => /Simple Animated/.test(c)), chips);
+  await st('click', 'Animated');
+  ok('Animated is picked', (await where()).mode === 'animated');
+  ok('and a fresh frame is empty', (await drawing()).length === 0);
+
+  console.log('');
+  console.log('== strokes, undo and redo ==');
+  await stroke(0.3, 0.3, 0.7, 0.6);
+  ok('a drag draws a stroke', (await drawing()).length === 1 && (await drawing())[0].p.length > 4, await drawing());
+  await stroke(0.2, 0.7, 0.8, 0.7);
+  ok('and another', (await drawing()).length === 2);
+  await p.keyboard.press('Control+z'); await p.waitForTimeout(80);
+  ok('Ctrl+Z takes the last one back', (await drawing()).length === 1, await st('history'));
+  await p.keyboard.press('Control+z'); await p.waitForTimeout(80);
+  ok('and the one before', (await drawing()).length === 0);
+  await p.keyboard.press('Control+y'); await p.waitForTimeout(80);
+  ok('Ctrl+Y brings one back', (await drawing()).length === 1);
+  await p.keyboard.press('Control+Shift+z'); await p.waitForTimeout(80);
+  ok('Ctrl+Shift+Z brings the other', (await drawing()).length === 2);
+  await st('click', 'Clear'); await p.waitForTimeout(80);
+  ok('Clear empties the frame', (await drawing()).length === 0);
+  await p.keyboard.press('Control+z'); await p.waitForTimeout(80);
+  ok('and is undone like anything else', (await drawing()).length === 2);
+
+  console.log('');
+  console.log('== the tools ==');
+  await st('click', 'Clear');
+  await stroke(0.2, 0.2, 0.8, 0.8, 'Shift');
+  const ln = await drawing();
+  ok('Shift makes a straight line: two points only', ln.length === 1 && ln[0].p.length === 4, ln[0] && ln[0].p.length);
+  await st('click', 'Clear');
+  await st('set', 'symmetry', true);
+  await stroke(0.2, 0.3, 0.4, 0.5);
+  const sym = await drawing();
+  ok('symmetry draws the stroke and its mirror', sym.length === 2 && Math.abs((1 - sym[0].p[0]) - sym[1].p[0]) < 0.001, sym.map(s => s.p.slice(0, 2)));
+  await st('set', 'symmetry', false);
+  await st('click', 'Clear');
+  await st('set', 'opacity', 0.5);
+  await stroke(0.3, 0.3, 0.6, 0.3);
+  ok('opacity goes on the stroke', Math.abs((await drawing())[0].a - 0.5) < 0.001, (await drawing())[0]);
+  await st('set', 'opacity', 1);
+  await st('setColor', '#123456');
+  await stroke(0.3, 0.5, 0.6, 0.5);
+  ok('any colour goes on the stroke', (await drawing())[1].c === '#123456');
+  // the eyedropper reads it back
+  await st('setColor', '#ffffff');
+  await st('set', 'tool', 'pick');
+  const r = await st('canvasRect');
+  await p.mouse.click(r.x + r.w * 0.45, r.y + r.h * 0.5); await p.waitForTimeout(80);
+  ok('the eyedropper picks the colour off the drawing', (await where()).color === '#123456', (await where()).color);
+  ok('and hands back the brush', (await where()).tool === 'brush');
+  await st('setColor', null);
+  await stroke(0.3, 0.5, 0.6, 0.5);
+  ok('the eraser is a stroke with no colour', (await drawing())[2].c === null);
+  await p.keyboard.press('b');
+  ok('B is back to the brush with a colour', (await where()).color !== null);
+  await p.keyboard.press('e');
+  ok('E is the eraser', (await where()).color === null);
+  await p.keyboard.press('b');
+  // zoom about the cursor, and the drawing is untouched
+  const before = await drawing();
+  await p.mouse.move(r.x + r.w * 0.5, r.y + r.h * 0.5); await p.mouse.wheel(0, -200); await p.waitForTimeout(100);
+  ok('the wheel zooms the stage', (await where()).zoom > 1.1, (await where()).zoom);
+  ok('and the drawing is untouched', JSON.stringify(await drawing()) === JSON.stringify(before));
+  await p.keyboard.press('0');
+  ok('0 zooms back out', (await where()).zoom === 1);
+
+  console.log('');
+  console.log('== frames ==');
+  await st('go', 'run', 0);
+  ok('Run starts with two frames', (await where()).frames === 2);
+  await st('click', 'Clear'); await stroke(0.2, 0.2, 0.5, 0.5);
+  await st('click', '+ copy');
+  ok('"+ copy" adds a copy after this one and moves to it', (await where()).frames === 3 && (await where()).frame === 1 && (await drawing()).length === 1, await where());
+  await st('click', '+ blank');
+  ok('"+ blank" adds an empty frame', (await where()).frames === 4 && (await drawing()).length === 0);
+  await st('click', '◀ move');
+  ok('it can be moved earlier', (await where()).frame === 1 && (await drawing()).length === 0);
+  await st('click', '✕');
+  ok('and deleted', (await where()).frames === 3);
+  for (let i = 0; i < 50; i++) await st('click', '+ blank');
+  ok('a state can have 48 frames', (await where()).frames === 48, (await where()).frames);
+  const fAt = (await where()).frame;
+  await p.keyboard.press('ArrowLeft'); await p.keyboard.press('ArrowLeft');
+  ok('the arrow keys step through them', (await where()).frame === fAt - 2, { from: fAt, now: (await where()).frame });
+  await p.keyboard.press('p'); await p.waitForTimeout(700);
+  const w1 = await where();
+  ok('P plays them at the state\'s speed', w1.playing && w1.frame !== 45, w1);
+  await p.keyboard.press('p');
+  await st('close');
+  const saved = await p.evaluate(() => JSON.parse(localStorage.getItem('pg_char_frame_counts')));
+  ok('the frame count is saved', saved && saved.run === 48, saved);
+  const fps = await p.evaluate(() => JSON.parse(localStorage.getItem('pg_char_fps')));
+  ok('with a speed per state', fps && fps.run === 8 && fps.idle === 2, fps);
+
+  console.log('');
+  console.log(fail ? `FAILED ${fail} of ${pass+fail} checks` : `ALL ${pass} checks`);
+  console.log('errors:', errs.length ? errs : 'none');
+  await b.close();
+  process.exit(fail ? 1 : 0);
+})();

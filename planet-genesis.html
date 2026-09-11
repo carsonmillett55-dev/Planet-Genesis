@@ -1087,7 +1087,10 @@
     border:2px solid var(--paper-edge); background:var(--stitch); color:var(--ink);
   }
   .ceChips button.active{ background:var(--yellow); border-color:var(--yellow-dark); }
-  .ceFrameStrip{ display:flex; flex-wrap:wrap; gap:.3rem; }
+  .cePicker{ width:1.9rem; height:1.9rem; padding:0; border:2px solid var(--ink); border-radius:50%; background:none; cursor:pointer; }
+  .cePicker::-webkit-color-swatch-wrapper{ padding:0; }
+  .cePicker::-webkit-color-swatch{ border:none; border-radius:50%; }
+  .ceFrameStrip{ display:flex; flex-wrap:wrap; gap:.3rem; max-height:11rem; overflow-y:auto; }
   .ceFrameStrip .fr{
     position:relative; width:2.6rem; height:3.4rem; border-radius:6px; cursor:pointer;
     border:2px solid var(--paper-edge); background:var(--paper); overflow:hidden;
@@ -1563,7 +1566,7 @@
     { id:"bored", label:"Bored", frames:1, emoji:"😐" }
   ];
   var EMOTE_KEYS = { "1":"happy", "2":"sad", "3":"angry", "4":"bored" };
-  var CHAR_MAX_FRAMES = 12;
+  var CHAR_MAX_FRAMES = 48;
 
   /* ---- Character art model -------------------------------------------
      A drawing is a list of SMOOTH BRUSH STROKES, not a pixel grid, so
@@ -1605,6 +1608,7 @@
       var s = strokes[i], pts = s.p;
       if (!pts || pts.length < 2) continue;
       c2d.globalCompositeOperation = s.c ? "source-over" : "destination-out";
+      c2d.globalAlpha = s.a != null ? s.a : 1;
       c2d.strokeStyle = s.c || "#000";
       c2d.lineWidth = Math.max(0.6, (s.w || 0.1) * h);
       c2d.beginPath();
@@ -1636,26 +1640,12 @@
   // Small/Medium/Large characters — the drawn art always fills the
   // hitbox exactly, so picking a size resizes the physics body too.
   var CHAR_SIZES = { small:{ w:30, h:42 }, medium:{ w:40, h:56 }, large:{ w:52, h:72 } };
-  var CHAR_SIZE_BASELINE = 56; // medium height — the reference the Rig anchors/parts are authored against
+  var CHAR_SIZE_BASELINE = 56; // medium height
   var CHAR_ASPECT = 40/56;     // the drawing box a character pose is authored in
-
-  // "Simple Animated" (Rig) mode: four separately-drawn parts posed and
-  // animated procedurally instead of hand-drawn per state. Anchor
-  // offsets are authored in medium-character pixels and scaled by the
-  // current size at draw time. gameW/gameH is the part's on-screen
-  // footprint at the medium-character baseline.
-  var RIG_PARTS = ["head","body","arm","leg"];
-  var RIG_PART_DEFS = {
-    head: { label:"Head", gameW:18, gameH:18, legacyW:8, legacyH:8  },
-    body: { label:"Body", gameW:20, gameH:28, legacyW:8, legacyH:12 },
-    arm:  { label:"Arm",  gameW:9,  gameH:24, legacyW:4, legacyH:12 },
-    leg:  { label:"Leg",  gameW:10, gameH:28, legacyW:4, legacyH:14 }
-  };
-  var RIG_ANCHOR_DEFAULTS = { headY:-30, armX:13, armY:-8, legX:7, legY:20 };
 
   // Character-editor brush: a real round brush now, sized as a fraction
   // of the drawing box's height so it means the same thing at any zoom.
-  var CE_BRUSH_MIN = 0.02, CE_BRUSH_MAX = 0.42;
+  var CE_BRUSH_MIN = 0.006, CE_BRUSH_MAX = 0.42;   // fine enough for an eyelash
   var ceBrushW = parseFloat(localStorage.getItem("pg_char_brush_w") || "0.11") || 0.11;
   function persistCharBrush(){ localStorage.setItem("pg_char_brush_w", String(ceBrushW)); }
 
@@ -4484,13 +4474,21 @@
   var mouseWorld = { x: 0, y: 0 };
 
   // ---- Character creator state (persisted like charColor) ----
-  var charMode = localStorage.getItem("pg_char_mode") || "preset"; // "preset" | "simple" | "animated" | "rig"
+  var charMode = localStorage.getItem("pg_char_mode") || "preset"; // "preset" | "simple" | "animated"
+  if (charMode === "rig") charMode = "animated";   // the four-part rig mode is gone
 
   var charFrameCounts = null;
   try { charFrameCounts = JSON.parse(localStorage.getItem("pg_char_frame_counts") || "null"); } catch(e){ charFrameCounts = null; }
   if (!charFrameCounts || typeof charFrameCounts !== "object") charFrameCounts = {};
   ANIM_STATES.forEach(function(s){ if (typeof charFrameCounts[s.id] !== "number") charFrameCounts[s.id] = s.frames; });
   function persistCharFrameCounts(){ localStorage.setItem("pg_char_frame_counts", JSON.stringify(charFrameCounts)); }
+  // frames a second, per state — a run cycle wants to be quick, a bored
+  // fidget slow
+  var charFps = null;
+  try { charFps = JSON.parse(localStorage.getItem("pg_char_fps") || "null"); } catch(e){ charFps = null; }
+  if (!charFps || typeof charFps !== "object") charFps = {};
+  ANIM_STATES.forEach(function(s){ if (typeof charFps[s.id] !== "number") charFps[s.id] = s.id === "run" ? 8 : 2; });
+  function persistCharFps(){ localStorage.setItem("pg_char_fps", JSON.stringify(charFps)); }
 
   var charSprites = null;
   try { charSprites = JSON.parse(localStorage.getItem("pg_char_sprites") || "null"); } catch(e){ charSprites = null; }
@@ -4516,33 +4514,10 @@
     persistCharFrameCounts(); persistCharSprites();
   }
 
-  // ---- "Simple Animated" rig: four separately-drawn parts, posed and
-  // animated procedurally rather than hand-drawn per frame. ----
-  var rigSprites = null;
-  try { rigSprites = JSON.parse(localStorage.getItem("pg_char_rig") || "null"); } catch(e){ rigSprites = null; }
-  if (!rigSprites || typeof rigSprites !== "object") rigSprites = {};
-  RIG_PARTS.forEach(function(p){
-    var d = RIG_PART_DEFS[p];
-    rigSprites[p] = normalizeDrawing(rigSprites[p], d.legacyW, d.legacyH);
-  });
-  function persistRigSprites(){
-    try { localStorage.setItem("pg_char_rig", JSON.stringify(rigSprites)); } catch(e){}
-  }
-  function rigHasAnyArt(){
-    return RIG_PARTS.some(function(p){ return drawingHasArt(rigSprites[p]); });
-  }
-  var rigAnchors = null;
-  try { rigAnchors = JSON.parse(localStorage.getItem("pg_char_rig_anchors") || "null"); } catch(e){ rigAnchors = null; }
-  if (!rigAnchors || typeof rigAnchors !== "object") rigAnchors = {};
-  Object.keys(RIG_ANCHOR_DEFAULTS).forEach(function(k){ if (typeof rigAnchors[k] !== "number") rigAnchors[k] = RIG_ANCHOR_DEFAULTS[k]; });
-  function persistRigAnchors(){ localStorage.setItem("pg_char_rig_anchors", JSON.stringify(rigAnchors)); }
-
   var activeEmote = null, emoteUntil = 0;
   function triggerEmote(id){
     if (charMode !== "animated"){
-      showToast(charMode === "rig"
-        ? "Emotes need a Draw: Animated character — Simple Animated poses itself instead."
-        : "Draw an Animated character in the Character Creator to use emotes.");
+      showToast("Draw an Animated character in the Character Creator to use emotes.");
       return;
     }
     activeEmote = id; emoteUntil = performance.now() + 1800;
@@ -4572,7 +4547,7 @@
     else if (player && !grounded && player.velocity.y > 1.2) stateId = "fall";
     else if (input.left || input.right || (player && Math.abs(player.velocity.x) > 0.6)) stateId = "run";
     var fc = charFrameCounts[stateId];
-    var period = stateId === "run" ? 130 : 480;
+    var period = 1000 / Math.max(1, charFps[stateId] || 2);
     var idx = fc > 1 ? Math.floor(performance.now()/period) % fc : 0;
     return { frame: pickCharFrame(stateId, idx) };
   }
@@ -4587,88 +4562,6 @@
     ctx.restore();
   }
 
-  // Draws one rig part into any 2D context already translated to that
-  // part's parent origin — shared by the live gameplay render and the
-  // editor's "full character" preview so they never drift apart.
-  // pivotTop=true anchors the part's top edge at (0,0) and lets it
-  // extend downward (arms/legs, for swinging from the shoulder/hip);
-  // pivotTop=false centers the part on (0,0) (head/body).
-  function drawRigPartAt(targetCtx, part, ax, ay, angle, pivotTop, scale){
-    var f = rigSprites[part];
-    if (!drawingHasArt(f)) return;
-    var d = RIG_PART_DEFS[part];
-    var pw = d.gameW * scale, ph = d.gameH * scale;
-    var cv = drawingCanvas(f, d.gameW*3, d.gameH*3);
-    targetCtx.save();
-    targetCtx.translate(ax*scale, ay*scale);
-    targetCtx.rotate(angle);
-    targetCtx.drawImage(cv, -pw/2, pivotTop ? 0 : -ph/2, pw, ph);
-    targetCtx.restore();
-  }
-  // Live gameplay render — called from inside drawCharacter's local
-  // space (already translated to the player's center). The body flips
-  // to face whichever side of the world the cursor is on; the head
-  // tilts (clamped) toward the cursor; arms & legs swing through a walk
-  // cycle while grounded and moving, and the arm nearest the hold
-  // point reaches toward it instead of swinging.
-  function drawRigCharacter(){
-    var p = player.position;
-    var bodyFacing = (mouseWorld.x < p.x) ? -1 : 1;
-    var moving = grounded && (input.left || input.right || Math.abs(player.velocity.x) > 0.6);
-    var swing = moving ? Math.sin(performance.now()/140) : 0;
-    var scale = PH / CHAR_SIZE_BASELINE;
-
-    ctx.save();
-    if (bodyFacing === -1) ctx.scale(-1, 1);
-
-    drawRigPartAt(ctx, "leg",  rigAnchors.legX, rigAnchors.legY,  swing*0.55, true, scale);
-    drawRigPartAt(ctx, "leg", -rigAnchors.legX, rigAnchors.legY, -swing*0.55, true, scale);
-    drawRigPartAt(ctx, "body", 0, 0, 0, false, scale);
-
-    var armAngleR = -swing*0.5, armAngleL = swing*0.5;
-    if (grabConstraint){
-      var grabPt = ropeAnchorWorld();
-      var dx = (grabPt.x - p.x) * bodyFacing, dy = grabPt.y - p.y;
-      var reach = Math.max(-2.2, Math.min(2.2, Math.atan2(-dx, dy)));
-      if (dx >= 0) armAngleR = reach; else armAngleL = reach;
-    }
-    drawRigPartAt(ctx, "arm",  rigAnchors.armX, rigAnchors.armY, armAngleR, true, scale);
-    drawRigPartAt(ctx, "arm", -rigAnchors.armX, rigAnchors.armY, armAngleL, true, scale);
-
-    // ---- head tracks the cursor ----
-    // Worked out entirely in WORLD space and only converted into the
-    // (possibly mirrored) local frame on the very last line, so the
-    // direction can't inverts when the character flips. The vertical
-    // term is floored so atan2 can never swing past 90° — the old
-    // version wrapped right past it the moment the cursor dropped below
-    // the head, which is what made the tilt read backwards. The head
-    // also shifts slightly toward the cursor, so the tracking reads
-    // clearly no matter how the head itself is drawn.
-    var headWorldY = p.y + rigAnchors.headY*scale;
-    var hdx = mouseWorld.x - p.x, hdy = mouseWorld.y - headWorldY;
-    var look = Math.atan2(hdx, Math.max(30, Math.abs(hdy)));
-    var headAng = Math.max(-0.5, Math.min(0.5, look)) * -bodyFacing;
-    var leanX = Math.max(-4, Math.min(4, hdx/22)) * bodyFacing;
-    var leanY = Math.max(-3, Math.min(3, hdy/30));
-    drawRigPartAt(ctx, "head", leanX, rigAnchors.headY + leanY, headAng, false, scale);
-
-    ctx.restore();
-  }
-  // Static "full character" preview used in the Rig editor — same part
-  // draw code, a fixed idle-ish pose, own local canvas-pixel space.
-  function drawRigPreview(pctx, w, h){
-    pctx.clearRect(0, 0, w, h);
-    var scale = (h*0.72) / CHAR_SIZE_BASELINE;
-    pctx.save();
-    pctx.translate(w/2, h*0.62);
-    drawRigPartAt(pctx, "leg",  rigAnchors.legX, rigAnchors.legY,  0.16, true, scale);
-    drawRigPartAt(pctx, "leg", -rigAnchors.legX, rigAnchors.legY, -0.16, true, scale);
-    drawRigPartAt(pctx, "body", 0, 0, 0, false, scale);
-    drawRigPartAt(pctx, "arm",  rigAnchors.armX, rigAnchors.armY, -0.12, true, scale);
-    drawRigPartAt(pctx, "arm", -rigAnchors.armX, rigAnchors.armY,  0.12, true, scale);
-    drawRigPartAt(pctx, "head", 0, rigAnchors.headY, 0, false, scale);
-    pctx.restore();
-  }
   var FLY_SPEED = 9;
   var SWIM_SPEED = 3.3;
   // How submerged the player is right now, 0..1. Cheap to call every
@@ -7008,15 +6901,10 @@
       ctx.restore();
     }
     var usedCustom = false;
-    if (charMode === "rig" && rigHasAnyArt()){
-      drawRigCharacter();
+    var anim = currentCharAnim();
+    if (anim && drawingHasArt(anim.frame)){
+      drawSpriteFrame(anim.frame, facing === -1);
       usedCustom = true;
-    } else if (charMode !== "rig"){
-      var anim = currentCharAnim();
-      if (anim && drawingHasArt(anim.frame)){
-        drawSpriteFrame(anim.frame, facing === -1);
-        usedCustom = true;
-      }
     }
     if (!usedCustom){
       ctx.beginPath();
@@ -7867,7 +7755,6 @@
   var pmBodyEl = document.getElementById("pmBody");
   var pmOpen = false, pmActiveSection = null, pmActivePage = null;
   var pmEditState = "idle", pmEditFrame = 0, pmPaintColor = CHAR_PALETTE[0];
-  var pmRigPart = "head";
 
   function togglePersonalMenu(){ pmOpen ? closePersonalMenu() : openPersonalMenu(); }
   function openPersonalMenu(){
@@ -8427,14 +8314,14 @@
   function currentCharacterData(){
     return JSON.parse(JSON.stringify({
       mode: charMode, color: charColor, size: charSize,
-      frameCounts: charFrameCounts, sprites: charSprites,
-      rig: rigSprites, anchors: rigAnchors
+      frameCounts: charFrameCounts, sprites: charSprites, fps: charFps
     }));
   }
   function applyCharacterData(d){
     if (!d) return;
-    charMode = d.mode || "preset";
+    charMode = d.mode === "rig" ? "animated" : (d.mode || "preset");   // the rig mode is gone; its saves become animated
     if (d.color) charColor = d.color;
+    if (d.fps) ANIM_STATES.forEach(function(s){ if (typeof d.fps[s.id] === "number") charFps[s.id] = Math.max(1, Math.min(30, d.fps[s.id])); });
     if (d.size && CHAR_SIZES[d.size]) setCharSize(d.size);
     ANIM_STATES.forEach(function(s){
       var n = (d.frameCounts && d.frameCounts[s.id]) || s.frames;
@@ -8443,14 +8330,8 @@
       charSprites[s.id] = [];
       for (var i = 0; i < charFrameCounts[s.id]; i++) charSprites[s.id][i] = normalizeDrawing(src[i], 10, 14);
     });
-    RIG_PARTS.forEach(function(p){
-      rigSprites[p] = normalizeDrawing(d.rig && d.rig[p], RIG_PART_DEFS[p].legacyW, RIG_PART_DEFS[p].legacyH);
-    });
-    Object.keys(RIG_ANCHOR_DEFAULTS).forEach(function(k){
-      rigAnchors[k] = (d.anchors && typeof d.anchors[k] === "number") ? d.anchors[k] : RIG_ANCHOR_DEFAULTS[k];
-    });
     localStorage.setItem("pg_char_color", charColor);
-    persistCharMode(); persistCharFrameCounts(); persistCharSprites(); persistRigSprites(); persistRigAnchors();
+    persistCharMode(); persistCharFrameCounts(); persistCharSprites(); persistCharFps();
   }
   function saveCurrentCharacter(){
     var data = currentCharacterData();
@@ -8464,7 +8345,13 @@
     });
   }
 
-  // ---- the full-screen editor ----
+  // ---- the studio: one drawing-and-animation editor ----
+  /* Everything drawn in the game comes through here — the character today,
+     creatures, animated objects and particles after it. The SUBJECT says
+     what is being drawn (its states, its frames, its shape, how to preview
+     it, where to save); the studio does the drawing: brush, line, eyedropper,
+     any colour, opacity, symmetry, smoothing, zoom, onion skins, frame
+     tools, playback, and a real undo/redo on Ctrl+Z / Ctrl+Y. */
   var charEditorOverlay = document.getElementById("charEditorOverlay");
   var ceCanvas = document.getElementById("ceCanvas");
   var ceCtx = ceCanvas.getContext("2d");
@@ -8473,31 +8360,126 @@
   var ceModeRowEl = document.getElementById("ceModeRow");
   var ceStageEl = document.getElementById("ceStage");
   var ceHintEl = document.getElementById("ceHint");
-  var ceOnion = true;
-  var cePrevCanvas = null;
+  var ceTitleEl = charEditorOverlay.querySelector("h2");
+  var ceOnion = true, ceOnionNext = true, ceGuides = true, ceSymmetry = false, ceSmooth = true;
+  var ceTool = "brush";            // brush | line | pick
+  var ceOpacity = 1;
+  var ceZoom = 1, ceCX = 0.5, ceCY = 0.5;   // the stage's view: zoom about a point of the drawing
+  var cePlaying = false, cePlayLast = 0, cePlayAcc = 0;
+  var ceRecent = [];               // colours used lately, newest first
+  try { ceRecent = JSON.parse(localStorage.getItem("pg_ce_recent") || "[]"); } catch(e){ ceRecent = []; }
+  var cePrevCanvas = null, ceFrameStripEl = null;
+  var CE_HISTORY_MAX = 80;
+  var ceHistory = { undo: [], redo: [] }, cePending = null;
 
-  function ceIsRig(){ return charMode === "rig"; }
+  // -- the subject --
+  var ceSubject = null;
+  function ceCharacterSubject(){
+    return {
+      kind: "character", title: "✏️ Character Creator",
+      states: function(){ return charMode === "animated" ? ANIM_STATES : [ANIM_STATES[0]]; },
+      frames: function(st){ return charSprites[st]; },
+      count: function(st){ return charFrameCounts[st]; },
+      setCount: function(st, n){ setStateFrameCount(st, n); },
+      fps: function(st){ return charFps[st]; },
+      setFps: function(st, v){ charFps[st] = v; persistCharFps(); },
+      aspect: function(){ return CHAR_ASPECT; },
+      persist: function(){ persistCharSprites(); persistCharFrameCounts(); persistCharFps(); },
+      hint: function(){ return charMode === "simple" ? "One look for your character." : "A pose per state, as many frames as you like. Ctrl+Z undoes, Ctrl+Y redoes."; },
+      modes: function(){ return [["simple","Simple"],["animated","Animated"]]; },
+      mode: function(){ return charMode; },
+      setMode: function(m){ charMode = m; persistCharMode(); },
+      extraRight: function(el){ ceCharacterExtras(el); }
+    };
+  }
+  function ceStates(){ return ceSubject.states(); }
+  function ceFramesOf(st){ return ceSubject.frames(st); }
   function ceTargetDrawing(){
-    if (ceIsRig()) return rigSprites[pmRigPart];
-    return charSprites[pmEditState][pmEditFrame];
+    var arr = ceFramesOf(pmEditState);
+    if (!arr) return blankDrawing();
+    if (pmEditFrame >= arr.length) pmEditFrame = Math.max(0, arr.length - 1);
+    if (!arr[pmEditFrame]) arr[pmEditFrame] = blankDrawing();
+    return arr[pmEditFrame];
   }
-  function ceSetTarget(d){
-    if (ceIsRig()) rigSprites[pmRigPart] = d;
-    else charSprites[pmEditState][pmEditFrame] = d;
+  function ceSetTarget(d){ ceFramesOf(pmEditState)[pmEditFrame] = d; }
+  function cePersist(){ ceSubject.persist(); }
+  function ceAspect(){ return ceSubject.aspect(); }
+  function ceEnsureState(){
+    var sts = ceStates();
+    if (!sts.some(function(st){ return st.id === pmEditState; })){ pmEditState = sts[0].id; pmEditFrame = 0; }
   }
-  function cePersist(){ if (ceIsRig()) persistRigSprites(); else persistCharSprites(); }
-  function ceAspect(){
-    if (ceIsRig()){ var d = RIG_PART_DEFS[pmRigPart]; return d.gameW / d.gameH; }
-    return CHAR_ASPECT;
+
+  // -- undo / redo: whole-frame snapshots, one per change --
+  function ceBeginChange(){
+    cePending = { st: pmEditState, fr: pmEditFrame, before: JSON.stringify(ceTargetDrawing()) };
   }
-  // Onion skin: the frame before this one, faint, underneath — so a walk
-  // cycle can be drawn against the pose it has to flow out of.
-  function ceOnionDrawing(){
-    if (!ceOnion || ceIsRig() || charMode !== "animated") return null;
-    var arr = charSprites[pmEditState];
+  function ceEndChange(){
+    if (!cePending) return;
+    var after = JSON.stringify(ceTargetDrawing());
+    if (after !== cePending.before){
+      cePending.after = after;
+      ceHistory.undo.push(cePending);
+      if (ceHistory.undo.length > CE_HISTORY_MAX) ceHistory.undo.shift();
+      ceHistory.redo.length = 0;
+    }
+    cePending = null;
+    cePersist();
+  }
+  function ceApplyHistory(entry, useAfter){
+    pmEditState = entry.st; pmEditFrame = entry.fr;
+    var arr = ceFramesOf(pmEditState);
+    while (arr.length <= pmEditFrame) arr.push(blankDrawing());
+    var d = JSON.parse(useAfter ? entry.after : entry.before);
+    arr[pmEditFrame] = d; touchDrawing(d);
+    cePersist(); renderCharEditorPanels(); ceLayout();
+  }
+  function ceUndo(){
+    if (cePending) return;
+    var e = ceHistory.undo.pop();
+    if (!e){ showToast("Nothing to undo."); return; }
+    ceHistory.redo.push(e); ceApplyHistory(e, false);
+  }
+  function ceRedo(){
+    var e = ceHistory.redo.pop();
+    if (!e){ showToast("Nothing to redo."); return; }
+    ceHistory.undo.push(e); ceApplyHistory(e, true);
+  }
+  // a whole-frame edit that is not a stroke: clear, mirror, copy, paste
+  function ceEdit(fn){ ceBeginChange(); fn(); touchDrawing(ceTargetDrawing()); ceEndChange(); ceRedraw(); }
+
+  // -- the view: zoom about a point, pan --
+  function ceViewRect(){
+    // where the drawing box sits on the canvas, in canvas pixels
+    var w = ceCanvas.width, h = ceCanvas.height;
+    return { x: w * (0.5 - ceCX * ceZoom), y: h * (0.5 - ceCY * ceZoom), w: w * ceZoom, h: h * ceZoom };
+  }
+  function ceNorm(e){
+    // client → drawing fraction, through the view
+    var r = ceCanvas.getBoundingClientRect();
+    var fx = (e.clientX - r.left) / Math.max(1, r.width), fy = (e.clientY - r.top) / Math.max(1, r.height);
+    return { x: (fx - 0.5) / ceZoom + ceCX, y: (fy - 0.5) / ceZoom + ceCY };
+  }
+  function ceZoomAt(fx, fy, factor){
+    var ux = (fx - 0.5) / ceZoom + ceCX, uy = (fy - 0.5) / ceZoom + ceCY;
+    ceZoom = Math.max(1, Math.min(8, ceZoom * factor));
+    ceCX = ux - (fx - 0.5) / ceZoom; ceCY = uy - (fy - 0.5) / ceZoom;
+    ceClampView(); ceRedraw();
+  }
+  function ceClampView(){
+    var half = 0.5 / ceZoom;
+    ceCX = Math.max(half, Math.min(1 - half, ceCX)); ceCY = Math.max(half, Math.min(1 - half, ceCY));
+    if (ceZoom <= 1){ ceCX = 0.5; ceCY = 0.5; }
+  }
+  function ceResetView(){ ceZoom = 1; ceCX = 0.5; ceCY = 0.5; ceRedraw(); }
+
+  function ceOnionDrawing(dir){
+    if (!ceOnion) return null;
+    var arr = ceFramesOf(pmEditState);
     if (!arr || arr.length < 2) return null;
-    var prev = (pmEditFrame - 1 + arr.length) % arr.length;
-    return drawingHasArt(arr[prev]) ? arr[prev] : null;
+    if (dir > 0 && !ceOnionNext) return null;
+    var idx = (pmEditFrame + dir + arr.length) % arr.length;
+    if (idx === pmEditFrame) return null;
+    return drawingHasArt(arr[idx]) ? arr[idx] : null;
   }
 
   function ceLayout(){
@@ -8518,98 +8500,236 @@
     var w = ceCanvas.width, h = ceCanvas.height;
     ceCtx.setTransform(1,0,0,1,0,0);
     ceCtx.clearRect(0, 0, w, h);
-    var onion = ceOnionDrawing();
-    if (onion){
-      ceCtx.save(); ceCtx.globalAlpha = 0.2;
-      ceCtx.drawImage(drawingCanvas(onion, w, h), 0, 0);
+    var v = ceViewRect();
+    // the drawing box itself, so a zoomed view still shows its edge
+    ceCtx.save();
+    ceCtx.fillStyle = "rgba(255,255,255,0.55)"; ceCtx.fillRect(v.x, v.y, v.w, v.h);
+    ceCtx.restore();
+    var rw = Math.min(4096, Math.round(v.w)), rh = Math.min(4096, Math.round(v.h));
+    var prev = ceOnionDrawing(-1), next = ceOnionDrawing(1);
+    if (prev){ ceCtx.save(); ceCtx.globalAlpha = 0.22; ceCtx.drawImage(drawingCanvas(prev, rw, rh), v.x, v.y, v.w, v.h); ceCtx.restore(); }
+    if (next){ ceCtx.save(); ceCtx.globalAlpha = 0.12; ceCtx.drawImage(drawingCanvas(next, rw, rh), v.x, v.y, v.w, v.h); ceCtx.restore(); }
+    // composited from its own rasterisation, so eraser strokes take out
+    // only this drawing and leave the onion skins alone
+    ceCtx.drawImage(drawingCanvas(ceTargetDrawing(), rw, rh), v.x, v.y, v.w, v.h);
+    if (ceGuides){
+      ceCtx.save();
+      ceCtx.strokeStyle = "rgba(43,27,18,0.28)"; ceCtx.lineWidth = 1; ceCtx.setLineDash([4, 4]);
+      ceCtx.beginPath();
+      ceCtx.moveTo(v.x + v.w/2, v.y); ceCtx.lineTo(v.x + v.w/2, v.y + v.h);
+      ceCtx.moveTo(v.x, v.y + v.h/2); ceCtx.lineTo(v.x + v.w, v.y + v.h/2);
+      ceCtx.stroke();
+      ceCtx.setLineDash([]); ceCtx.strokeStyle = "rgba(43,27,18,0.45)";
+      ceCtx.strokeRect(v.x + 0.5, v.y + 0.5, v.w - 1, v.h - 1);
       ceCtx.restore();
     }
-    // Composited from its own rasterisation rather than stroked straight
-    // onto this canvas, so eraser strokes take out only this drawing and
-    // leave the onion skin below them alone.
-    ceCtx.drawImage(drawingCanvas(ceTargetDrawing(), w, h), 0, 0);
     ceRefreshPreview();
     ceRefreshFrameStrip();
   }
 
-  // ---- freehand painting ----
-  var ceStroke = null;
-  function ceNorm(e){
+  // -- painting --
+  var ceStroke = null, ceStroke2 = null, cePan = null, ceSpaceHeld = false;
+  function ceRecordColour(c){
+    if (!c) return;
+    ceRecent = [c].concat(ceRecent.filter(function(x){ return x !== c; })).slice(0, 10);
+    try { localStorage.setItem("pg_ce_recent", JSON.stringify(ceRecent)); } catch(e){}
+  }
+  function cePickAt(e){
     var r = ceCanvas.getBoundingClientRect();
-    return { x: (e.clientX - r.left) / Math.max(1, r.width), y: (e.clientY - r.top) / Math.max(1, r.height) };
+    var px = Math.round((e.clientX - r.left) / Math.max(1, r.width) * ceCanvas.width), py = Math.round((e.clientY - r.top) / Math.max(1, r.height) * ceCanvas.height);
+    // read the drawing alone, not the guides or onion skins
+    var v = ceViewRect(), cv = drawingCanvas(ceTargetDrawing(), Math.min(4096, Math.round(v.w)), Math.min(4096, Math.round(v.h)));
+    var sx = Math.round((px - v.x) / v.w * cv.width), sy = Math.round((py - v.y) / v.h * cv.height);
+    if (sx < 0 || sy < 0 || sx >= cv.width || sy >= cv.height) return null;
+    var d = cv.getContext("2d").getImageData(sx, sy, 1, 1).data;
+    if (d[3] < 40) return null;
+    var hex = function(n){ return ("0" + n.toString(16)).slice(-2); };
+    return "#" + hex(d[0]) + hex(d[1]) + hex(d[2]);
   }
   ceCanvas.addEventListener("pointerdown", function(e){
     e.preventDefault();
+    if (e.button === 1 || (e.button === 0 && ceSpaceHeld)){
+      cePan = { x: e.clientX, y: e.clientY, cx: ceCX, cy: ceCY };
+      ceCanvas.setPointerCapture(e.pointerId); return;
+    }
+    if (e.button !== 0) return;
+    if (ceTool === "pick"){
+      var c = cePickAt(e);
+      if (c){ pmPaintColor = c; ceRecordColour(c); ceTool = "brush"; renderCharEditorPanels(); showToast("Picked " + c); }
+      else showToast("Nothing there to pick.");
+      return;
+    }
     ceCanvas.setPointerCapture(e.pointerId);
     var n = ceNorm(e);
-    ceStroke = { c: pmPaintColor, w: ceBrushW, p: [n.x, n.y] };
+    ceBeginChange();
     var d = ceTargetDrawing();
+    ceStroke = { c: pmPaintColor, w: ceBrushW, p: [n.x, n.y] };
+    if (ceOpacity < 0.999) ceStroke.a = ceOpacity;
+    ceStroke.line = ceTool === "line" || e.shiftKey;
     d.push(ceStroke);
+    if (ceSymmetry){
+      ceStroke2 = { c: pmPaintColor, w: ceBrushW, p: [1 - n.x, n.y] };
+      if (ceOpacity < 0.999) ceStroke2.a = ceOpacity;
+      d.push(ceStroke2);
+    } else ceStroke2 = null;
+    if (pmPaintColor) ceRecordColour(pmPaintColor);
     touchDrawing(d);
     ceRedraw();
   });
   ceCanvas.addEventListener("pointermove", function(e){
+    if (cePan){
+      var r = ceCanvas.getBoundingClientRect();
+      ceCX = cePan.cx - (e.clientX - cePan.x) / Math.max(1, r.width) / ceZoom;
+      ceCY = cePan.cy - (e.clientY - cePan.y) / Math.max(1, r.height) / ceZoom;
+      ceClampView(); ceRedraw(); return;
+    }
     if (!ceStroke) return;
     var n = ceNorm(e);
     var p = ceStroke.p;
-    var dx = n.x - p[p.length-2], dy = n.y - p[p.length-1];
-    if (dx*dx + dy*dy < 0.00004) return; // skip jitter, keep the path light
-    p.push(n.x, n.y);
+    if (ceStroke.line){
+      // a straight line from where the press was to the cursor
+      p.length = 2; p.push(n.x, n.y);
+      if (ceStroke2){ ceStroke2.p.length = 2; ceStroke2.p.push(1 - n.x, n.y); }
+    } else {
+      var lx = p[p.length-2], ly = p[p.length-1];
+      if (ceSmooth){ n = { x: lx + (n.x - lx) * 0.55, y: ly + (n.y - ly) * 0.55 }; }   // a light stabiliser: the line lags the hand and loses the jitter
+      var dx = n.x - lx, dy = n.y - ly;
+      if (dx*dx + dy*dy < 0.000016 / ceZoom) return;   // skip jitter, keep the path light; finer when zoomed
+      p.push(n.x, n.y);
+      if (ceStroke2) ceStroke2.p.push(1 - n.x, n.y);
+    }
     touchDrawing(ceTargetDrawing());
     ceRedraw();
   });
   ["pointerup","pointercancel"].forEach(function(ev){
     ceCanvas.addEventListener(ev, function(){
+      if (cePan){ cePan = null; return; }
       if (!ceStroke) return;
-      ceStroke = null;
-      cePersist();
+      delete ceStroke.line;
+      ceStroke = null; ceStroke2 = null;
+      ceEndChange();
       ceRedraw();
     });
   });
+  ceCanvas.addEventListener("wheel", function(e){
+    e.preventDefault();
+    var r = ceCanvas.getBoundingClientRect();
+    ceZoomAt((e.clientX - r.left) / Math.max(1, r.width), (e.clientY - r.top) / Math.max(1, r.height), e.deltaY < 0 ? 1.15 : 1/1.15);
+  }, { passive: false });
 
-  function ceUndo(){
-    var d = ceTargetDrawing();
-    if (!d.length){ showToast("Nothing to undo."); return; }
-    d.pop(); touchDrawing(d); cePersist(); ceRedraw();
-  }
-  function ceClear(){
-    var d = ceTargetDrawing();
-    d.length = 0; touchDrawing(d); cePersist(); ceRedraw();
-  }
-  function ceMirror(){
-    var d = ceTargetDrawing();
-    d.forEach(function(s){ for (var i = 0; i < s.p.length; i += 2) s.p[i] = 1 - s.p[i]; });
-    touchDrawing(d); cePersist(); ceRedraw();
-  }
+  function ceClear(){ ceEdit(function(){ ceTargetDrawing().length = 0; }); }
+  function ceMirror(){ ceEdit(function(){ ceTargetDrawing().forEach(function(st){ for (var i = 0; i < st.p.length; i += 2) st.p[i] = 1 - st.p[i]; }); }); }
   function ceCopyFrom(srcDrawing){
     if (!drawingHasArt(srcDrawing)){ showToast("That frame is empty."); return; }
-    var copy = JSON.parse(JSON.stringify(srcDrawing));
-    ceSetTarget(copy); touchDrawing(copy); cePersist(); ceRedraw();
+    ceEdit(function(){ ceSetTarget(JSON.parse(JSON.stringify(srcDrawing))); });
     showToast("Copied.");
   }
+  var ceClipboard = null;
+  function ceCopyFrame(){ ceClipboard = JSON.stringify(ceTargetDrawing()); showToast("Frame copied."); }
+  function cePasteFrame(){ if (!ceClipboard){ showToast("Nothing copied yet."); return; } ceEdit(function(){ ceSetTarget(JSON.parse(ceClipboard)); }); }
+  // frame tools: insert after this one (blank or a copy), delete this one, move it
+  function ceInsertFrame(copy){
+    var arr = ceFramesOf(pmEditState);
+    if (ceSubject.count(pmEditState) >= CHAR_MAX_FRAMES){ showToast("That's the most frames a state can have (" + CHAR_MAX_FRAMES + ")."); return; }
+    var fresh = copy ? JSON.parse(JSON.stringify(ceTargetDrawing())) : blankDrawing();
+    arr.splice(pmEditFrame + 1, 0, fresh);
+    ceSubject.setCount(pmEditState, arr.length);
+    pmEditFrame++; ceHistory.undo.length = 0; ceHistory.redo.length = 0;
+    cePersist(); renderCharEditorPanels(); ceRedraw();
+  }
+  function ceDeleteFrame(){
+    var arr = ceFramesOf(pmEditState);
+    if (arr.length <= 1){ ceClear(); return; }
+    arr.splice(pmEditFrame, 1);
+    ceSubject.setCount(pmEditState, arr.length);
+    pmEditFrame = Math.min(pmEditFrame, arr.length - 1); ceHistory.undo.length = 0; ceHistory.redo.length = 0;
+    cePersist(); renderCharEditorPanels(); ceRedraw();
+  }
+  function ceMoveFrame(dir){
+    var arr = ceFramesOf(pmEditState), j = pmEditFrame + dir;
+    if (j < 0 || j >= arr.length) return;
+    var t = arr[pmEditFrame]; arr[pmEditFrame] = arr[j]; arr[j] = t;
+    pmEditFrame = j; ceHistory.undo.length = 0; ceHistory.redo.length = 0;
+    cePersist(); renderCharEditorPanels(); ceRedraw();
+  }
+  function ceGoFrame(i){
+    var n = ceFramesOf(pmEditState).length;
+    pmEditFrame = ((i % n) + n) % n;
+    renderCharEditorPanels(); ceRedraw();
+  }
+  // playback: the frames cycle at the state's speed while the button is on
+  function ceTick(now){
+    if (charEditorOverlay.hidden) return;
+    if (cePlaying){
+      var fps = Math.max(1, ceSubject.fps(pmEditState) || 2), n = ceFramesOf(pmEditState).length;
+      cePlayAcc += (now - cePlayLast);
+      var period = 1000 / fps;
+      if (n > 1 && cePlayAcc >= period){
+        cePlayAcc -= period; pmEditFrame = (pmEditFrame + 1) % n;
+        ceRefreshFrameStrip(true); ceRedraw();
+      }
+    }
+    cePlayLast = now;
+    requestAnimationFrame(ceTick);
+  }
 
-  function openCharEditor(){
-    if (charMode === "preset"){ charMode = "simple"; persistCharMode(); }
+  function ceOpenWith(subject){
+    ceSubject = subject;
+    ceHistory.undo.length = 0; ceHistory.redo.length = 0; cePending = null; ceStroke = null;
+    cePlaying = false; ceZoom = 1; ceCX = 0.5; ceCY = 0.5; ceTool = "brush";
+    ceEnsureState();
     closePersonalMenu();
     input.left = input.right = input.up = input.down = false;
     endPaintStroke();
     charEditorOverlay.hidden = false;
+    ceTitleEl.textContent = subject.title;
     renderCharEditorPanels();
-    // wait for layout so the stage has real dimensions to measure
     requestAnimationFrame(ceLayout);
+    cePlayLast = performance.now(); requestAnimationFrame(ceTick);
+  }
+  function openCharEditor(){
+    if (charMode === "preset"){ charMode = "simple"; persistCharMode(); }
+    ceOpenWith(ceCharacterSubject());
   }
   function closeCharEditor(){
     charEditorOverlay.hidden = true;
-    ceStroke = null;
-    cePersist();
+    ceStroke = null; cePlaying = false;
+    if (ceSubject){ cePersist(); if (ceSubject.onClose) ceSubject.onClose(); }
     if (pmOpen) renderPersonalMenu();
   }
   document.getElementById("ceDone").addEventListener("click", closeCharEditor);
   window.addEventListener("resize", ceLayout);
+  // the studio's own keys, while it is open
+  window.addEventListener("keydown", function(e){
+    if (charEditorOverlay.hidden) return;
+    if (document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA")) return;
+    var k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === "z" && !e.shiftKey){ e.preventDefault(); ceUndo(); return; }
+    if ((e.ctrlKey || e.metaKey) && (k === "y" || (k === "z" && e.shiftKey))){ e.preventDefault(); ceRedo(); return; }
+    if ((e.ctrlKey || e.metaKey) && k === "c"){ e.preventDefault(); ceCopyFrame(); return; }
+    if ((e.ctrlKey || e.metaKey) && k === "v"){ e.preventDefault(); cePasteFrame(); return; }
+    if (e.ctrlKey || e.metaKey) return;
+    if (e.code === "Space"){ e.preventDefault(); if (!e.repeat) ceSpaceHeld = true; return; }
+    if (k === "b"){ ceTool = "brush"; if (pmPaintColor === null) pmPaintColor = ceRecent[0] || CHAR_PALETTE[0]; renderCharEditorPanels(); }
+    else if (k === "e"){ ceTool = "brush"; pmPaintColor = null; renderCharEditorPanels(); }
+    else if (k === "l"){ ceTool = ceTool === "line" ? "brush" : "line"; renderCharEditorPanels(); }
+    else if (k === "i"){ ceTool = ceTool === "pick" ? "brush" : "pick"; renderCharEditorPanels(); }
+    else if (k === "x"){ ceSymmetry = !ceSymmetry; renderCharEditorPanels(); }
+    else if (k === "o"){ ceOnion = !ceOnion; renderCharEditorPanels(); ceRedraw(); }
+    else if (k === "g"){ ceGuides = !ceGuides; renderCharEditorPanels(); ceRedraw(); }
+    else if (k === "[" ){ ceBrushW = Math.max(CE_BRUSH_MIN, ceBrushW * 0.85); persistCharBrush(); renderCharEditorPanels(); }
+    else if (k === "]" ){ ceBrushW = Math.min(CE_BRUSH_MAX, ceBrushW / 0.85); persistCharBrush(); renderCharEditorPanels(); }
+    else if (e.code === "ArrowLeft"){ e.preventDefault(); ceGoFrame(pmEditFrame - 1); }
+    else if (e.code === "ArrowRight"){ e.preventDefault(); ceGoFrame(pmEditFrame + 1); }
+    else if (k === "p"){ cePlaying = !cePlaying; cePlayAcc = 0; renderCharEditorPanels(); }
+    else if (k === "0"){ ceResetView(); }
+  }, true);
+  window.addEventListener("keyup", function(e){ if (e.code === "Space") ceSpaceHeld = false; }, true);
 
-  function ceChip(label, active, fn){
+  function ceChip(label, active, fn, title){
     var b = document.createElement("button");
     b.textContent = label;
+    if (title) b.title = title;
     if (active) b.className = "active";
     b.addEventListener("click", fn);
     return b;
@@ -8619,200 +8739,196 @@
     var pctx = cePrevCanvas.getContext("2d");
     var w = cePrevCanvas.width, h = cePrevCanvas.height;
     pctx.clearRect(0, 0, w, h);
-    if (ceIsRig()){ drawRigPreview(pctx, w, h); return; }
     var f = ceTargetDrawing();
     if (!drawingHasArt(f)) return;
-    var ph = h * 0.86, pw = ph * CHAR_ASPECT;
+    var a = ceAspect(), ph = h * 0.86, pw = ph * a;
+    if (pw > w * 0.9){ pw = w * 0.9; ph = pw / a; }
     pctx.drawImage(drawingCanvas(f, pw*2, ph*2), (w-pw)/2, (h-ph)/2, pw, ph);
   }
-  var ceFrameStripEl = null;
-  function ceRefreshFrameStrip(){
+  function ceRefreshFrameStrip(activeOnly){
     if (!ceFrameStripEl) return;
-    var thumbs = ceFrameStripEl.querySelectorAll("canvas");
-    for (var i = 0; i < thumbs.length; i++){
-      var arr = charSprites[pmEditState];
-      var cv = thumbs[i], c2 = cv.getContext("2d");
+    var frs = ceFrameStripEl.querySelectorAll(".fr"), arr = ceFramesOf(pmEditState);
+    for (var i = 0; i < frs.length; i++){
+      frs[i].classList.toggle("active", i === pmEditFrame);
+      if (activeOnly) continue;
+      var cv = frs[i].querySelector("canvas"), c2 = cv.getContext("2d");
       c2.clearRect(0, 0, cv.width, cv.height);
       if (arr && drawingHasArt(arr[i])) c2.drawImage(drawingCanvas(arr[i], cv.width, cv.height), 0, 0);
     }
   }
+  function ceRow(){ var r = document.createElement("div"); r.className = "ceRow"; return r; }
+  function ceBtn(label, cls, fn, title){ var b = document.createElement("button"); b.className = "btn tiny " + (cls || "ghost"); b.textContent = label; if (title) b.title = title; b.addEventListener("click", fn); return b; }
+  function ceH4(t, el){ var h = document.createElement("h4"); h.textContent = t; el.appendChild(h); }
 
   function renderCharEditorPanels(){
-    // ---- header: which kind of character ----
+    ceEnsureState();
+    // ---- header: the subject's modes, if it has any ----
     ceModeRowEl.innerHTML = "";
-    [["simple","Simple"],["animated","Animated"],["rig","Simple Animated"]].forEach(function(m){
-      ceModeRowEl.appendChild(ceChip(m[1], charMode === m[0], function(){
-        charMode = m[0]; persistCharMode(); renderCharEditorPanels(); ceLayout();
-      }));
-    });
-
-    ceHintEl.textContent = ceIsRig()
-      ? "Draw each body part on its own — the game poses and animates them for you."
-      : (charMode === "simple" ? "One look for your character." : "A pose per state, with as many frames as you like.");
-
-    // ---- left: what you're drawing ----
-    ceLeftEl.innerHTML = "";
-    ceFrameStripEl = null;
-    if (ceIsRig()){
-      var ph = document.createElement("h4"); ph.textContent = "Body part"; ceLeftEl.appendChild(ph);
-      var partRow = document.createElement("div"); partRow.className = "ceChips";
-      RIG_PARTS.forEach(function(p){
-        partRow.appendChild(ceChip(RIG_PART_DEFS[p].label, pmRigPart === p, function(){
-          pmRigPart = p; renderCharEditorPanels(); ceLayout();
+    if (ceSubject.modes){
+      ceSubject.modes().forEach(function(m){
+        ceModeRowEl.appendChild(ceChip(m[1], ceSubject.mode() === m[0], function(){
+          ceSubject.setMode(m[0]); ceEnsureState(); renderCharEditorPanels(); ceLayout();
         }));
       });
-      ceLeftEl.appendChild(partRow);
+    }
+    ceHintEl.textContent = ceSubject.hint ? ceSubject.hint() : "";
 
-      var posH = document.createElement("h4"); posH.textContent = "Positioning"; ceLeftEl.appendChild(posH);
-      [["headY","Head height",-50,-10],["armX","Arm spread",4,26],["armY","Arm height",-30,10],
-       ["legX","Leg spread",2,20],["legY","Leg height",10,40]].forEach(function(s){
-        ceLeftEl.appendChild(sliderRow(s[1], rigAnchors[s[0]], s[2], s[3], 1, function(v){
-          rigAnchors[s[0]] = v; persistRigAnchors(); ceRefreshPreview();
-        }, function(v){ return Math.round(v) + "px"; }));
+    // ---- left: states, frames, playback ----
+    ceLeftEl.innerHTML = "";
+    ceFrameStripEl = null;
+    var sts = ceStates();
+    if (sts.length > 1){
+      ceH4("State", ceLeftEl);
+      var stateRow = document.createElement("div"); stateRow.className = "ceChips";
+      sts.forEach(function(st){
+        stateRow.appendChild(ceChip((st.emoji ? st.emoji + " " : "") + st.label, pmEditState === st.id, function(){
+          pmEditState = st.id; pmEditFrame = 0; cePlaying = false; renderCharEditorPanels(); ceRedraw();
+        }));
       });
-    } else {
-      if (charMode === "animated"){
-        var sh = document.createElement("h4"); sh.textContent = "State"; ceLeftEl.appendChild(sh);
-        var stateRow = document.createElement("div"); stateRow.className = "ceChips";
-        ANIM_STATES.forEach(function(s){
-          stateRow.appendChild(ceChip(s.emoji + " " + s.label, pmEditState === s.id, function(){
-            pmEditState = s.id; pmEditFrame = 0; renderCharEditorPanels(); ceRedraw();
-          }));
-        });
-        ceLeftEl.appendChild(stateRow);
-
-        var fh = document.createElement("h4"); fh.textContent = "Frames"; ceLeftEl.appendChild(fh);
-        var strip = document.createElement("div"); strip.className = "ceFrameStrip";
-        ceFrameStripEl = strip;
-        for (var i = 0; i < charFrameCounts[pmEditState]; i++){
-          (function(i){
-            var fr = document.createElement("div");
-            fr.className = "fr" + (pmEditFrame === i ? " active" : "");
-            var cv = document.createElement("canvas"); cv.width = 42; cv.height = 56;
-            var n = document.createElement("div"); n.className = "n"; n.textContent = (i+1);
-            fr.appendChild(cv); fr.appendChild(n);
-            fr.addEventListener("click", function(){ pmEditFrame = i; renderCharEditorPanels(); ceRedraw(); });
-            strip.appendChild(fr);
-          })(i);
-        }
-        ceLeftEl.appendChild(strip);
-
-        var fcRow = document.createElement("div"); fcRow.className = "ceRow";
-        var minus = document.createElement("button"); minus.className = "btn tiny ghost"; minus.textContent = "− frame";
-        minus.addEventListener("click", function(){
-          setStateFrameCount(pmEditState, charFrameCounts[pmEditState] - 1);
-          pmEditFrame = Math.min(pmEditFrame, charFrameCounts[pmEditState] - 1);
-          renderCharEditorPanels(); ceRedraw();
-        });
-        var plus = document.createElement("button"); plus.className = "btn tiny ghost"; plus.textContent = "+ frame";
-        plus.addEventListener("click", function(){
-          if (charFrameCounts[pmEditState] >= CHAR_MAX_FRAMES){ showToast("That's the most frames a state can have."); return; }
-          setStateFrameCount(pmEditState, charFrameCounts[pmEditState] + 1);
-          renderCharEditorPanels(); ceRedraw();
-        });
-        fcRow.appendChild(minus); fcRow.appendChild(plus);
-        ceLeftEl.appendChild(fcRow);
-
-        var onionBtn = document.createElement("button");
-        onionBtn.className = "btn tiny" + (ceOnion ? "" : " ghost");
-        onionBtn.textContent = ceOnion ? "🧅 Onion skin: on" : "🧅 Onion skin: off";
-        onionBtn.addEventListener("click", function(){ ceOnion = !ceOnion; renderCharEditorPanels(); ceRedraw(); });
-        ceLeftEl.appendChild(onionBtn);
-
-        var ch = document.createElement("h4"); ch.textContent = "Copy from"; ceLeftEl.appendChild(ch);
-        var copyRow = document.createElement("div"); copyRow.className = "ceChips";
-        var arr = charSprites[pmEditState];
-        if (arr.length > 1){
-          copyRow.appendChild(ceChip("Previous frame", false, function(){
-            ceCopyFrom(arr[(pmEditFrame - 1 + arr.length) % arr.length]);
-          }));
-        }
-        if (pmEditState !== "idle"){
-          copyRow.appendChild(ceChip("Idle pose", false, function(){ ceCopyFrom(charSprites.idle[0]); }));
-        }
-        ceLeftEl.appendChild(copyRow);
-      } else {
-        pmEditState = "idle"; pmEditFrame = 0;
-        var only = document.createElement("div"); only.className = "noteText";
-        only.textContent = "Simple characters have one look. Switch to Animated for per-state poses and frames.";
-        ceLeftEl.appendChild(only);
-      }
+      ceLeftEl.appendChild(stateRow);
+    }
+    var arr = ceFramesOf(pmEditState);
+    ceH4("Frames — " + arr.length, ceLeftEl);
+    var strip = document.createElement("div"); strip.className = "ceFrameStrip";
+    ceFrameStripEl = strip;
+    var a = ceAspect();
+    for (var i = 0; i < arr.length; i++){
+      (function(i){
+        var fr = document.createElement("div");
+        fr.className = "fr" + (pmEditFrame === i ? " active" : "");
+        var cv = document.createElement("canvas"); cv.width = Math.round(56 * a); cv.height = 56;
+        var n = document.createElement("div"); n.className = "n"; n.textContent = (i+1);
+        fr.appendChild(cv); fr.appendChild(n);
+        fr.addEventListener("click", function(){ pmEditFrame = i; cePlaying = false; renderCharEditorPanels(); ceRedraw(); });
+        strip.appendChild(fr);
+      })(i);
+    }
+    ceLeftEl.appendChild(strip);
+    var fr1 = ceRow();
+    fr1.appendChild(ceBtn("+ blank", "ghost", function(){ ceInsertFrame(false); }, "Add a blank frame after this one"));
+    fr1.appendChild(ceBtn("+ copy", "ghost", function(){ ceInsertFrame(true); }, "Add a copy of this frame after it"));
+    fr1.appendChild(ceBtn("✕", "red", function(){ ceDeleteFrame(); }, "Delete this frame"));
+    ceLeftEl.appendChild(fr1);
+    var fr2 = ceRow();
+    fr2.appendChild(ceBtn("◀ move", "ghost", function(){ ceMoveFrame(-1); }, "Move this frame earlier"));
+    fr2.appendChild(ceBtn("move ▶", "ghost", function(){ ceMoveFrame(1); }, "Move this frame later"));
+    ceLeftEl.appendChild(fr2);
+    var fr3 = ceRow();
+    fr3.appendChild(ceBtn("⧉ Copy", "ghost", ceCopyFrame, "Copy this frame (Ctrl+C)"));
+    fr3.appendChild(ceBtn("⧉ Paste", "ghost", cePasteFrame, "Paste over this frame (Ctrl+V)"));
+    ceLeftEl.appendChild(fr3);
+    if (arr.length > 1 || sts.length > 1){
+      ceH4("Playback", ceLeftEl);
+      var pb = ceRow();
+      pb.appendChild(ceBtn(cePlaying ? "❚❚ Pause" : "▶ Play", cePlaying ? "" : "ghost", function(){ cePlaying = !cePlaying; cePlayAcc = 0; renderCharEditorPanels(); }, "Play the frames in a loop (P)"));
+      ceLeftEl.appendChild(pb);
+      ceLeftEl.appendChild(sliderRow("Speed", ceSubject.fps(pmEditState) || 2, 1, 30, 1, function(v){ ceSubject.setFps(pmEditState, v); }, function(v){ return Math.round(v) + " frames/s"; }));
+    }
+    ceH4("Onion skin", ceLeftEl);
+    var on = document.createElement("div"); on.className = "ceChips";
+    on.appendChild(ceChip("Previous", ceOnion, function(){ ceOnion = !ceOnion; renderCharEditorPanels(); ceRedraw(); }, "The frame before, faint (O)"));
+    on.appendChild(ceChip("Next too", ceOnion && ceOnionNext, function(){ ceOnionNext = !ceOnionNext; if (ceOnionNext) ceOnion = true; renderCharEditorPanels(); ceRedraw(); }, "And the frame after, fainter"));
+    ceLeftEl.appendChild(on);
+    if (sts.length > 1 || arr.length > 1){
+      ceH4("Copy from", ceLeftEl);
+      var copyRow = document.createElement("div"); copyRow.className = "ceChips";
+      if (arr.length > 1) copyRow.appendChild(ceChip("Previous frame", false, function(){ ceCopyFrom(arr[(pmEditFrame - 1 + arr.length) % arr.length]); }));
+      if (pmEditState !== sts[0].id) copyRow.appendChild(ceChip(sts[0].label + " pose", false, function(){ ceCopyFrom(ceFramesOf(sts[0].id)[0]); }));
+      ceLeftEl.appendChild(copyRow);
     }
 
-    // ---- right: brush, preview, saved characters ----
+    // ---- right: tools, colour, brush, preview, and the subject's own things ----
     ceRightEl.innerHTML = "";
-    var bh = document.createElement("h4"); bh.textContent = "Brush"; ceRightEl.appendChild(bh);
-    ceRightEl.appendChild(sliderRow("Size", ceBrushW, CE_BRUSH_MIN, CE_BRUSH_MAX, 0.005,
-      function(v){ ceBrushW = v; persistCharBrush(); }, function(v){ return Math.round(v*100) + "%"; }));
+    ceH4("Tool", ceRightEl);
+    var tl = document.createElement("div"); tl.className = "ceChips";
+    tl.appendChild(ceChip("✎ Brush", ceTool === "brush" && pmPaintColor !== null, function(){ ceTool = "brush"; if (pmPaintColor === null) pmPaintColor = ceRecent[0] || CHAR_PALETTE[0]; renderCharEditorPanels(); }, "Freehand (B)"));
+    tl.appendChild(ceChip("╱ Line", ceTool === "line", function(){ ceTool = "line"; if (pmPaintColor === null) pmPaintColor = ceRecent[0] || CHAR_PALETTE[0]; renderCharEditorPanels(); }, "Straight lines (L) — or hold Shift while brushing"));
+    tl.appendChild(ceChip("◌ Eraser", pmPaintColor === null, function(){ ceTool = "brush"; pmPaintColor = null; renderCharEditorPanels(); }, "Rub out (E)"));
+    tl.appendChild(ceChip("✦ Pick", ceTool === "pick", function(){ ceTool = "pick"; renderCharEditorPanels(); }, "Pick a colour off the drawing (I)"));
+    ceRightEl.appendChild(tl);
+    var tg = document.createElement("div"); tg.className = "ceChips";
+    tg.appendChild(ceChip("⇔ Symmetry", ceSymmetry, function(){ ceSymmetry = !ceSymmetry; renderCharEditorPanels(); }, "Every stroke is mirrored left-right (X)"));
+    tg.appendChild(ceChip("〰 Steady", ceSmooth, function(){ ceSmooth = !ceSmooth; renderCharEditorPanels(); }, "Smooths a shaky hand"));
+    tg.appendChild(ceChip("⊞ Guides", ceGuides, function(){ ceGuides = !ceGuides; renderCharEditorPanels(); ceRedraw(); }, "Centre lines (G)"));
+    ceRightEl.appendChild(tg);
+    ceRightEl.appendChild(sliderRow("Size", ceBrushW, CE_BRUSH_MIN, CE_BRUSH_MAX, 0.002,
+      function(v){ ceBrushW = v; persistCharBrush(); }, function(v){ return (v*100).toFixed(1) + "%"; }));
+    ceRightEl.appendChild(sliderRow("Opacity", ceOpacity, 0.05, 1, 0.05, function(v){ ceOpacity = v; }, function(v){ return Math.round(v*100) + "%"; }));
 
+    ceH4("Colour", ceRightEl);
     var pal = document.createElement("div"); pal.className = "charPalette";
+    var picker = document.createElement("input"); picker.type = "color"; picker.className = "cePicker";
+    picker.value = /^#[0-9a-f]{6}$/i.test(pmPaintColor || "") ? pmPaintColor : (ceRecent[0] || CHAR_PALETTE[0]);
+    picker.title = "Any colour";
+    picker.addEventListener("input", function(){ pmPaintColor = picker.value; ceTool = ceTool === "pick" ? "brush" : ceTool; ceRecordColour(picker.value); });
+    picker.addEventListener("change", function(){ renderCharEditorPanels(); });
+    pal.appendChild(picker);
     CHAR_PALETTE.forEach(function(c){
       var sw = document.createElement("div");
       sw.className = "cswatch" + (pmPaintColor === c ? " sel" : "");
       sw.style.background = c;
-      sw.addEventListener("click", function(){ pmPaintColor = c; renderCharEditorPanels(); });
+      sw.addEventListener("click", function(){ pmPaintColor = c; if (ceTool === "pick") ceTool = "brush"; renderCharEditorPanels(); });
       pal.appendChild(sw);
     });
-    var er = document.createElement("div");
-    er.className = "cswatch eraseSw" + (pmPaintColor === null ? " sel" : "");
-    er.textContent = "✕"; er.title = "Eraser";
-    er.addEventListener("click", function(){ pmPaintColor = null; renderCharEditorPanels(); });
-    pal.appendChild(er);
     ceRightEl.appendChild(pal);
+    var recent = ceRecent.filter(function(c){ return CHAR_PALETTE.indexOf(c) < 0; });
+    if (recent.length){
+      var rp = document.createElement("div"); rp.className = "charPalette";
+      recent.forEach(function(c){
+        var sw = document.createElement("div");
+        sw.className = "cswatch" + (pmPaintColor === c ? " sel" : "");
+        sw.style.background = c; sw.title = "Used lately";
+        sw.addEventListener("click", function(){ pmPaintColor = c; if (ceTool === "pick") ceTool = "brush"; renderCharEditorPanels(); });
+        rp.appendChild(sw);
+      });
+      ceRightEl.appendChild(rp);
+    }
 
-    var toolRow = document.createElement("div"); toolRow.className = "ceRow";
-    var undoBtn = document.createElement("button"); undoBtn.className = "btn tiny ghost"; undoBtn.textContent = "↩ Undo";
-    undoBtn.addEventListener("click", ceUndo);
-    var mirBtn = document.createElement("button"); mirBtn.className = "btn tiny ghost"; mirBtn.textContent = "⇄ Mirror";
-    mirBtn.addEventListener("click", ceMirror);
-    var clrBtn = document.createElement("button"); clrBtn.className = "btn tiny red"; clrBtn.textContent = "Clear";
-    clrBtn.addEventListener("click", ceClear);
-    toolRow.appendChild(undoBtn); toolRow.appendChild(mirBtn); toolRow.appendChild(clrBtn);
+    var toolRow = ceRow();
+    toolRow.appendChild(ceBtn("↩ Undo", "ghost", ceUndo, "Ctrl+Z"));
+    toolRow.appendChild(ceBtn("↪ Redo", "ghost", ceRedo, "Ctrl+Y"));
     ceRightEl.appendChild(toolRow);
+    var toolRow2 = ceRow();
+    toolRow2.appendChild(ceBtn("⇄ Mirror", "ghost", ceMirror, "Flip this frame left-right"));
+    toolRow2.appendChild(ceBtn("1:1", "ghost", ceResetView, "Zoom back out (0) — scroll to zoom, hold Space or the middle button to pan"));
+    toolRow2.appendChild(ceBtn("Clear", "red", ceClear, "Empty this frame"));
+    ceRightEl.appendChild(toolRow2);
 
-    var vh = document.createElement("h4"); vh.textContent = ceIsRig() ? "Full character" : "In-game size"; ceRightEl.appendChild(vh);
+    ceH4(ceSubject.previewLabel || "In-game size", ceRightEl);
     cePrevCanvas = document.createElement("canvas");
     cePrevCanvas.className = "charPreviewCanvas";
     cePrevCanvas.width = 92; cePrevCanvas.height = 124;
     cePrevCanvas.style.alignSelf = "center";
     ceRightEl.appendChild(cePrevCanvas);
 
-    var szh = document.createElement("h4"); szh.textContent = "Character size"; ceRightEl.appendChild(szh);
-    var szRow = document.createElement("div"); szRow.className = "ceChips";
-    [["small","Small"],["medium","Medium"],["large","Large"]].forEach(function(s){
-      szRow.appendChild(ceChip(s[1], charSize === s[0], function(){ setCharSize(s[0]); renderCharEditorPanels(); }));
-    });
-    ceRightEl.appendChild(szRow);
+    if (ceSubject.extraRight) ceSubject.extraRight(ceRightEl);
 
-    var mh = document.createElement("h4"); mh.textContent = "My Characters"; ceRightEl.appendChild(mh);
-    var saveBtn = document.createElement("button"); saveBtn.className = "btn tiny"; saveBtn.textContent = "💾 Save this character";
-    saveBtn.addEventListener("click", saveCurrentCharacter);
-    ceRightEl.appendChild(saveBtn);
+    ceRefreshPreview();
+    ceRefreshFrameStrip();
+  }
+  // the character's own controls on the right: its size, and My Characters
+  function ceCharacterExtras(el){
+    ceH4("Character size", el);
+    var szRow = document.createElement("div"); szRow.className = "ceChips";
+    [["small","Small"],["medium","Medium"],["large","Large"]].forEach(function(sz){
+      szRow.appendChild(ceChip(sz[1], charSize === sz[0], function(){ setCharSize(sz[0]); renderCharEditorPanels(); }));
+    });
+    el.appendChild(szRow);
+    ceH4("My Characters", el);
+    el.appendChild(ceBtn("💾 Save this character", "", saveCurrentCharacter));
     if (!myCharacters.length){
       var em = document.createElement("div"); em.className = "noteText";
       em.textContent = "Saved characters show up here, on any level.";
-      ceRightEl.appendChild(em);
+      el.appendChild(em);
     }
     myCharacters.forEach(function(c){
       var row = document.createElement("div"); row.className = "myCharRow";
       var nm = document.createElement("div"); nm.className = "nm"; nm.textContent = c.name;
-      var load = document.createElement("button"); load.className = "btn tiny ghost"; load.textContent = "Load";
-      load.addEventListener("click", function(){
-        applyCharacterData(c.data);
-        renderCharEditorPanels(); ceLayout();
-        showToast("Loaded '"+c.name+"'");
-      });
-      var del = document.createElement("button"); del.className = "btn tiny red"; del.textContent = "✕";
-      del.addEventListener("click", function(){
-        myCharacters = myCharacters.filter(function(x){ return x.id !== c.id; });
-        persistMyCharacters(); renderCharEditorPanels();
-      });
+      var load = ceBtn("Load", "ghost", function(){ applyCharacterData(c.data); ceHistory.undo.length = 0; ceHistory.redo.length = 0; renderCharEditorPanels(); ceLayout(); showToast("Loaded '"+c.name+"'"); });
+      var del = ceBtn("✕", "red", function(){ myCharacters = myCharacters.filter(function(x){ return x.id !== c.id; }); persistMyCharacters(); renderCharEditorPanels(); });
       row.appendChild(nm); row.appendChild(load); row.appendChild(del);
-      ceRightEl.appendChild(row);
+      el.appendChild(row);
     });
-
-    ceRefreshPreview();
-    ceRefreshFrameStrip();
   }
 
   // ---- the Character tab in the personal menu: settings + a door
@@ -8835,7 +8951,7 @@
     var modeLabel = document.createElement("div"); modeLabel.className = "noteText"; modeLabel.textContent = "Character type";
     el.appendChild(modeLabel);
     var modeRow = document.createElement("div"); modeRow.className = "infoSubTabs"; modeRow.style.flexWrap = "wrap";
-    [["preset","Preset Color"],["simple","Draw: Simple"],["animated","Draw: Animated"],["rig","Simple Animated"]].forEach(function(m){
+    [["preset","Preset Color"],["simple","Draw: Simple"],["animated","Draw: Animated"]].forEach(function(m){
       var b = document.createElement("button");
       b.textContent = m[1];
       b.style.flex = "1 1 45%";

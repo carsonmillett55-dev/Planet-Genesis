@@ -69,6 +69,20 @@ HOOK = """
     liveWorld: function(){ return { light: liveLight(), water: liveWater() }; },
     moverDraft: function(){ return moverDraft ? moverDraft.id : null; },
     flying: function(){ return flying; },
+    studio: function(cmd, a, b){
+      if (cmd === 'open'){ openCharEditor(); return !charEditorOverlay.hidden; }
+      if (cmd === 'close'){ closeCharEditor(); return charEditorOverlay.hidden; }
+      if (cmd === 'drawing'){ return JSON.parse(JSON.stringify(ceTargetDrawing())); }
+      if (cmd === 'where'){ return { state: pmEditState, frame: pmEditFrame, frames: ceFramesOf(pmEditState).length, mode: charMode, tool: ceTool, color: pmPaintColor, symmetry: ceSymmetry, zoom: +ceZoom.toFixed(3), playing: cePlaying, fps: charFps[pmEditState] }; }
+      if (cmd === 'go'){ pmEditState = a; pmEditFrame = b || 0; renderCharEditorPanels(); ceRedraw(); return true; }
+      if (cmd === 'canvasRect'){ var r = ceCanvas.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }
+      if (cmd === 'chips'){ return Array.from(ceModeRowEl.querySelectorAll('button')).map(function(b){ return b.textContent; }); }
+      if (cmd === 'click'){ var btn = Array.from(charEditorOverlay.querySelectorAll('button')).find(function(x){ return x.textContent.trim() === a; }); if (btn){ btn.click(); return true; } return false; }
+      if (cmd === 'history'){ return { undo: ceHistory.undo.length, redo: ceHistory.redo.length }; }
+      if (cmd === 'setColor'){ pmPaintColor = a; return pmPaintColor; }
+      if (cmd === 'set'){ if (a === 'tool') ceTool = b; if (a === 'symmetry') ceSymmetry = !!b; if (a === 'opacity') ceOpacity = b; if (a === 'smooth') ceSmooth = !!b; renderCharEditorPanels(); return true; }
+      return null;
+    },
     menu: function(section){ if (section === null){ closePersonalMenu(); return false; } pmActiveSection = section; pmActivePage = null; openPersonalMenu(); return pmOpen; },
     camShot: function(id){ var g = gadgetById(id); return g && g.kind === 'camera' ? cameraShotRect(g) : null; },
     edCam: function(){ return edCam ? { zoom: edCam.zoom } : null; },
