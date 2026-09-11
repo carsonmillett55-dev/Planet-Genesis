@@ -2037,7 +2037,7 @@
   /* grabReach px; walkSpeed and sprintSpeed are multipliers (sprint on top
      of walk); playZoom is the camera's zoom in Play, set from Build. */
   var WORLD_DEFAULTS = { gravity: 1, waterLevel: null, ropeLength: 220, motorSpeed: 0.06, light: 1,
-                         grabReach: 16, walkSpeed: 1, sprintSpeed: 1.45, playZoom: 1 };
+                         grabReach: 16, walkSpeed: 1, sprintSpeed: 1.45, playZoom: 1, camHeight: -70 };   // camHeight: px above (negative) the character the view centres
   var worldSettings = {};
   function resetWorldSettings(){ for (var k in WORLD_DEFAULTS) worldSettings[k] = WORLD_DEFAULTS[k]; }
   resetWorldSettings();
@@ -2702,8 +2702,14 @@
          shake, and freezing the player for the shot. `sweep` is the
          easier-than-keyframes move: a second spot (an offset from the
          camera, in world axes) and zoom it glides to over `secs`. */
-      g.hold = extra.hold != null ? Math.max(0, Math.min(60, +extra.hold)) : 0;
-      g.holdForever = !!extra.holdForever;
+      /* holdMode: "zone" — the shot lasts while the player is in the zone
+         (or the signal is on); "time" — the shot lasts `hold` seconds from
+         when it starts, whatever the player does, and does not start again
+         until they have left and come back; "forever" — until another
+         camera takes over. */
+      g.hold = extra.hold != null ? Math.max(0.5, Math.min(60, +extra.hold)) : 3;
+      g.holdMode = extra.holdMode === "time" || extra.holdMode === "forever" ? extra.holdMode : (extra.holdForever ? "forever" : "zone");
+      g.holdForever = g.holdMode === "forever";
       g.shake = extra.shake != null ? Math.max(0, Math.min(1, +extra.shake)) : 0;
       g.freeze = !!extra.freeze;
       g.sweep = extra.sweep && isFinite(+extra.sweep.dx) ? { dx:+extra.sweep.dx, dy:+extra.sweep.dy||0,
@@ -4985,7 +4991,7 @@
       var wp = gadgetWorld(g);
       return { kind:g.kind, o:g.obj ? objIndex[g.obj.id] : null, x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
-               zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdForever:g.holdForever, shake:g.shake, freeze:g.freeze,
+               zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdMode:g.holdMode, holdForever:g.holdMode === "forever", shake:g.shake, freeze:g.freeze,
                sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
                zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null };
     });
@@ -5134,6 +5140,7 @@
     worldSettings.walkSpeed = w.walkSpeed != null ? Math.max(0.1, Math.min(5, +w.walkSpeed)) : WORLD_DEFAULTS.walkSpeed;
     worldSettings.sprintSpeed = w.sprintSpeed != null ? Math.max(1, Math.min(5, +w.sprintSpeed)) : WORLD_DEFAULTS.sprintSpeed;
     worldSettings.playZoom = w.playZoom != null ? Math.max(CAM_ZOOM_MIN, Math.min(CAM_ZOOM_MAX, +w.playZoom)) : WORLD_DEFAULTS.playZoom;
+    worldSettings.camHeight = w.camHeight != null && isFinite(+w.camHeight) ? Math.max(-600, Math.min(600, +w.camHeight)) : (w.playZoom != null ? 0 : WORLD_DEFAULTS.camHeight);   // a level saved with a zoom but no height was built centred
   }
 
   /* ============================================================
@@ -5216,19 +5223,25 @@
      as the Play camera is. This is what the gold frame draws, so it is the
      truth rather than the design intent — Carson found the intent alone
      "not super accurate", which with tracking at 50% it was not. */
+  /* Where the camera aims when it aims at the character: a little above
+     them (worldSettings.camHeight, negative is up), so there is more level
+     over their head than under their feet. LBP frames Sackboy that way. */
+  function playerAim(){ return { x: player.position.x, y: player.position.y + worldNum("camHeight") }; }
   function cameraShotRect(g){
     var c = cameraView(g), t = g.tracking || 0;
-    if (player && t > 0) c = { x: c.x + (player.position.x - c.x) * t, y: c.y + (player.position.y - c.y) * t };
+    if (player && t > 0){ var pa = cameraShotRectAim(); c = { x: c.x + (pa.x - c.x) * t, y: c.y + (pa.y - c.y) * t }; }
     var fr = cameraFrameRect(g, g.zoom, c);
     return { x: clampCam(fr.x, WORLD_W, fr.w), y: clampCam(fr.y, WORLD_H, fr.h), w: fr.w, h: fr.h };
   }
   /* And the inverse: the view spot that puts the shot's centre at `c` for
      the player as they stand now. With tracking at 100% the shot is on the
      player whatever the view is, so the view is left alone. */
+  function cameraShotRectAim(){ return playerAim(); }
   function cameraViewForShot(g, c){
     var t = g.tracking || 0, gp = gadgetWorld(g);
     if (t >= 0.999 || !player || t <= 0) return t >= 0.999 ? null : { dx: c.x - gp.x, dy: c.y - gp.y };
-    return { dx: (c.x - player.position.x * t) / (1 - t) - gp.x, dy: (c.y - player.position.y * t) / (1 - t) - gp.y };
+    var pa = playerAim();
+    return { dx: (c.x - pa.x * t) / (1 - t) - gp.x, dy: (c.y - pa.y * t) / (1 - t) - gp.y };
   }
   function activeCamera(){
     if (!player) return null;
@@ -5245,22 +5258,27 @@
     }
     return best;
   }
-  function resetPlayCamera(){ playCam.ever = false; playCam.easing = false; playCam.active = null; playCam.holdUntil = -1; playCam.t0 = 0; }
+  function resetPlayCamera(){ playCam.ever = false; playCam.easing = false; playCam.active = null; playCam.spent = null; playCam.t0 = 0; }
   function updatePlayCamera(){
     var now = performance.now();
     var trig = activeCamera(), cg = null;
-    if (trig){
-      if (playCam.active !== trig) playCam.t0 = now;   // a fresh shot: the sweep starts from its first spot
-      playCam.holdUntil = -1; cg = trig;
-    } else if (playCam.active){
-      // the trigger has ended: the camera holds its shot for its hold time
-      // (or for good) before handing back
-      if (playCam.holdUntil < 0) playCam.holdUntil = playCam.active.holdForever ? Infinity : now + (playCam.active.hold || 0) * 1000;
-      cg = now < playCam.holdUntil ? playCam.active : null;
+    // a timed shot that has run its course stays spent until its trigger
+    // lets go — or the player standing in the zone would start it again
+    if (playCam.spent && playCam.spent !== trig) playCam.spent = null;
+    if (trig && trig !== playCam.spent){
+      if (playCam.active !== trig) playCam.t0 = now;   // a fresh shot: the glide starts from its first spot
+      cg = trig;
+      if (trig.holdMode === "time" && now - playCam.t0 >= trig.hold * 1000){ playCam.spent = trig; cg = null; }
+    } else if (playCam.active && playCam.active !== playCam.spent){
+      // the trigger has ended: "forever" keeps the shot, "time" keeps it
+      // until its time is up, "zone" hands back at once
+      var a = playCam.active;
+      if (a.holdMode === "forever") cg = a;
+      else if (a.holdMode === "time" && now - playCam.t0 < a.hold * 1000) cg = a;
     }
     playCam.active = cg;
     var wantZoom = cg ? cg.zoom : (mode === "play" ? worldNum("playZoom") : (edCam ? edCam.zoom : buildZoom));
-    var wx = player.position.x, wy = player.position.y;
+    var aim = playerAim(), wx = aim.x, wy = aim.y;
     if (cg){
       var gp = cameraView(cg), t = cg.tracking;
       if (cg.sweep){
@@ -5296,17 +5314,41 @@
   function buildPreviewWanted(){
     return mode === "build" && !flying && camFollow && !!player && (!!playCam.active || playCam.easing || !!activeCamera());
   }
+  /* And with the World page open, the level shows what Play's default
+     camera will show — the character at the level's zoom and height —
+     whatever the editor camera was doing, so the two sliders can be set
+     by eye. Closing the page puts the editor's view back exactly. */
+  function worldPagePreviewWanted(){ return mode === "build" && pmOpen && pmActiveSection === "world" && !!player; }
+  function beginEditorHold(){
+    if (edCam) return;
+    var visW = viewRectW / camScale, visH = viewRectH / camScale;
+    edCam = { zoom: buildZoom, follow: camFollow, cx: camX + visW/2, cy: camY + visH/2 };
+  }
   function endBuildPreview(){
     if (!edCam) return;
-    camZoom = edCam.zoom; edCam = null; applyCamScale();
+    var e = edCam; edCam = null;
+    camZoom = e.zoom; applyCamScale();
+    if (e.follow === false){
+      camFollow = false;
+      var visW = viewRectW / camScale, visH = viewRectH / camScale;
+      camX = e.cx - visW/2; camY = e.cy - visH/2; clampCamNow();
+    }
+    updateViewHud();
   }
   function updateCamera(){
     var visW = viewRectW / camScale, visH = viewRectH / camScale;
     if (camFollow && player && mode === "play"){
       updatePlayCamera();
+    } else if (worldPagePreviewWanted()){
+      beginEditorHold();
+      var pz = worldNum("playZoom");
+      if (Math.abs(camZoom - pz) > 1e-6){ camZoom = pz; applyCamScale(); visW = viewRectW / camScale; visH = viewRectH / camScale; }
+      var aim = playerAim();
+      camX = clampCam(aim.x - visW/2, WORLD_W, visW);
+      camY = clampCam(aim.y - visH/2, WORLD_H, visH);
     } else if (buildPreviewWanted()){
       if (!edCam){
-        edCam = { zoom: buildZoom };
+        beginEditorHold();
         // ease in from the view as it is, rather than jumping
         playCam.ever = true; playCam.cx = camX + visW/2; playCam.cy = camY + visH/2; playCam.zoom = camZoom;
       }
@@ -7647,6 +7689,11 @@
     var ch = document.createElement("h3"); ch.textContent = "Camera"; el.appendChild(ch);
     var pzRow = sliderRow("Zoom in Play", worldNum("playZoom"), CAM_ZOOM_MIN, CAM_ZOOM_MAX, 0.05, function(v){ worldSettings.playZoom = v; }, function(v){ return Math.round(v*100) + "%"; });
     el.appendChild(pzRow);
+    el.appendChild(sliderRow("Camera height", worldNum("camHeight"), -600, 600, 10, function(v){ worldSettings.camHeight = v; },
+      function(v){ return v < -0.5 ? Math.round(-v) + "px above the character" : (v > 0.5 ? Math.round(v) + "px below" : "level with the character"); }));
+    var hNote = document.createElement("div"); hNote.className = "noteText";
+    hNote.textContent = "While this page is open the level shows exactly what Play will: the character, at this zoom and height.";
+    el.appendChild(hNote);
     var pzBtn = document.createElement("button"); pzBtn.className = "btn tiny"; pzBtn.textContent = "Use the zoom I have now (" + Math.round(camZoom*100) + "%)";
     pzBtn.addEventListener("click", function(){ worldSettings.playZoom = camZoom; renderPersonalMenu(); sfx("tick"); });
     el.appendChild(pzBtn);
@@ -9221,10 +9268,11 @@
         "Drag the box's edge to move it, its corners to resize it.";
       zn.style.flexBasis = "100%"; zs.appendChild(zn);
       var hd = opSection("Hold");
-      opBtn(hd, g.holdForever ? "∞ Holds until another camera takes over" : "⏱ Holds for a while, then hands back", "",
-        function(){ pushUndo("changing a camera"); g.holdForever = !g.holdForever; renderSelBar(); sfx("tick"); }, "wide" + (g.holdForever ? " on" : ""));
-      if (!g.holdForever) slider(hd, "After the trigger ends", g.hold, 0, 30, 0.5, function(v){ g.hold = v; },
-        function(v){ return v <= 0 ? "hands back at once" : (+v).toFixed(1) + "s"; }, "changing a camera");
+      var setHold = function(m){ pushUndo("changing a camera"); g.holdMode = m; g.holdForever = m === "forever"; renderSelBar(); sfx("tick"); };
+      opBtn(hd, g.input != null ? "Until the signal stops" : "Until the player leaves the zone", "", function(){ setHold("zone"); }, "wide" + (g.holdMode === "zone" ? " on" : ""));
+      opBtn(hd, "⏱ For a set time, then back to the player", "The shot runs its time out even if the player stays; it starts again once they have left and come back", function(){ setHold("time"); }, "wide" + (g.holdMode === "time" ? " on" : ""));
+      if (g.holdMode === "time") slider(hd, "How long", g.hold, 0.5, 60, 0.5, function(v){ g.hold = v; }, function(v){ return (+v).toFixed(1) + "s"; }, "changing a camera");
+      opBtn(hd, "∞ Until another camera takes over", "", function(){ setHold("forever"); }, "wide" + (g.holdMode === "forever" ? " on" : ""));
       var sw = opSection("Move");
       opBtn(sw, g.sweep ? "➜ Glides to a second spot" : "▪ Stays on its spot", g.sweep ? "Click to stop it moving" : "Click and a second spot appears — drag the knob to where the shot should end up",
         function(){
@@ -10796,7 +10844,7 @@
       var wp = gadgetWorld(g);
       return { kind:g.kind, o:g.obj ? objIndex[g.obj.id] : null, x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
-               zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdForever:g.holdForever, shake:g.shake, freeze:g.freeze,
+               zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdMode:g.holdMode, holdForever:g.holdMode === "forever", shake:g.shake, freeze:g.freeze,
                sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
                zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null };
     });

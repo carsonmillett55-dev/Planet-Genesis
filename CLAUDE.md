@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` | Playwright suites, 476 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` | Playwright suites, 489 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 476 checks + checkgeom, in order
+npm test                   # all 489 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -61,7 +61,7 @@ node tgadget.js            # 49 — player sensor, button, lever, wires, what th
 node tlink.js              # 59 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
 node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint; the weight slider
 node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
-node tcam.js               # 74 — Play's own zoom, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, hold, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
+node tcam.js               # 87 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -809,10 +809,24 @@ back onto them and the cursor would mean nothing. The home button brings
 it back. `buildZoom` is the editor's zoom, persisted as `pg_zoom`;
 `applyCamScale` only writes it outside Play.
 
-**Play has the level's own zoom.** `worldSettings.playZoom` (World →
-Camera, with a "use the zoom I have now" button), applied on entering Play
-and swapped back for `buildZoom` on leaving. The wheel does nothing in Play
-(`zoomAround` returns).
+**Play has the level's own zoom and height.** `worldSettings.playZoom`
+(World → Camera, with a "use the zoom I have now" button), applied on
+entering Play and swapped back for `buildZoom` on leaving; the wheel does
+nothing in Play (`zoomAround` returns). And `camHeight`, default −70:
+the default camera aims that many px *above* the character (`playerAim`),
+as LBP frames Sackboy — more level over the head than under the feet.
+Every place the camera aims at the player uses `playerAim`: the default
+follow, a gadget's tracking, the honest frame and its inverse. A level
+saved with a zoom but no height loads centred (0), as it was built.
+
+**The World page previews the default camera live.** While the personal
+menu is open on the World section in Build (`worldPagePreviewWanted`),
+the level shows the character at the Play zoom and height whatever the
+editor camera was doing — detached, zoomed, anywhere — so the two sliders
+are set by eye. `beginEditorHold` keeps the editor's zoom, follow flag and
+centre in `edCam` (the same hold the walking preview uses, now with
+follow and position too) and `endBuildPreview` puts all of it back when
+the page closes. No easing here: a slider should answer at once.
 
 **Camera gadgets** — LBP2's Game Camera, researched: a zone, a view (angle
 and zoom), tracking ("how much it moves toward the player, or ignores
@@ -892,10 +906,16 @@ time, Track Player, Camera Shake, Hold Time with Infinite, Disable
 Controllers — Flatness, Depth of Field and Skippable do not apply), on the
 same gadget rather than a second kind:
 
-- **Hold** — `hold` seconds after the trigger ends before it hands back,
-  or `holdForever` until another camera takes over. `playCam.holdUntil`
-  is set the frame the trigger drops; a fresh trigger clears it, and
-  another camera's zone wins over a held shot.
+- **Hold** — `holdMode`: `zone` (default) — the shot lasts while the
+  player is in the zone or the signal is on, and hands back the moment
+  they leave; `time` — the shot lasts `hold` seconds from when it starts
+  whatever the player does, and **does not start again until the trigger
+  has let go** (`playCam.spent` remembers the camera whose time ran out
+  and clears when its trigger is off for a frame — otherwise standing in
+  the zone would restart it every frame); `forever` — until another
+  camera takes over. `holdForever` is still written for older readers.
+  Carson: "how long it holds before going back to the player camera,
+  unless the player wants to leave it so it continues until they leave".
 - **Move** — Carson wanted something easier than keyframes: `sweep`
   is one second spot (`dx, dy`, an offset from the camera in world axes,
   so it rides with the host), an end `zoom`, and `secs`. Each time the

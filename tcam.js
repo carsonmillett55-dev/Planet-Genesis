@@ -48,12 +48,21 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await play();
   ok('entering Play takes the level\'s zoom', Math.abs((await view()).zoom - 0.6) < 0.01, (await view()).zoom);
   const ws = await p.evaluate(() => window.__pg.worldSize());
-  // mid-map, where the edges do not clamp the view — and held there, so the view and the character can be read together
-  await p.evaluate(([x,y]) => { window.__pg.playerTo(x, y); window.__pg.paused(true); }, [ws.w/2, ws.h/2]); await p.waitForTimeout(200);
-  const c0 = await centre(), pp0 = await pos();
-  await p.evaluate(() => window.__pg.paused(false));
-  ok('and looks at the character', Math.abs(c0.x - pp0.x) < 2 && Math.abs(c0.y - pp0.y) < 2, { centre: c0, player: pp0 });
-  const mid = await w2p(pp0.x, pp0.y);
+  // mid-map, where the edges do not clamp the view. Play cannot be paused, so
+  // the character is falling: read the view and the character in one go, and
+  // allow a physics step of lag between the two
+  await p.evaluate(([x,y]) => { window.__pg.playerTo(x, y); }, [ws.w/2, ws.h/2]); await p.waitForTimeout(200);
+  const both = () => p.evaluate(() => { const v = window.__pg.view(), q = window.__pg.playerPos(); return { cx: v.x + v.w/2, cy: v.y + v.h/2, px: q.x, py: q.y }; });
+  const bb = await both();
+  ok('and looks at the character — a little above them, 70px by default', Math.abs(bb.cx - bb.px) < 2 && Math.abs(bb.cy - (bb.py - 70)) < 20, bb);
+  await p.evaluate(() => window.__pg.worldSet('camHeight', 0)); await p.waitForTimeout(120);
+  const b0 = await both();
+  ok('camera height at 0 centres it on them', Math.abs(b0.cy - b0.py) < 20, b0);
+  await p.evaluate(() => window.__pg.worldSet('camHeight', -200)); await p.waitForTimeout(120);
+  const b1 = await both();
+  ok('and at 200 above, it looks 200px over their head', Math.abs(b1.cy - (b1.py - 200)) < 20, b1);
+  await p.evaluate(() => window.__pg.worldSet('camHeight', -70));
+  const mid = await w2p(bb.px, bb.py);
   await p.mouse.move(mid.x, mid.y); await p.mouse.wheel(0, -300); await p.waitForTimeout(150);
   ok('the wheel does nothing in Play', Math.abs((await view()).zoom - 0.6) < 0.01, (await view()).zoom);
   await build();
@@ -165,19 +174,35 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await lockAll();
   await p.evaluate(() => { window.__pg.setLayer(0); window.__pg.setTool('camera'); });
   await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [MX+360, MY-40]);
-  // hold for a second after the player leaves
-  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 0.5, tracking: 0, speed: 1, zone: { dx: 0, dy: 0, w: 440, h: 440 }, hold: 1 }), (await theCamera()).id);
+  // "until the player leaves the zone": the default — leave, and it hands back at once
+  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 0.5, tracking: 0, speed: 1, zone: { dx: 0, dy: 0, w: 440, h: 440 } }), (await theCamera()).id);
   await play();
   const hId = (await theCamera()).id;
+  ok('a fresh camera holds until the player leaves the zone', (await theCamera()).holdMode === 'zone');
   await standAt(MX+360, MY+60); await p.waitForTimeout(500);
   ok('in the zone, it is in charge', (await p.evaluate(() => window.__pg.playCam())).active === hId);
-  await standAt(MX-200, MY+60); await p.waitForTimeout(400);
-  ok('gone from the zone, it holds the shot for its hold time', (await p.evaluate(() => window.__pg.playCam())).active === hId, await p.evaluate(() => window.__pg.playCam()));
-  await p.waitForTimeout(1000);
-  ok('and hands back when the hold is up', (await p.evaluate(() => window.__pg.playCam())).active === null, await p.evaluate(() => window.__pg.playCam()));
+  await standAt(MX-200, MY+60); await p.waitForTimeout(150);
+  ok('gone from the zone, it hands back straight away', (await p.evaluate(() => window.__pg.playCam())).active === null, await p.evaluate(() => window.__pg.playCam()));
   await build(); await camMid();
-  // holding for good
-  await p.evaluate(id => window.__pg.gadgetSet(id, { holdForever: true }), (await theCamera()).id);
+  // "for a set time": the shot runs its time out even with the player still inside, and does not restart until they have left and come back
+  await p.evaluate(id => window.__pg.gadgetSet(id, { holdMode: 'time', hold: 1 }), (await theCamera()).id);
+  await play();
+  const tId = (await theCamera()).id;
+  await standAt(MX+360, MY+60); await p.waitForTimeout(400);
+  ok('set to a time, it starts when the player arrives', (await p.evaluate(() => window.__pg.playCam())).active === tId);
+  await p.waitForTimeout(1000);
+  ok('and is over when its time is up, player still in the zone', (await p.evaluate(() => window.__pg.playCam())).active === null, await p.evaluate(() => window.__pg.playCam()));
+  await p.waitForTimeout(400);
+  ok('and does not start again while they stand there', (await p.evaluate(() => window.__pg.playCam())).active === null);
+  await p.evaluate(id => window.__pg.gadgetSet(id, { hold: 2 }), tId);
+  await standAt(MX-200, MY+60); await p.waitForTimeout(200);
+  await standAt(MX+360, MY+60); await p.waitForTimeout(400);
+  ok('but leaving and coming back starts it afresh', (await p.evaluate(() => window.__pg.playCam())).active === tId);
+  await standAt(MX-200, MY+60); await p.waitForTimeout(300);
+  ok('and a timed shot keeps going after the player leaves, until its time is up', (await p.evaluate(() => window.__pg.playCam())).active === tId);
+  await build(); await camMid();
+  // "until another camera takes over"
+  await p.evaluate(id => window.__pg.gadgetSet(id, { holdMode: 'forever' }), (await theCamera()).id);
   await play();
   const fId = (await theCamera()).id;
   await standAt(MX+360, MY+60); await p.waitForTimeout(400);
@@ -185,7 +210,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('set to hold for good, it keeps the shot long after the player has gone', (await p.evaluate(() => window.__pg.playCam())).active === fId);
   await build(); await camMid();
   // the glide: a second spot 300px to the right and zoomed in, over half a second
-  await p.evaluate(id => window.__pg.gadgetSet(id, { holdForever: false, hold: 0, sweep: { dx: 300, dy: -100, zoom: 1.5, secs: 0.5 } }), (await theCamera()).id);
+  await p.evaluate(id => window.__pg.gadgetSet(id, { holdMode: 'zone', sweep: { dx: 300, dy: -100, zoom: 1.5, secs: 0.5 } }), (await theCamera()).id);
   await play();
   await standAt(MX+360, MY+60); await p.waitForTimeout(1200);
   const cEnd = await centre();
@@ -194,7 +219,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await build(); await camMid();
   const svS = await p.evaluate(() => window.__pg.serialize('sweep'));
   const gsS = svS.gadgets.filter(g => g.kind === 'camera')[0];
-  ok('the save carries hold, shake, freeze and the second spot', gsS && gsS.sweep && gsS.sweep.dx === 300 && gsS.sweep.zoom === 1.5 && gsS.sweep.secs === 0.5 && gsS.hold === 0 && gsS.holdForever === false, gsS);
+  ok('the save carries hold, shake, freeze and the second spot', gsS && gsS.sweep && gsS.sweep.dx === 300 && gsS.sweep.zoom === 1.5 && gsS.sweep.secs === 0.5 && gsS.holdMode === 'zone' && gsS.hold === 1, gsS);
   await p.evaluate(sv => window.__pg.load(sv), svS); await p.waitForTimeout(300);
   const gsB = await theCamera();
   ok('and a load brings them back', gsB && gsB.sweep && gsB.sweep.dx === 300 && gsB.sweep.dy === -100 && gsB.sweep.zoom === 1.5, gsB && gsB.sweep);
@@ -303,7 +328,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const pp = await pos(), vc = { x: MX+360 + gi1.view.dx, y: MY-40 + gi1.view.dy };
   const shot = await p.evaluate(id => window.__pg.camShot(id), gi1.id);
   const sc = { x: shot.x + shot.w/2, y: shot.y + shot.h/2 };
-  ok('with tracking at 50% the drawn frame sits halfway between the view spot and the player', Math.abs(sc.x - (vc.x + pp.x)/2) < 3 && Math.abs(sc.y - (vc.y + pp.y)/2) < 3, { shot: sc, view: vc, player: pp });
+  ok('with tracking at 50% the drawn frame sits halfway between the view spot and the player (as the camera aims at them, 70px up)', Math.abs(sc.x - (vc.x + pp.x)/2) < 3 && Math.abs(sc.y - (vc.y + pp.y - 70)/2) < 3, { shot: sc, view: vc, player: pp });
   // and it agrees with what Play actually shows from there
   await play();
   await standAt(MX-100, MY-300); await p.waitForTimeout(100);
@@ -388,6 +413,31 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await standAt(MX-300, MY+60); await p.waitForTimeout(900);
   ok('walking out of the zone hands the editor view back', Math.abs((await view()).zoom - 1) < 0.02 && (await p.evaluate(() => window.__pg.playCam())).active === null, { zoom: (await view()).zoom });
   await p.evaluate(() => window.__pg.setFlying(true));
+
+  console.log('');
+  console.log('== the World page shows exactly what Play\'s camera will show, as you set it ==');
+  await fresh(); await camMid(); await p.waitForTimeout(150);
+  await rect('wood', 1, MX-380, MY+100, MX+400, MY+140);
+  await lockAll();
+  await p.evaluate(() => window.__pg.paused(false));
+  await standAt(MX, MY+60); await p.waitForTimeout(400);
+  // the editor camera is off somewhere else, detached
+  await p.evaluate(([x,y]) => window.__pg.zoomTo(1.3, x, y), [MX+300, MY-200]); await p.waitForTimeout(100);
+  const ed0 = await view();
+  ok('the editor view starts detached, elsewhere, at its own zoom', !(await p.evaluate(() => window.__pg.camFollowing())) && Math.abs(ed0.zoom - 1.3) < 0.01, ed0);
+  await p.evaluate(() => { window.__pg.worldSet('playZoom', 0.7); window.__pg.worldSet('camHeight', -120); });
+  ok('the World page opens', await p.evaluate(() => window.__pg.menu('world')));
+  await p.waitForTimeout(150);
+  const wpc = await centre(), wpp = await pos();
+  ok('with it open the level shows the character at the Play zoom', Math.abs((await view()).zoom - 0.7) < 0.01, (await view()).zoom);
+  ok('and at the Play height', Math.abs(wpc.x - wpp.x) < 2 && Math.abs(wpc.y - (wpp.y - 120)) < 2, { centre: wpc, player: wpp });
+  await p.evaluate(() => { window.__pg.worldSet('camHeight', 40); window.__pg.worldSet('playZoom', 1.1); }); await p.waitForTimeout(120);
+  const wpc2 = await centre();
+  ok('changing the height and zoom shows at once', Math.abs((await view()).zoom - 1.1) < 0.01 && Math.abs(wpc2.y - (wpp.y + 40)) < 2, { zoom: (await view()).zoom, centre: wpc2, player: wpp });
+  await p.evaluate(() => window.__pg.menu(null)); await p.waitForTimeout(150);
+  const ed1 = await view();
+  ok('closing the page puts the editor view back exactly where it was', !(await p.evaluate(() => window.__pg.camFollowing())) && Math.abs(ed1.zoom - 1.3) < 0.01 && Math.abs(ed1.x - ed0.x) < 2 && Math.abs(ed1.y - ed0.y) < 2, { before: ed0, after: ed1 });
+  await p.evaluate(() => { window.__pg.worldSet('playZoom', 1); window.__pg.worldSet('camHeight', -70); window.__pg.paused(true); });
 
   console.log('');
   console.log('== the level sets the walking and sprinting pace ==');
