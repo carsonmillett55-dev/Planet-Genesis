@@ -238,6 +238,63 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.keyboard.up('KeyQ');
 
   console.log('');
+  console.log('== the weight slider: a big block made light enough to carry ==');
+  await fresh();
+  await rect('wood', 1, X-300, Y+100, X+400, Y+140);
+  await lockAll();
+  await rect('metal', 1, X, Y-20, X+120, Y+100);            // a big metal block, many times your weight
+  const big = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0];
+  await p.evaluate(id => window.__pg.setGrabbable(id, true), big.id);
+  const m0 = await p.evaluate(id => window.__pg.objMass(id), big.id), pm = await p.evaluate(() => window.__pg.playerMass());
+  console.log('   block is', (m0 / pm).toFixed(1) + '× the player');
+  ok('it starts at its material\'s own weight', (await p.evaluate(id => window.__pg.objWeight(id), big.id)) === 1);
+  ok('and is far too heavy to carry', m0 > pm * 3, { block: m0, player: pm });
+  await play();
+  await standAt(X-22, Y+60); await p.waitForTimeout(300);
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
+  ok('grabbed, it is dragged rather than lifted', (await grabbing()) && !(await p.evaluate(() => window.__pg.carrying())));
+  await p.keyboard.up('KeyQ');
+  // set it to a twentieth of its weight, through the box's slider, typing the number
+  await p.evaluate(() => window.__pg.setMode('build')); await p.waitForTimeout(300);
+  const big2 = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0];
+  ok('the box opens with a Weight slider', await p.evaluate(id => window.__pg.openBox(id), big2.id) && await p.evaluate(() => /Weight/.test(document.getElementById('opBody').innerText)));
+  await p.evaluate(() => { const rows = Array.from(document.querySelectorAll('#opBody .settingRow')); rows.find(r => /Weight/.test(r.querySelector('label').textContent)).querySelector('input.val').focus(); });
+  await p.waitForTimeout(50);
+  await p.keyboard.press('Control+a'); await p.keyboard.type('5'); await p.keyboard.press('Enter');
+  await p.waitForTimeout(250);
+  const m1 = await p.evaluate(id => window.__pg.objMass(id), big2.id);
+  ok('typing 5 makes it 5% of its weight', Math.abs((await p.evaluate(id => window.__pg.objWeight(id), big2.id)) - 0.05) < 1e-6 && Math.abs(m1 / m0 - 0.05) < 0.005, { weight: await p.evaluate(id => window.__pg.objWeight(id), big2.id), massRatio: m1 / m0 });
+  ok('the note says it can be carried now', await p.evaluate(() => /light enough to carry/.test(document.getElementById('opBody').innerText)));
+  const sv2 = await p.evaluate(() => window.__pg.serialize('w'));
+  ok('the save remembers the weight', sv2.objects.some(o => Math.abs(o.weight - 0.05) < 1e-6), sv2.objects.map(o => o.weight));
+  await p.evaluate(() => window.__pg.deselect());
+  await play();
+  await standAt(X-22, Y+60); await p.waitForTimeout(300);
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
+  ok('and now the big block is picked up and carried', !!(await p.evaluate(() => window.__pg.carrying())));
+  const upW = await w2p(X+40, Y-80); await p.mouse.move(upW.x, upW.y); await p.waitForTimeout(700);
+  const lifted2 = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0], plW = await pos();
+  ok('lifted clear of the floor', lifted2.pos.y < plW.y - 20, { block: lifted2.pos.y, player: plW.y });
+  await p.keyboard.up('KeyQ'); await p.waitForTimeout(400);
+  // the weight survives a round trip through the save
+  await p.evaluate(() => window.__pg.setMode('build')); await p.waitForTimeout(300);
+  await p.evaluate(sv => window.__pg.load(sv), sv2); await p.waitForTimeout(400);
+  const back = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0];
+  const mBack = await p.evaluate(id => window.__pg.objMass(id), back.id);
+  ok('loaded back, it still weighs a twentieth', Math.abs((await p.evaluate(id => window.__pg.objWeight(id), back.id)) - 0.05) < 1e-6 && Math.abs(mBack / m0 - 0.05) < 0.005, { massRatio: mBack / m0 });
+  // and a locked object takes the change too, for when it is freed
+  await p.evaluate(id => { const o = window.__pg.objects().filter(q => q.id === id)[0]; window.__pg.select(o); window.__pg.anchor(); window.__pg.deselect(); }, back.id);
+  await p.evaluate(id => window.__pg.openBox(id), back.id);
+  await p.evaluate(() => { const rows = Array.from(document.querySelectorAll('#opBody .settingRow')); rows.find(r => /Weight/.test(r.querySelector('label').textContent)).querySelector('input.val').focus(); });
+  await p.waitForTimeout(50);
+  await p.keyboard.press('Control+a'); await p.keyboard.type('200'); await p.keyboard.press('Enter');
+  await p.waitForTimeout(250);
+  ok('a locked object takes a new weight', Math.abs((await p.evaluate(id => window.__pg.objMass(id), back.id)) / m0 - 2) < 0.02, (await p.evaluate(id => window.__pg.objMass(id), back.id)) / m0);
+  await p.evaluate(id => { const o = window.__pg.objects().filter(q => q.id === id)[0]; window.__pg.select(o); window.__pg.anchor(); window.__pg.deselect(); }, back.id);
+  await p.waitForTimeout(100);
+  ok('and keeps it when freed', Math.abs((await p.evaluate(id => window.__pg.objMass(id), back.id)) / m0 - 2) < 0.02, (await p.evaluate(id => window.__pg.objMass(id), back.id)) / m0);
+
+  console.log('');
   console.log('== you cannot ride what you are holding ==');
   await fresh();
   await rect('wood', 1, X-300, Y+100, X+400, Y+140);

@@ -122,6 +122,10 @@ HOOK = """
       return { x:+(bx/dpr).toFixed(1), y:+(by/dpr).toFixed(1), lum:best }; },
     playerPos: function(){ return player ? { x:player.position.x, y:player.position.y } : null; },
     playerSize: function(){ return { w: PW, h: PH }; },
+    objMass: function(id){ var o = objects.filter(function(q){ return q.id===id; })[0]; if (!o || !o.body) return null; var b = o.body; return b.isStatic ? (b._original ? b._original.mass : Infinity) : b.mass; },
+    objWeight: function(id){ var o = objects.filter(function(q){ return q.id===id; })[0]; return o ? (o.weight == null ? 1 : o.weight) : null; },
+    playerMass: function(){ return player ? player.mass : null; },
+    openBox: function(id){ var o = objects.filter(function(q){ return q.id===id; })[0]; if (!o) return false; selectObject(o); opWanted = true; renderSelBar(); return !objPanelEl.hidden; },
     ctxOpen: function(){ return !objPanelEl.hidden; },
     holes: function(){ return objects.map(function(o){ return o.pieces.map(function(p){ return p.poly.map(function(pl){ return pl.slice(1).map(function(h){ return h.length; }); }); }); }); },
     undo: undo, redo: redo

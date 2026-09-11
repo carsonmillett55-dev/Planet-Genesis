@@ -2222,8 +2222,37 @@
     if (body.isStatic === !!v) return;
     Body.setStatic(body, !!v);
   }
+  /* Weight: a per-object multiplier on what its materials weigh — 1 is
+     the material's own, 0.01 a hundredth, 4 four times. Matter gives a
+     compound the sum of its parts' masses; this scales that (and the
+     inertia with it, which Body.setMass does) so a big block can be light
+     enough to carry or swing, or a small one heavy. A static body keeps
+     its real mass in `_original` and would hand back the old one when
+     freed, so it is woken for the change and put back. */
+  var WEIGHT_MIN = 0.01, WEIGHT_MAX = 4;
+  function objectBaseMass(obj){
+    var b = obj.body, parts = b.parts.length > 1 ? b.parts.slice(1) : [b], m = 0;
+    for (var i = 0; i < parts.length; i++){
+      var pt = parts[i], mat = pt.plugin && matOf(pt.plugin.materialId);
+      m += Math.abs(pt.area) * (mat ? mat.density : MATERIALS.wood.density);
+    }
+    return m;
+  }
+  function applyObjectWeight(obj){
+    var b = obj.body; if (!b) return;
+    var w = obj.weight == null ? 1 : obj.weight;
+    var want = objectBaseMass(obj) * w;
+    if (!(want > 0)) return;
+    if (b.isStatic){
+      if (!b._original || Math.abs(b._original.mass - want) < 1e-9) return;
+      Body.setStatic(b, false); Body.setMass(b, want); Body.setStatic(b, true);
+    } else if (Math.abs(b.mass - want) > 1e-9){
+      Body.setMass(b, want);
+    }
+  }
   function refreshObjectPhysics(obj){
     if (!obj.body) return;                 // still waiting on a batched rebuild
+    applyObjectWeight(obj);
     var hasDark = false, totalArea = 0, fr = 0, re = 0, i;
     // Light has no body, so it lends the object neither weight nor grip.
     // A shape made ONLY of light holds itself up and is walked straight
@@ -3793,7 +3822,7 @@
         // Safety rail: never lift a dab harder than 2.5x its own weight,
         // so no amount of odd geometry can fling something out of the
         // level. That still leaves plenty of float for the light stuff.
-        var maxLift = mat.density * vol * g.y * gscale * 2.5;
+        var maxLift = mat.density * (o.weight == null ? 1 : o.weight) * vol * g.y * gscale * 2.5;
         if (lift > maxLift) lift = maxLift;
         Body.applyForce(o.body, p.position, { x: 0, y: -lift });
       });
@@ -4801,6 +4830,7 @@
     if (o.lightSolid) d.lightSolid = 1;
     if (o.lightFalls) d.lightFalls = 1;
     if (o.grabbable === true) d.grab = 1; else if (o.grabbable === false) d.grab = 0;
+    if (o.weight != null && o.weight !== 1) d.weight = o.weight;
     return d;
   }
   /* Corners left in this load's budget. A level file is untrusted input
@@ -4827,6 +4857,7 @@
       { a: +os.a || 0, x: +os.x || 0, y: +os.y || 0 }, !!os.forcedStatic);
     if (made && os.glow != null) made.glow = clampGlow(os.glow);
     if (made && os.grab != null) made.grabbable = !!os.grab;
+    if (made && os.weight != null && isFinite(+os.weight)){ made.weight = Math.max(WEIGHT_MIN, Math.min(WEIGHT_MAX, +os.weight)); applyObjectWeight(made); }
     if (made){
       made.lightSolid = !!os.lightSolid;
       made.lightFalls = !!os.lightFalls;
@@ -9025,6 +9056,32 @@
     ly.appendChild(lname);
     opBtn(ly, "⤒ Front", "Move a layer forward", function(){ layerSelected(1); });
 
+    // Weight — relative to what the material itself weighs.
+    if (many === 1 && !o.allGlow){
+      var wt = opSection("Weight");
+      var pushedWeight = false;
+      var wNote = document.createElement("div"); wNote.className = "noteText";
+      var weightNote = function(){
+        if (!player || !o.body || !(o.body.mass > 0 || (o.body._original && o.body._original.mass > 0))) return "";
+        var m = o.body.isStatic ? (o.body._original ? o.body._original.mass : 0) : o.body.mass;
+        var rel = m / player.mass;
+        var relTxt = rel < 0.095 ? "next to nothing" : (rel < 0.95 ? Math.round(rel * 100) + "% of your weight" : rel.toFixed(rel < 10 ? 1 : 0) + "× your weight");
+        return "Weighs " + relTxt + (rel <= CARRY_MASS_RATIO ? " — light enough to carry" : " — too heavy to carry, you can still drag or swing on it");
+      };
+      var ws = sliderRow("⚖ Weight", o.weight == null ? 1 : o.weight, WEIGHT_MIN, WEIGHT_MAX, 0.01,
+        function(v){
+          if (!pushedWeight){ pushUndo("changing an object's weight"); pushedWeight = true; }
+          o.weight = v; applyObjectWeight(o);
+          wNote.textContent = weightNote();
+        },
+        function(v){ return Math.round(v * 100) + "%"; });
+      ws.style.flexBasis = "100%";
+      wt.appendChild(ws);
+      wNote.textContent = weightNote();
+      wNote.style.flexBasis = "100%";
+      wt.appendChild(wNote);
+    }
+
     // Light, only when there is one.
     if (many === 1 && objectLights(o).length){
       var lt = opSection("Light");
@@ -9493,6 +9550,8 @@
         copy.glow = (src.glow == null ? 1 : src.glow);
         copy.lightSolid = !!src.lightSolid;
         copy.lightFalls = !!src.lightFalls;
+        if (src.grabbable != null) copy.grabbable = src.grabbable;   // and the same grip and weight
+        if (src.weight != null) copy.weight = src.weight;
         rebuildFromPieces(copy);
         if (objects.indexOf(copy) >= 0) refreshObjectPhysics(copy);
         Body.setVelocity(copy.body, {x:0,y:0});

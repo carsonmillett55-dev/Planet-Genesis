@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` | Playwright suites, 386 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` | Playwright suites, 398 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 386 checks + checkgeom, in order
+npm test                   # all 398 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -59,7 +59,7 @@ node tmenu.js              # 19 — the personal menu's sections, pages and grad
 node tbolt.js              # 52 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, typed rpm, save/load
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
 node tlink.js              # 59 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
-node tgrab.js              # 50 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint
+node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint; the weight slider
 node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -251,6 +251,29 @@ of one box: a bolt's speed and tightness, a mover's line, a sensor's range
 all get a section, not a popup each.
 
 ---
+
+## Weight
+
+Every object has a **Weight** slider in its box: a multiplier on what its
+materials weigh, 1%–400%, `o.weight` (undefined = 1), saved as `weight`,
+carried by duplicate, snapshots and the level file. Carson's ask: a big
+thing that is easy to swing on, or to pick up even though it is big. A
+note under the slider says what it comes to against the player — "3.2×
+your weight — too heavy to carry" — since carrying is `CARRY_MASS_RATIO`.
+
+`applyObjectWeight`, called at the top of `refreshObjectPhysics` so every
+rebuild keeps it: the base mass is the sum over parts of area × material
+density (what Matter gave the compound in the first place, computed
+rather than read so it does not matter whether the body is static), and
+`Body.setMass` scales it, inertia along with it. **A static body has to
+be woken for the change**: `Body.setStatic` stashes the real mass in
+`_original` and hands it back on freeing, so setting the mass on a static
+body would be thrown away — it goes `setStatic(false)`, `setMass`,
+`setStatic(true)`, which also resets `positionPrev`, harmless on
+something not moving. A static body with no `_original` is left alone.
+
+The buoyancy safety rail (2.5× own weight) scales with it, or a
+feather-light block could not float.
 
 ## The physics step
 
