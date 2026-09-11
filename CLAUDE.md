@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` | Playwright suites, 237 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` | Playwright suites, 252 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 237 checks + checkgeom, in order
+npm test                   # all 252 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -57,7 +57,7 @@ node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 19 — the personal menu's sections, pages and gradient
 node tbolt.js              # 46 — bolts: through the layers, four kinds, limits, the box, the ghost, save/load
-node tgadget.js            # 28 — player sensor, button, lever, wires, and what they drive
+node tgadget.js            # 43 — player sensor, button, lever, wires, what they drive, paused walking
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -355,7 +355,11 @@ A gadget sits ON an object and rides with it. Position is stored two ways:
 a bolt's Matter anchor) and `pos` is the world point, refreshed every step. A
 rebuild replaces the host body with its angle reset to 0, so `local` is
 re-derived from `pos` then — `reanchorGadgets`, called from
-`rebuildFromPieces`. Removing the host removes its gadgets and their wires.
+`rebuildFromPieces`. Resize and flip carry gadgets through the same map as
+bolts (`carryGadgets`): same spot on the object, and for a scale the glyph
+and a button's pad grow with it (`scale`, `size`). Reach is a setting, not a
+size, and is left alone. Removing the host removes its gadgets and their
+wires.
 
 Each gadget has an **output**, 0 or 1:
 
@@ -364,6 +368,10 @@ Each gadget has an **output**, 0 or 1:
 | **sensor** | the player is within `radius` (Play only) | radius |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
+
+Gadgets work whenever the world is running — Play, or Build unpaused. A
+small key-cap and "use" floats above a lever in reach (`drawUsePrompt`),
+naming whatever interact is actually bound to.
 
 A **wire** is `{from: gadget id, to: bolt or gadget id}`. Every step, after
 outputs are computed, each receiver's `input` is reset to `null` and then set
@@ -387,6 +395,18 @@ in hand.
 
 Snapshots (undo, mode switch) and level saves both carry gadgets and wires,
 by index. Entering Play resets buttons and held levers.
+
+## Walking while paused
+
+The physics engine is not stepping while paused, so the player is moved by
+hand in `freeMoveIfPaused`. Flying is the free-roam it always was. Not
+flying is a real walk: gravity, ground, walls, small ledges stepped up, and
+a jump. Each move is tried with `Body.translate` and backed out if
+`Query.collides` finds it overlapping something solid — walls and
+non-sensor object bodies, narrowed first with `Query.region`. Gravity is
+applied in 4px steps so a fast fall still lands on the surface. Before
+this, paused-and-not-flying slid sideways through everything and hung in
+the air.
 
 ## The map has edges
 

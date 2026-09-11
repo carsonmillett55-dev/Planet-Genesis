@@ -214,6 +214,77 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('undo brings both back', (await gads()).length === 1 && (await p.evaluate(() => window.__pg.wires())).length === 1);
 
   console.log('');
+  console.log('== a gadget resizes and flips with its object ==');
+  const rb = await platformWith('button', X+40, Y+2);
+  await p.evaluate(() => { window.__pg.paused(true); window.__pg.setTool('move'); const o = window.__pg.objects().filter(q => q.id === window.__pg.gadgets()[0].obj)[0]; window.__pg.select(o); });
+  const hostId = rb.obj;
+  const hb0 = await p.evaluate(i => window.__pg.bounds(i), hostId);
+  const gb0 = (await gads())[0];
+  // Pull the bottom-right handle out to about 1.6x.
+  const hf = await w2p(hb0.x2+5, hb0.y2+5);
+  const ht = await w2p(hb0.x-5 + (hb0.x2-hb0.x+10)*1.6, hb0.y-5 + (hb0.y2-hb0.y+10)*1.6);
+  await p.mouse.move(hf.x, hf.y); await p.mouse.down(); await p.mouse.move(ht.x, ht.y, { steps: 8 }); await p.mouse.up();
+  await p.waitForTimeout(400);
+  const hb1 = await p.evaluate(i => window.__pg.bounds(i), hostId);
+  const gb1 = (await gads())[0];
+  const kx = (hb1.x2 - hb1.x) / (hb0.x2 - hb0.x);
+  console.log('   host grew x' + kx.toFixed(2) + '; button width', gb0.size, '->', gb1.size, '; x', gb0.x, '->', gb1.x);
+  ok('the host got bigger', kx > 1.3, kx);
+  ok('the button grew with it', Math.abs(gb1.size / gb0.size - kx) < 0.15, { before: gb0.size, after: gb1.size, kx });
+  ok('and stayed on the same spot of the object',
+     Math.abs((gb1.x - hb1.x) / (hb1.x2 - hb1.x) - (gb0.x - hb0.x) / (hb0.x2 - hb0.x)) < 0.06,
+     { before: (gb0.x - hb0.x) / (hb0.x2 - hb0.x), after: (gb1.x - hb1.x) / (hb1.x2 - hb1.x) });
+  ok('and is still on top of it', Math.abs(gb1.y - hb1.y) < 12, { gy: gb1.y, top: hb1.y });
+  await p.evaluate(() => window.__pg.flip());
+  await p.waitForTimeout(300);
+  const gb2 = (await gads())[0], hb2 = await p.evaluate(i => window.__pg.bounds(i), hostId);
+  ok('flipping the host mirrors the gadget across it',
+     Math.abs(((gb2.x - hb2.x) / (hb2.x2 - hb2.x)) - (1 - (gb1.x - hb1.x) / (hb1.x2 - hb1.x))) < 0.06,
+     { before: (gb1.x - hb1.x) / (hb1.x2 - hb1.x), after: (gb2.x - hb2.x) / (hb2.x2 - hb2.x) });
+  const sd = await p.evaluate(() => window.__pg.serialize('s'));
+  ok('the size survives a save', Math.abs(sd.gadgets[0].size - gb2.size) < 0.01 && sd.gadgets[0].scale > 1.3, sd.gadgets[0]);
+
+  console.log('');
+  console.log('== gadgets work in Build when the world is running ==');
+  const bl = await platformWith('lever');
+  await p.evaluate(() => { window.__pg.paused(false); window.__pg.setFlying(false); });
+  await p.evaluate(([x,y]) => window.__pg.playerTo(x,y), [X+120, Y-30]);
+  await p.waitForTimeout(400);
+  ok('the prompt knows there is a lever to use', (await p.evaluate(() => window.__pg.nearLever())) === (await gads())[0].id);
+  await p.keyboard.press('KeyF'); await p.waitForTimeout(200);
+  ok('F flips the lever in Build, unpaused', (await gads())[0].out === 1, (await gads())[0]);
+  await p.evaluate(() => window.__pg.paused(true));
+  await p.waitForTimeout(100);
+  await p.keyboard.press('KeyF'); await p.waitForTimeout(200);
+  ok('but not while paused', (await gads())[0].out === 1, (await gads())[0]);
+  await p.evaluate(() => window.__pg.paused(false));
+
+  console.log('');
+  console.log('== paused, you walk instead of floating ==');
+  await fresh();
+  await rect('wood', 1, X, Y, X+300, Y+40);
+  await rect('wood', 1, X+300, Y-120, X+340, Y+40);   // a wall at the right end
+  await lockAll();
+  await p.evaluate(() => { window.__pg.paused(true); window.__pg.setFlying(false); });
+  await p.evaluate(([x,y]) => window.__pg.playerTo(x,y), [X+100, Y-200]);   // in the air over the platform
+  await p.waitForTimeout(900);
+  const pp0 = await p.evaluate(() => window.__pg.playerPos());
+  ok('you fall to the ground rather than hang in the air', pp0.y > Y-80 && pp0.y < Y+5, { y: pp0.y, top: Y });
+  const yBefore = pp0.y;
+  await p.keyboard.down('KeyD'); await p.waitForTimeout(1200); await p.keyboard.up('KeyD');
+  await p.waitForTimeout(100);
+  const pp1 = await p.evaluate(() => window.__pg.playerPos());
+  ok('you walk along it', pp1.x > pp0.x + 60, { from: pp0.x, to: pp1.x });
+  ok('the wall stops you', pp1.x < X+300, { x: pp1.x, wall: X+300 });
+  ok('and you stay on the ground while walking', Math.abs(pp1.y - yBefore) < 6, { before: yBefore, after: pp1.y });
+  await p.keyboard.press('Space'); await p.waitForTimeout(250);
+  const ppJ = await p.evaluate(() => window.__pg.playerPos());
+  await p.waitForTimeout(900);
+  const ppL = await p.evaluate(() => window.__pg.playerPos());
+  ok('Space jumps', ppJ.y < yBefore - 20, { up: ppJ.y, ground: yBefore });
+  ok('and you land again', Math.abs(ppL.y - yBefore) < 6, { landed: ppL.y, ground: yBefore });
+
+  console.log('');
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();

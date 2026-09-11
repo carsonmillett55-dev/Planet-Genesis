@@ -2598,6 +2598,7 @@
               radius: extra.radius != null ? +extra.radius : 160,
               size: extra.size != null ? +extra.size : 64,
               sticky: !!extra.sticky, springs: !!extra.springs,
+              scale: extra.scale != null ? +extra.scale : 1,
               visible: extra.visible != null ? !!extra.visible : true };
     if (extra.on) g.on = true;
     gadgets.push(g);
@@ -2622,6 +2623,23 @@
   function reanchorGadgets(obj){
     gadgets.forEach(function(g){ if (g.obj === obj && obj.body) g.local = toBodyLocal(obj.body, g.pos); });
   }
+  /* Objects in `list` have just been transformed in place by `mapPt`. A
+     gadget on one of them goes to the same spot ON the object — through the
+     same map — and, for a scale, grows with it: a button's pad is as wide
+     as it was relative to the thing it sits on, and the glyph keeps its
+     proportion. Reach (a sensor's radius) is a setting, not a size, and is
+     left alone. */
+  function carryGadgets(list, mapPt, k){
+    gadgets.forEach(function(g){
+      if (list.indexOf(g.obj) < 0 || !g.obj.body) return;
+      g.pos = mapPt(g.pos);
+      if (k && k !== 1){
+        g.scale = Math.max(0.25, Math.min(6, (g.scale || 1) * k));
+        if (g.kind === "button") g.size = Math.max(12, g.size * k);
+      }
+      g.local = toBodyLocal(g.obj.body, g.pos);
+    });
+  }
   function receiverById(id){ return boltById(id) || gadgetById(id); }
   function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston"); }
   function addWire(from, to){
@@ -2644,8 +2662,20 @@
   function leverInReach(g){
     return !!player && dist(gadgetWorld(g), player.position) < 80;
   }
+  /* The lever the player could use right now, if any: nearest within reach. */
+  function leverNearPlayer(){
+    if (!player) return null;
+    var best = null, bestD = 80;
+    gadgets.forEach(function(g){
+      if (g.kind !== "lever") return;
+      var d = dist(gadgetWorld(g), player.position);
+      if (d < bestD){ bestD = d; best = g; }
+    });
+    return best;
+  }
   function useLever(){
-    if (mode !== "play" || !player) return false;
+    // Works whenever the world is running — Play, or Build unpaused.
+    if (!player || !runner.enabled) return false;
     var best = null, bestD = 80;
     gadgets.forEach(function(g){
       if (g.kind !== "lever") return;
@@ -2665,9 +2695,9 @@
     for (i = 0; i < gadgets.length; i++){
       g = gadgets[i];
       if (g.kind === "sensor"){
-        g.out = (player && mode === "play" && dist(g.pos, player.position) < g.radius) ? 1 : 0;
+        g.out = (player && dist(g.pos, player.position) < g.radius) ? 1 : 0;
       } else if (g.kind === "button"){
-        var pressed = mode === "play" && buttonPressed(g);
+        var pressed = buttonPressed(g);
         if (pressed && g.sticky) g.on = true;
         g.out = (g.sticky ? g.on : pressed) ? 1 : 0;
       } else if (g.kind === "lever"){
@@ -3903,7 +3933,7 @@
       e.preventDefault();
       if (!e.repeat) handleJumpOrFlyToggle();
     }
-    if (isAction("interact", e.code) && !e.repeat && mode === "play"){ if (useLever()) e.preventDefault(); }
+    if (isAction("interact", e.code) && !e.repeat && runner.enabled){ if (useLever()) e.preventDefault(); }
     if (isAction("pauseMenu", e.code) && !e.repeat){ e.preventDefault(); onEscape(); }
     if (isAction("layerDown", e.code) && !e.repeat) setBuildLayer(buildLayer - 1);
     if (isAction("layerUp", e.code) && !e.repeat) setBuildLayer(buildLayer + 1);
@@ -4042,11 +4072,32 @@
   // disabled, so beforeUpdate above never fires; this runs straight
   // off the render loop instead and just translates the body directly. ----
   var lastFreeMoveT = performance.now();
+  /* While the world is paused the physics engine is not stepping, so the
+     player is moved by hand. Flying is the free-roam it always was. Not
+     flying is a walk: gravity, ground, walls and a jump, resolved by
+     trying each move and backing it out if it overlaps something solid.
+     Before this, paused-and-not-flying just slid sideways through
+     everything and hung in the air wherever you happened to be. */
+  var pausedVy = 0, pausedGrounded = false;
+  function solidsNear(body){
+    var region = Query.region(objects.map(function(o){ return o.body; }).filter(function(b){ return b && !b.isSensor; }).concat(walls), body.bounds);
+    return region;
+  }
+  function tryMovePlayer(dx, dy){
+    Body.translate(player, { x:dx, y:dy });
+    var near = solidsNear(player);
+    if (near.length && Query.collides(player, near).length){
+      Body.translate(player, { x:-dx, y:-dy });
+      return false;
+    }
+    return true;
+  }
   function freeMoveIfPaused(now){
     var dt = Math.min(50, now - lastFreeMoveT);
     lastFreeMoveT = now;
-    if (!player || runner.enabled) return;
-    var speed = (flying ? FLY_SPEED : 4.2) * (dt/16.666);
+    if (!player || runner.enabled){ pausedVy = 0; return; }
+    var k = dt/16.666;
+    var speed = (flying ? FLY_SPEED : 4.2) * k;
     var dx = 0, dy = 0;
     if (input.left) dx -= speed;
     if (input.right) dx += speed;
@@ -4054,8 +4105,38 @@
     if (flying){
       if (input.up) dy -= speed;
       if (input.down) dy += speed;
+      if (dx || dy) Body.translate(player, { x:dx, y:dy });
+      pausedVy = 0;
+      return;
     }
-    if (dx || dy) Body.translate(player, { x:dx, y:dy });
+    // walk: sideways first, stepping up small ledges
+    if (dx){
+      if (!tryMovePlayer(dx, 0)){
+        var stepped = false;
+        for (var up = 4; up <= 14 && !stepped; up += 5){
+          if (tryMovePlayer(dx, -up)) stepped = true;
+        }
+      }
+    }
+    // jump: Space queued a jump the physics would normally take
+    if (input.jumpQueued){
+      input.jumpQueued = false;
+      if (pausedGrounded){ pausedVy = -11.5; pausedGrounded = false; }
+    }
+    // gravity, in small steps so a fast fall still lands on the surface
+    pausedVy = Math.min(pausedVy + 0.6 * k, 16);
+    var move = pausedVy * k, dir = move > 0 ? 1 : -1, left = Math.abs(move);
+    pausedGrounded = false;
+    while (left > 0){
+      var st = Math.min(4, left);
+      if (!tryMovePlayer(0, st * dir)){
+        if (dir > 0) pausedGrounded = true;
+        pausedVy = 0;
+        break;
+      }
+      left -= st;
+    }
+    keepInside(player);
   }
 
   /* ============================================================
@@ -4160,7 +4241,7 @@
     var gadgetSnaps = gadgets.map(function(g){
       var wp = gadgetWorld(g);
       return { kind:g.kind, o:objIndex[g.obj.id], x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
-               sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible };
+               sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale };
     });
     var gIdx = {}; gadgets.forEach(function(g, i){ gIdx[g.id] = i; });
     var bIdx = {}; bolts.forEach(function(b, i){ bIdx[b.id] = i; });
@@ -5056,6 +5137,7 @@
       ctx.save();
       ctx.translate(p.x, p.y);
       if (g.obj && g.obj.body) ctx.rotate(g.obj.body.angle);
+      var gsc = g.scale || 1;
       if (mode === "build" && g.kind === "sensor" && (g === selectedGadget || isGadgetTool())){
         ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
         ctx.beginPath(); ctx.arc(0, 0, g.radius, 0, Math.PI*2);
@@ -5069,9 +5151,40 @@
         ctx.setLineDash([6/camScale, 4/camScale]); ctx.lineDashOffset = -performance.now()/70/camScale;
         ctx.stroke(); ctx.setLineDash([]);
       }
+      ctx.scale(gsc, gsc);
+      /* the pad's width is already in world units; undo the scale for it */
+      if (g.kind === "button"){ ctx.scale(1/gsc, 1/gsc); }
       drawGadgetGlyph(g, 1);
       ctx.restore();
     });
+  }
+  /* A small key-cap and the word "use" above a lever you could flip right
+     now. Sized in screen pixels so it reads the same at any zoom. */
+  function drawUsePrompt(){
+    if (!runner.enabled || !player) return;
+    var g = leverNearPlayer();
+    if (!g) return;
+    var wp = gadgetWorld(g);
+    var key = keyLabel((keyBinds.interact && keyBinds.interact[0]) || "KeyF");
+    ctx.save();
+    ctx.translate(wp.x, wp.y - 38/camScale);
+    ctx.scale(1/camScale, 1/camScale);
+    var bob = Math.sin(performance.now()/260) * 2;
+    ctx.translate(0, bob);
+    ctx.font = "bold 11px 'Baloo 2', sans-serif";
+    var w = ctx.measureText(key).width + 12, tw = ctx.measureText("use").width;
+    var total = w + 6 + tw;
+    ctx.globalAlpha = 0.95;
+    // key cap
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-total/2, -11, w, 20, 5) : ctx.rect(-total/2, -11, w, 20);
+    ctx.fillStyle = "#F6ECD9"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+    ctx.fillStyle = "#2B1B12"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(key, -total/2 + w/2, 0);
+    // the word
+    ctx.font = "11px 'Patrick Hand', cursive";
+    ctx.fillStyle = "#F6ECD9"; ctx.strokeStyle = "rgba(43,27,18,0.75)"; ctx.lineWidth = 3; ctx.lineJoin = "round";
+    ctx.strokeText("use", total/2 - tw/2, 0); ctx.fillText("use", total/2 - tw/2, 0);
+    ctx.restore();
   }
   function drawWires(){
     if (mode !== "build") return;
@@ -5703,6 +5816,7 @@
     drawLayer(2);
     drawBolts(2); drawGadgets(2);
     drawWires();
+    drawUsePrompt();
     drawWorldWaterOverlay();
     drawLighting();
     // The selection ring and the drag highlight are interface, not
@@ -8102,7 +8216,9 @@
     pushUndo(list.length > 1 ? ("resizing " + list.length + " objects") : "resize");
     var held = boltsTouching(list).map(function(b){ return boltWorldPoint(b); });
     list.forEach(function(o){ scaleObjectAbout(o, pivot.x, pivot.y, k); });
-    carryBolts(list, function(pt){ return { x: pivot.x + (pt.x - pivot.x)*k, y: pivot.y + (pt.y - pivot.y)*k }; });
+    var scaleMap = function(pt){ return { x: pivot.x + (pt.x - pivot.x)*k, y: pivot.y + (pt.y - pivot.y)*k }; };
+    carryBolts(list, scaleMap);
+    carryGadgets(list, scaleMap, k);
     renderSelBar();
     sfx("glue");
   }
@@ -8217,7 +8333,9 @@
     var sb = selectionBounds();
     var cx = list.length > 1 ? (sb.minX + sb.maxX)/2 : list[0].body.position.x;
     list.forEach(function(o){ flipObjectAbout(o, cx); });
-    carryBolts(list, function(pt){ return { x: 2*cx - pt.x, y: pt.y }; });
+    var flipMap = function(pt){ return { x: 2*cx - pt.x, y: pt.y }; };
+    carryBolts(list, flipMap);
+    carryGadgets(list, flipMap, 1);
     renderSelBar();
     sfx("glue");
   }
@@ -9126,7 +9244,7 @@
     var gadgetSnaps = gadgets.map(function(g){
       var wp = gadgetWorld(g);
       return { kind:g.kind, o:objIndex[g.obj.id], x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
-               sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible };
+               sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale };
     });
     var gIdx = {}; gadgets.forEach(function(g, i){ gIdx[g.id] = i; });
     var bIdx = {}; bolts.forEach(function(b, i){ bIdx[b.id] = i; });
