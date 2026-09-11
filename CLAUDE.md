@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` | Playwright suites, 515 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` | Playwright suites, 533 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 515 checks + checkgeom, in order
+npm test                   # all 533 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -62,6 +62,7 @@ node tlink.js              # 59 — pistons and rope: placing, cycling, stiff, w
 node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint; the weight slider
 node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
 node tmover.js             # 22 — the Mover: two-click placing, once and bounce, riding it, a loose host held, wired, the knob, save/load
+node tworld.js             # 18 — the Water sensor, and the World changer's light and water, wired, latched, saved
 node tcam.js               # 91 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -415,6 +416,8 @@ Each gadget has an **output**, 0 or 1:
 | **sensor** | the player is within `radius` (Play only) | radius |
 | **camera** | takes over the Play camera while the player is in its zone, or while wired on — see The camera | zoom, tracking, speed, zone, view, hold, once, glide, shake, freeze |
 | **mover** | drives its host along a line — see The Mover | line, speed, bounce |
+| **watersensor** | the sensor itself is under water (`waterAt(pos) > 0.5`), the world's or painted — LBP's | — |
+| **changer** | while wired on (unwired: always; `latch`: for good once it has been), the world's light and/or water level move to its values over `secs` — see The live world | setLight, light, setWater, water, secs, latch |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
 
@@ -429,7 +432,7 @@ unwired receiver behaves as it always did — that is the whole compatibility
 story. The gadget step is registered before the bolt step so the inputs are
 fresh when bolts read them.
 
-What takes an input today (`canReceive`): a **camera** (see The camera); a **mover** (moves while the signal is on); a **motor bolt** — the signal is
+What takes an input today (`canReceive`): a **camera** (see The camera); a **mover** (moves while the signal is on); a **world changer** (see The live world); a **motor bolt** — the signal is
 the throttle, and off holds firm like a tight bolt (zeroing the velocity
 alone let gravity creep the arm 3.5° in half a second, so the stop angle is
 held and turned back to); a **wobble bolt** — wired, it is a *flipper*:
@@ -721,6 +724,24 @@ in `collisionActive`), and `groundVel()` is its velocity at the feet —
 platform dropping away takes you down with it rather than leaving you
 floating (`vy` follows the ground's when it is faster downward). A jump
 keeps the carried sideways speed, as it should.
+
+## The live world
+
+A World changer is LBP2's global tweakers as one gadget. It never edits
+the level's settings: `worldLive` is what the light and water level *are*
+right now, `liveLight()` / `liveWater()` are what every run-time reader
+uses (`waterAt`, buoyancy, `playerWetness`, the water overlay,
+`drawLighting`), and the World page still edits `worldSettings`, calling
+`worldLiveReset` when nothing is changing the world. `updateWorldLive`
+runs at the end of the gadget step, after wires, so a changer sees a
+fresh input: the target is the level's own values, overridden by the
+last active changer's (`activeChanger`; `latched` once on, if `latch`),
+and light and water each move toward it at a rate that crosses the whole
+range in `secs` — instant at 0. "No water" is a surface 400px below the
+floor (`waterLevelOrNone`), so draining and flooding ease like anything
+else and a level read back as null once past the floor. Pausing Build,
+entering Play and every load reset the live world to the level's own and
+clear latches.
 
 ## The Mover
 

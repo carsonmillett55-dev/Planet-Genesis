@@ -218,11 +218,11 @@ implement it, including connected systems, rather than approximating.
 | **Player sensors** | DONE. Radius; on while the player is inside it. |
 | **Buttons** (stepped on) | DONE. Sticky option. |
 | **Levers** (interact key) | DONE. F to flip; springs-back option. |
-| **Water sensors** | LBP behaviour. |
+| **Water sensors** | DONE 2026-09-11. On while the sensor itself is under water, as LBP's. |
 | **Pistons** | DONE. Shortest/longest, seconds per stroke, pause, stiff, wired in/out/run. |
 | **Rope** | DONE. Length; hangs, swings, goes slack, holds. |
 | **Emitters** | Research the LBP emitter system specifically — it is deeper than it looks. |
-| **World changer** | Driven by activators (sensors, buttons). Adjusts world lighting, world water level, etc. |
+| **World changer** | DONE 2026-09-11. Wired to any activator; moves the world's light and/or water level to its values over a time, back when the signal stops, or stays changed. |
 | **Mover** | DONE 2026-09-11, to the spec below. |
 | **Creature eye** | See below. |
 | **Camera** | DONE 2026-09-11. LBP2's Game Camera: zone, zoom, tracking, speed; wired, the switch decides. Plus the Movie Camera's hold time (or hold for good), shake, controls off, and a glide to a second spot and zoom — Carson's "easier than keyframing". Play has its own fixed zoom, set in World. **Still to do: tilt** (a camera roll; a rendering change — the frame transform, its inverse for the mouse, the light buffer and overlays all have to agree). |

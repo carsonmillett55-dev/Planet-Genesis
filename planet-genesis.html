@@ -2687,9 +2687,9 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover"];
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover" };
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer"];
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   var gadgets = [], gadgetCounter = 1;
   var wires = [];                 // { from: gadget id, to: bolt or gadget id }
@@ -2716,6 +2716,19 @@
               sticky: !!extra.sticky, springs: !!extra.springs,
               scale: extra.scale != null ? +extra.scale : 1,
               visible: extra.visible != null ? !!extra.visible : true };
+    if (kind === "changer"){
+      /* The World changer — LBP2's global tweakers, as one gadget: while
+         its signal is on (or for good, once it has been, with `latch`) the
+         world's light and/or water level move to its own values over
+         `secs`, and back to the level's when it stops. */
+      g.setLight = extra.setLight != null ? !!extra.setLight : true;
+      g.light = extra.light != null ? Math.max(0, Math.min(1, +extra.light)) : 0.25;
+      g.setWater = !!extra.setWater;
+      g.water = extra.water != null && isFinite(+extra.water) ? +extra.water : Math.round(WORLD_H * 0.7);   // a water level; WORLD_H or more means none
+      g.secs = extra.secs != null ? Math.max(0, Math.min(30, +extra.secs)) : 2;
+      g.latch = !!extra.latch;
+      g.latched = false;
+    }
     if (kind === "mover"){
       /* Carson's Mover: the object travels along a line and stops at the
          end, or bounces back and forth, at a speed. `line` is the travel
@@ -2804,7 +2817,7 @@
     });
   }
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover"); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer"); }
   function addWire(from, to){
     if (!from || !to || from === to) return false;
     if (!canReceive(to)) return false;
@@ -2928,6 +2941,9 @@
         g.out = (g.sticky ? g.on : pressed) ? 1 : 0;
       } else if (g.kind === "lever"){
         g.out = (g.springs ? g.held : g.on) ? 1 : 0;
+      } else if (g.kind === "watersensor"){
+        // LBP's: on while the sensor itself is under water
+        g.out = waterAt(g.pos.x, g.pos.y, 10) > 0.5 ? 1 : 0;
       }
     }
     // Inputs: null when nothing is wired to you, else the strongest signal in.
@@ -2939,10 +2955,54 @@
       if (!src || !tgt) continue;
       tgt.input = Math.max(tgt.input || 0, src.out);
     }
+    updateWorldLive(stepSeconds());
   });
+  /* ---- The live world -------------------------------------------
+     What the world's light and water level ARE right now, as opposed to
+     what the level's settings say: a World changer pulls them toward its
+     own values while it is on and lets them ease back when it is not.
+     Everything that reads light or water at run time reads these; the
+     settings page still edits the level's own. */
+  var worldLive = { light: 1, water: null, waterY: 0 };
+  function liveLight(){ return worldLive.light; }
+  function liveWater(){ return worldLive.water; }
+  function waterLevelOrNone(v){ return v == null || v >= WORLD_H - 1 ? WORLD_H + 400 : v; }   // "no water" is a surface well below the floor
+  function worldLiveReset(){
+    worldLive.light = worldNum("light");
+    worldLive.water = worldSettings.waterLevel;
+    worldLive.waterY = waterLevelOrNone(worldSettings.waterLevel);
+  }
+  function activeChanger(){
+    var best = null;
+    for (var i = 0; i < gadgets.length; i++){
+      var g = gadgets[i];
+      if (g.kind !== "changer") continue;
+      var on = g.input != null ? g.input > 0 : true;
+      if (on && g.latch) g.latched = true;
+      if (on || g.latched) best = g;    // the last one wins
+    }
+    return best;
+  }
+  function updateWorldLive(dt){
+    var c = activeChanger();
+    var tl = worldNum("light"), tw = waterLevelOrNone(worldSettings.waterLevel), secs = 0;
+    if (c){
+      if (c.setLight) tl = c.light;
+      if (c.setWater) tw = waterLevelOrNone(c.water);
+      secs = c.secs;
+    }
+    if (secs <= 0.02){ worldLive.light = tl; worldLive.waterY = tw; }
+    else {
+      var lr = dt / secs, wr = (WORLD_H + 400) * dt / secs;
+      var dl = tl - worldLive.light; worldLive.light += Math.max(-lr, Math.min(lr, dl));
+      var dw = tw - worldLive.waterY; worldLive.waterY += Math.max(-wr, Math.min(wr, dw));
+    }
+    worldLive.water = worldLive.waterY >= WORLD_H - 1 ? null : worldLive.waterY;
+  }
   function resetGadgetsForPlay(){
-    gadgets.forEach(function(g){ if (g.kind === "button") g.on = false; g.held = false; });
+    gadgets.forEach(function(g){ if (g.kind === "button") g.on = false; g.held = false; if (g.kind === "changer") g.latched = false; });
     moverHomeAll();
+    worldLiveReset();
   }
 
   /* ---- Links: pistons and rope ----------------------------------
@@ -3547,7 +3607,7 @@
   function starterLevel(){
     clearAllObjects();
     clearWater();
-    resetWorldSettings(); applyWorldSettings();
+    resetWorldSettings(); applyWorldSettings(); worldLiveReset();
     buildLayer = MID_LAYER;
     // one plank, one rectangle, four corners
     var fy = WORLD_H - 45, fy2 = WORLD_H - 15;
@@ -3884,8 +3944,9 @@
   function waterAt(x, y, r){
     r = r || 8;
     var w = 0;
-    if (worldSettings.waterLevel != null){
-      w = Math.max(0, Math.min(1, (y + r - worldSettings.waterLevel) / (2*r)));
+    var wlv = liveWater();
+    if (wlv != null){
+      w = Math.max(0, Math.min(1, (y + r - wlv) / (2*r)));
     }
     var s = waterSurfaceAt(x);
     if (s !== null){
@@ -3969,7 +4030,7 @@
   // simply isStatic, so gravity never touches it.
   onStep("beforeUpdate", function(){
     var g = engine.gravity, gscale = (typeof g.scale !== "undefined") ? g.scale : 0.001;
-    var noWater = (worldSettings.waterLevel == null) && waterCount === 0;
+    var noWater = (liveWater() == null) && waterCount === 0;
     objects.forEach(function(o){
       if (o.body.isStatic || o.body.isSensor) return;
       var floatSum = 0;
@@ -4332,7 +4393,7 @@
   // step, and short-circuits when the level has no water at all.
   function playerWetness(){
     if (!player) return 0;
-    if (worldSettings.waterLevel == null && waterCount === 0) return 0;
+    if (liveWater() == null && waterCount === 0) return 0;
     return waterAt(player.position.x, player.position.y, PH/2);
   }
 
@@ -5124,7 +5185,8 @@
                zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdMode:g.holdMode, holdForever:g.holdMode === "forever", once:g.once, shake:g.shake, freeze:g.freeze,
                sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
                zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null,
-               line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce };
+               line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce,
+               setLight: g.setLight, light: g.light, setWater: g.setWater, water: g.water, secs: g.secs, latch: g.latch };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -5188,7 +5250,7 @@
       if (snap.world.motorSpeed != null) worldSettings.motorSpeed = snap.world.motorSpeed;
       if (snap.world.light != null) worldSettings.light = snap.world.light;
       unpackPlayerSettings(snap.world);
-      applyWorldSettings();
+      applyWorldSettings(); worldLiveReset();
     }
     unpackWaterBytes(snap.water);
     if (player && snap.player){
@@ -5251,7 +5313,7 @@
     v = !!v && mode === "build";
     if (runner.enabled === !v) return;
     runner.enabled = !v;
-    if (mode === "build"){ if (v) moverReturnAll(); else moverHomeAll(); }   // paused: everything back at its start; running: travel from here
+    if (mode === "build"){ if (v){ moverReturnAll(); gadgets.forEach(function(g){ if (g.kind === "changer") g.latched = false; }); worldLiveReset(); } else moverHomeAll(); }   // paused: everything back at its start; running: travel from here
     updatePauseState();
   }
   function togglePause(){
@@ -5946,7 +6008,7 @@
     return out;
   }
   function drawLighting(){
-    var lv = worldSettings.light == null ? 1 : worldSettings.light;
+    var lv = liveLight();
     if (lv >= 0.995) return;
     /* The whole pass runs at half resolution and is stretched back up on
        the way out. Every pixel of it is a smooth gradient, so half res is
@@ -6184,6 +6246,18 @@
       ctx.fillStyle = "#5C3A26"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.beginPath(); ctx.rect(-w/2, -3 - h, w, h);
       ctx.fillStyle = on ? "#B3261E" : "#E4574B"; ctx.fill(); ctx.stroke();
+    } else if (g.kind === "watersensor"){
+      // a drop on a round base
+      ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2);
+      ctx.fillStyle = on ? "#8FD3F0" : "#2F86A6"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, -6); ctx.bezierCurveTo(5, 0, 5, 5, 0, 5); ctx.bezierCurveTo(-5, 5, -5, 0, 0, -6); ctx.closePath();
+      ctx.fillStyle = "#F6ECD9"; ctx.fill();
+    } else if (g.kind === "changer"){
+      // a half-lit globe
+      ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI*2);
+      ctx.fillStyle = on ? "#FFE9A8" : "#F2B705"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, 11, Math.PI/2, -Math.PI/2); ctx.closePath(); ctx.fillStyle = "#3A2E52"; ctx.fill();
+      ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI*2); ctx.stroke();
     } else if (g.kind === "mover"){
       // an arrow on a round base, pointing the way it goes
       var la = g.line && (g.line.dx || g.line.dy) ? Math.atan2(g.line.dy, g.line.dx) : 0;
@@ -6881,8 +6955,8 @@
     }
   }
   function drawWorldWaterOverlay(){
-    if (worldSettings.waterLevel == null) return;
-    var wl = worldSettings.waterLevel;
+    if (liveWater() == null) return;
+    var wl = liveWater();
     var t = performance.now()/760;
     ctx.save();
     ctx.globalAlpha = 0.34;
@@ -7779,7 +7853,7 @@
     var grid = document.createElement("div"); grid.className = "catalogGrid";
     var defs = [["move","🕹","Move"],["bolt","🔩","Bolt"],["sprungbolt","🌀","Sprung bolt"],["motorbolt","⚙","Motor bolt"],["wobblebolt","↔","Wobble bolt"],
                 ["piston","🔩","Piston"],["rope","➰","Rope"],
-                ["sensor","👁","Player sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["camera","🎥","Camera"],["mover","➡","Mover"],
+                ["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["camera","🎥","Camera"],["mover","➡","Mover"],["changer","🌗","World changer"],
                 ["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]];
     defs.forEach(function(d){
       var chip = document.createElement("div"); chip.className = "chip" + (currentTool===d[0] ? " active" : "");
@@ -7822,7 +7896,7 @@
     var h = document.createElement("h3"); h.textContent = "World Settings"; el.appendChild(h);
     el.appendChild(sliderRow("Gravity", worldSettings.gravity, 0.2, 2.5, 0.05, function(v){ worldSettings.gravity=v; applyWorldSettings(); }, function(v){ return v.toFixed(2)+"x"; }));
     el.appendChild(sliderRow("World Light", worldSettings.light == null ? 1 : worldSettings.light, 0, 1, 0.02,
-      function(v){ worldSettings.light = v; },
+      function(v){ worldSettings.light = v; if (!activeChanger()) worldLiveReset(); },
       function(v){ return v >= 0.995 ? "daylight" : (v <= 0.005 ? "night" : Math.round(v*100) + "%"); }));
     var lightNote = document.createElement("div"); lightNote.className = "noteText";
     lightNote.textContent = "Bring this down and the level falls to dusk. Anything painted in Light then burns a hole in the dark and casts its own colour — so a night level is lit by whatever you built into it.";
@@ -7834,6 +7908,7 @@
     waterToggle.textContent = worldSettings.waterLevel==null ? "Flood the world" : "Drain the world";
     waterToggle.addEventListener("click", function(){
       worldSettings.waterLevel = worldSettings.waterLevel==null ? WORLD_H*0.7 : null;
+      if (!activeChanger()) worldLiveReset();
       renderPersonalMenu();
     });
     waterTop.appendChild(waterLbl); waterTop.appendChild(waterToggle);
@@ -7847,7 +7922,7 @@
     if (worldSettings.waterLevel != null){
       // the full range: nothing at all, right up to a drowned world
       el.appendChild(sliderRow("Depth", WORLD_H - worldSettings.waterLevel, 0, WORLD_H, 20,
-        function(v){ worldSettings.waterLevel = WORLD_H - v; },
+        function(v){ worldSettings.waterLevel = WORLD_H - v; if (!activeChanger()) worldLiveReset(); },
         function(v){ return v <= 0 ? "empty" : (v >= WORLD_H ? "the whole world" : Math.round(v/WORLD_H*100) + "% deep"); }));
     }
     var ph = document.createElement("h3"); ph.textContent = "Player"; el.appendChild(ph);
@@ -9427,6 +9502,28 @@
         function(){ pushUndo("changing a button"); g.sticky = !g.sticky; g.on = false; renderSelBar(); sfx("tick"); }, g.sticky ? "on" : "");
       slider(opSection("Size"), "Width", g.size, 24, 200, 4, function(v){ g.size = v; }, function(v){ return Math.round(v) + "px"; }, "changing a button");
     }
+    if (g.kind === "watersensor"){
+      var wn = document.createElement("div"); wn.className = "noteText";
+      wn.textContent = "On while it is under water — the world's water or painted water. Put it where the water will reach, and wire it to what should happen then.";
+      wn.style.flexBasis = "100%"; opSection(null).appendChild(wn);
+    }
+    if (g.kind === "changer"){
+      var cl = opSection("Light");
+      opBtn(cl, g.setLight ? "☀ Changes the light" : "Leaves the light alone", "", function(){ pushUndo("changing a world changer"); g.setLight = !g.setLight; renderSelBar(); sfx("tick"); }, "wide" + (g.setLight ? " on" : ""));
+      if (g.setLight) slider(cl, "To", g.light, 0, 1, 0.02, function(v){ g.light = v; },
+        function(v){ return v >= 0.995 ? "daylight" : (v <= 0.005 ? "night" : Math.round(v*100) + "%"); }, "changing a world changer");
+      var cw = opSection("Water");
+      opBtn(cw, g.setWater ? "🌊 Changes the water" : "Leaves the water alone", "", function(){ pushUndo("changing a world changer"); g.setWater = !g.setWater; renderSelBar(); sfx("tick"); }, "wide" + (g.setWater ? " on" : ""));
+      if (g.setWater) slider(cw, "To a depth of", WORLD_H - Math.min(WORLD_H, g.water), 0, WORLD_H, 20, function(v){ g.water = WORLD_H - v; },
+        function(v){ return v <= 0 ? "none — drained" : (v >= WORLD_H ? "the whole world" : Math.round(v/WORLD_H*100) + "% deep"); }, "changing a world changer");
+      var ct = opSection("Takes");
+      slider(ct, "To change over", g.secs, 0, 30, 0.5, function(v){ g.secs = v; }, function(v){ return v <= 0 ? "at once" : (+v).toFixed(1) + "s"; }, "changing a world changer");
+      opBtn(ct, g.latch ? "📌 Stays changed once it has been on" : "↩ Goes back when its signal stops", "",
+        function(){ pushUndo("changing a world changer"); g.latch = !g.latch; g.latched = false; renderSelBar(); sfx("tick"); }, "wide" + (g.latch ? " on" : ""));
+      var cn = document.createElement("div"); cn.className = "noteText";
+      cn.textContent = g.input != null ? "While its signal is on the world takes these values, over that time." : "Nothing is wired to it, so it is on from the start. Wire a switch or sensor to it and it changes the world when that fires.";
+      cn.style.flexBasis = "100%"; opSection(null).appendChild(cn);
+    }
     if (g.kind === "mover"){
       var md = opSection("Travel");
       opBtn(md, "➜ Travels once and stops", "", function(){ pushUndo("changing a mover"); g.bounce = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.bounce ? " on" : ""));
@@ -9505,7 +9602,7 @@
       }, "wide");
     });
     opBtn(ws, wiring && wiring.from === g ? "… click what it should drive (Esc cancels)" : "🔌 Connect to…",
-      "Then click a motor bolt, wobble bolt, piston, camera or mover",
+      "Then click a motor bolt, wobble bolt, piston, camera, mover or world changer",
       function(){ wiring = wiring && wiring.from === g ? null : { from: g }; renderSelBar(); sfx("tick"); }, "wide" + (wiring && wiring.from === g ? " on" : ""));
     var vis = opSection("In play");
     opBtn(vis, g.visible === false ? "🙈 Hidden in Play" : "👁 Visible in Play",
@@ -11055,7 +11152,8 @@
                zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdMode:g.holdMode, holdForever:g.holdMode === "forever", once:g.once, shake:g.shake, freeze:g.freeze,
                sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
                zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null,
-               line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce };
+               line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce,
+               setLight: g.setLight, light: g.light, setWater: g.setWater, water: g.water, secs: g.secs, latch: g.latch };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -11126,7 +11224,7 @@
         worldSettings.motorSpeed = data.world.motorSpeed != null ? data.world.motorSpeed : 0.06;
         worldSettings.light = data.world.light != null ? Math.max(0, Math.min(1, +data.world.light)) : 1;
         unpackPlayerSettings(data.world);
-        applyWorldSettings();
+        applyWorldSettings(); worldLiveReset();
       }
     } else if (Array.isArray(data.blocks)){
       // legacy save from before objects existed — each old block becomes its own little square
