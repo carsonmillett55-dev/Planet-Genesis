@@ -1977,8 +1977,41 @@
   var BASE_GRAVITY = 1.05;
   engine.gravity.y = BASE_GRAVITY;
   var world = engine.world;
-  var runner = Runner.create();
-  Runner.run(runner, engine);
+  /* ---- The physics clock: 120 fixed steps a second, whatever the screen.
+     Matter's own Runner steps once per animation frame and never lets a
+     step be shorter than 1/60s. On a 120Hz screen — the machine this was
+     built and tuned on (measured: 121 frames and 120 steps a second) — that
+     ran the world 120 times a second at Matter's nominal 16.7ms: every
+     speed, jump and fall Carson tuned by feel is a per-step number taken
+     120 times a second. On a 60Hz screen the same level ran at half that.
+     This loop makes the tuned feel the truth everywhere: a real clock,
+     and exactly as many steps as 1/120s slices have elapsed — two per
+     frame at 60Hz, one at 120Hz, several after a stall (capped at 6, so a
+     tab back from the background does not spend a second catching up).
+     Each step still hands Matter its nominal 1000/60, since that is the
+     unit every per-step number here is written in: velocities are "px per
+     step", and there are 120 steps to a second. Anything that counts real
+     seconds — a piston's stroke, a wobble's period, a mover's speed, a
+     motor's rpm — goes through STEPS_PER_SEC / stepSeconds().
+     `runner.enabled` is still the pause switch everything reads. */
+  var STEPS_PER_SEC = 120, STEP_MS = 1000 / STEPS_PER_SEC, MATTER_DELTA = 1000 / 60;
+  var runner = { enabled: true, delta: STEP_MS, acc: 0, last: 0, steps: 0 };
+  function physicsFrame(t){
+    requestAnimationFrame(physicsFrame);
+    if (!runner.enabled){ runner.last = t; runner.acc = 0; return; }
+    var dt = runner.last ? t - runner.last : STEP_MS;
+    runner.last = t;
+    runner.acc += Math.min(dt, 6 * STEP_MS);
+    var n = 0;
+    while (runner.acc >= STEP_MS - 0.001 && n < 6){
+      try { Engine.update(engine, MATTER_DELTA); } catch (e){ if (runner.steps < 3) console.error("physics step failed:", e); }
+      runner.acc -= STEP_MS; n++; runner.steps++;
+    }
+    if (n === 6) runner.acc = 0;
+  }
+  requestAnimationFrame(physicsFrame);
+  /* How much real time one step covers, in seconds. */
+  function stepSeconds(){ return 1 / STEPS_PER_SEC; }
 
   /* Every physics-step handler goes through this.
 
@@ -2654,9 +2687,10 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera"];
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera" };
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover"];
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover" };
+  var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   var gadgets = [], gadgetCounter = 1;
   var wires = [];                 // { from: gadget id, to: bolt or gadget id }
   var selectedGadget = null;
@@ -2682,6 +2716,17 @@
               sticky: !!extra.sticky, springs: !!extra.springs,
               scale: extra.scale != null ? +extra.scale : 1,
               visible: extra.visible != null ? !!extra.visible : true };
+    if (kind === "mover"){
+      /* Carson's Mover: the object travels along a line and stops at the
+         end, or bounces back and forth, at a speed. `line` is the travel
+         from wherever the object is when the world starts running (its
+         `home`, taken then — so an object moved in Build travels from its
+         new spot), in world axes. Wired, it moves while the signal is on. */
+      g.line = extra.line && isFinite(+extra.line.dx) ? { dx:+extra.line.dx, dy:+extra.line.dy||0 } : { dx:0, dy:0 };
+      g.speed = extra.speed != null ? Math.max(5, Math.min(2000, +extra.speed)) : 120;
+      g.bounce = !!extra.bounce;
+      g.u = 0; g.dir = 1; g.home = null; g.homeAngle = 0;
+    }
     if (kind === "camera"){
       /* LBP2's Game Camera: a zone, a view, how much it tracks the player
          and how fast it moves. The view is centred on the camera itself. */
@@ -2748,16 +2793,18 @@
   function carryGadgets(list, mapPt, k){
     gadgets.forEach(function(g){
       if (list.indexOf(g.obj) < 0 || !g.obj.body) return;
+      var tip = g.kind === "mover" && g.line ? mapPt({ x: g.pos.x + g.line.dx, y: g.pos.y + g.line.dy }) : null;   // the travel's end, through the same map
       g.pos = mapPt(g.pos);
       if (k && k !== 1){
         g.scale = Math.max(0.25, Math.min(6, (g.scale || 1) * k));
         if (g.kind === "button") g.size = Math.max(12, g.size * k);
       }
+      if (tip) g.line = { dx: tip.x - g.pos.x, dy: tip.y - g.pos.y };
       g.local = toBodyLocal(g.obj.body, g.pos);
     });
   }
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera"); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover"); }
   function addWire(from, to){
     if (!from || !to || from === to) return false;
     if (!canReceive(to)) return false;
@@ -2804,6 +2851,69 @@
     return true;
   }
   function releaseLevers(){ gadgets.forEach(function(g){ if (g.kind === "lever") g.held = false; }); }
+  /* ---- Movers ------------------------------------------------------
+     The host is driven, not solved: each step the progress `u` moves
+     along the line at the speed, and in an afterUpdate step the body is
+     put exactly where that says (angle held, velocity set to the motion
+     so a character standing on it is carried and a wall feels the push) —
+     the same bulletproof approach as the stiff piston. Gravity, contacts,
+     whatever the solver did: overridden every step. */
+  function moverLen(g){ return g.line ? Math.hypot(g.line.dx, g.line.dy) : 0; }
+  function moverStart(g){ return g.home || gadgetWorld(g); }
+  function moverRunning(g){ return g.input != null ? g.input > 0 : true; }
+  /* Taken when the world starts running: the travel begins from wherever
+     the object is right then. */
+  function moverHomeAll(){
+    gadgets.forEach(function(g){
+      if (g.kind !== "mover" || !g.obj || !g.obj.body) return;
+      var wp = gadgetWorld(g);
+      g.home = { x: wp.x, y: wp.y }; g.homeAngle = g.obj.body.angle; g.u = 0; g.dir = 1;
+      g.lastX = g.obj.body.position.x; g.lastY = g.obj.body.position.y;
+    });
+  }
+  /* And when it stops (pausing Build): everything goes back to its start,
+     so a paused level always shows the objects where they were built. */
+  function moverReturnAll(){
+    gadgets.forEach(function(g){
+      if (g.kind !== "mover" || !g.home || !g.obj || !g.obj.body) return;
+      g.u = 0; g.dir = 1;
+      moverSnap(g);
+      Body.setVelocity(g.obj.body, { x:0, y:0 }); Body.setAngularVelocity(g.obj.body, 0);
+      g.home = null;
+    });
+  }
+  function moverAdvance(g, dtSec){
+    var len = moverLen(g);
+    if (!g.home || len < 1 || !moverRunning(g)) return;
+    var du = g.speed * dtSec / len;
+    g.u += g.dir * du;
+    if (g.bounce){
+      if (g.u >= 1){ g.u = 1; g.dir = -1; }
+      else if (g.u <= 0){ g.u = 0; g.dir = 1; }
+    } else if (g.u >= 1){ g.u = 1; }
+  }
+  function moverSnap(g){
+    var b = g.obj && g.obj.body;
+    if (!b || !g.home) return;
+    if (Math.abs(b.angle - g.homeAngle) > 1e-9) Body.setAngle(b, g.homeAngle);
+    var wp = gadgetWorld(g), tx = g.home.x + g.line.dx * g.u, ty = g.home.y + g.line.dy * g.u;
+    var px = b.position.x + (tx - wp.x), py = b.position.y + (ty - wp.y);
+    Body.setPosition(b, { x: px, y: py });
+    Body.setVelocity(b, { x: px - (g.lastX == null ? px : g.lastX), y: py - (g.lastY == null ? py : g.lastY) });
+    Body.setAngularVelocity(b, 0);
+    g.lastX = px; g.lastY = py;
+    g.pos = gadgetWorld(g);
+  }
+  onStep("afterUpdate", function(){
+    if (!runner.enabled) return;
+    for (var i = 0; i < gadgets.length; i++){
+      var g = gadgets[i];
+      if (g.kind !== "mover") continue;
+      if (!g.home) { moverHomeAll(); }   // the world started running without telling us (a load mid-run): take it now
+      moverAdvance(g, stepSeconds());
+      moverSnap(g);
+    }
+  });
   onStep("beforeUpdate", function(){
     var i, g;
     for (i = 0; i < gadgets.length; i++){ g = gadgets[i]; g.pos = gadgetWorld(g); }
@@ -2832,6 +2942,7 @@
   });
   function resetGadgetsForPlay(){
     gadgets.forEach(function(g){ if (g.kind === "button") g.on = false; g.held = false; });
+    moverHomeAll();
   }
 
   /* ---- Links: pistons and rope ----------------------------------
@@ -3130,7 +3241,7 @@
   }
   onStep("beforeUpdate", function(){
     if (!runner.enabled) return;
-    var dt = 1/60;
+    var dt = stepSeconds();
     for (var i = 0; i < links.length; i++){
       var l = links[i];
       if (l.kind !== "piston" || !l.constraint) continue;
@@ -3210,11 +3321,11 @@
   var BOLT_KINDS = ["bolt","sprung","motor","wobble"];
   var BOLT_KIND_LABEL = { bolt:"Bolt", sprung:"Sprung bolt", motor:"Motor bolt", wobble:"Wobble bolt" };
   var BOLT_TOOL_KIND = { bolt:"bolt", sprungbolt:"sprung", motorbolt:"motor", wobblebolt:"wobble" };
-  /* rad per step. 0.02 is about 11 rpm — a lazy windmill, which is what a
+  /* rad per step. 0.02 is about 23 rpm at 120 steps a second — a lazy windmill, which is what a
      fresh motor should feel like. The old 0.06 was 34 rpm and Carson's first
      reaction was that it was far too fast. Old levels keep their own speed. */
   var BOLT_DEFAULT_SPEED = 0.02;
-  function rpm(w){ return Math.round(Math.abs(w) * 60 * 60 / (Math.PI*2)); }
+  function rpm(w){ return Math.round(Math.abs(w) * STEPS_PER_SEC * 60 / (Math.PI*2)); }   // w is radians per step
   function isBoltTool(){ return !!BOLT_TOOL_KIND[currentTool]; }
   function boltIsMotor(b){ return b.kind === "motor"; }
   function boltDir(b){ return b.dir === -1 ? -1 : 1; }
@@ -3343,7 +3454,7 @@
     if (player) keepInside(player);
     for (var ki = 0; ki < objects.length; ki++) if (objects[ki].body) keepInside(objects[ki].body);
     if (!runner.enabled) return;
-    var dt = 1/60;
+    var dt = stepSeconds();
     for (var i = 0; i < bolts.length; i++){
       var b = bolts[i], c = b.constraint;
       if (!c || !c.bodyA || !c.bodyB) continue;
@@ -3429,7 +3540,7 @@
     bolts.slice().forEach(removeBolt);
     bolts = [];
     links.slice().forEach(removeLink);
-    links = []; selectedLink = null; linkDraft = null;
+    links = []; selectedLink = null; linkDraft = null; moverDraft = null;
     gadgets = []; wires = []; selectedGadget = null; wiring = null;
   }
 
@@ -4388,6 +4499,18 @@
   }
 
   var groundedNext = false;
+  /* What you are standing on, so its motion carries you. The walk sets
+     your sideways speed outright every step, which wiped out any carry a
+     moving platform's friction gave you — you stood still while it slid
+     out from under your feet. So the ground's own velocity at your feet
+     (a turning wheel's surface counts) is added to the walk. */
+  var groundBody = null, groundBodyNext = null;
+  function groundVel(){
+    if (!grounded || !groundBody || !player) return { x: 0, y: 0 };
+    var b = groundBody, w = b.angularVelocity || 0;
+    var rx = player.position.x - b.position.x, ry = player.position.y + PH/2 - b.position.y;
+    return { x: b.velocity.x - w * ry, y: b.velocity.y + w * rx };
+  }
   var lastFallSpeed = 0;
   /* Forgiveness. `grounded` is exact — one step off a ledge and it is
      false — which read as "I can't jump if I'm half a pixel off the
@@ -4403,8 +4526,8 @@
   }
   onStep("beforeUpdate", function(){
     var wasGrounded = grounded;
-    grounded = groundedNext;
-    groundedNext = false;
+    grounded = groundedNext; groundBody = groundedNext ? groundBodyNext : null;
+    groundedNext = false; groundBodyNext = null;
     if (grounded) lastGroundedAt = performance.now();
     // a landing worth hearing: you were airborne, coming down fast, and
     // now you're not
@@ -4435,6 +4558,7 @@
       for (var si = 0; si < sup.length; si++){ if (sup[si]){ sy += sup[si].y; sn++; } }
       if (sn && sy / sn < player.position.y + PH * 0.2) return;
       groundedNext = true;
+      var gb = p.bodyA === player ? p.bodyB : p.bodyA; groundBodyNext = gb.parent || gb;
     });
   });
   onStep("collisionStart", function(ev){
@@ -4563,6 +4687,7 @@
       e.preventDefault();
       if (wiring){ wiring = null; showToast("Wiring cancelled."); }
       else if (linkDraft){ linkDraft = null; showToast("Cancelled."); }
+      else if (moverDraft){ removeGadget(moverDraft); moverDraft = null; clearSelection(); showToast("Cancelled."); }
       else onEscape();
     }
       return;
@@ -4628,6 +4753,7 @@
       // Esc backs out of whatever is half done before it means "menu".
       if (wiring){ wiring = null; showToast("Wiring cancelled."); }
       else if (linkDraft){ linkDraft = null; showToast("Cancelled."); }
+      else if (moverDraft){ removeGadget(moverDraft); moverDraft = null; clearSelection(); showToast("Cancelled."); }
       else onEscape();
     }
     if (isAction("layerDown", e.code) && !e.repeat) setBuildLayer(buildLayer - 1);
@@ -4795,7 +4921,10 @@
         }
         Body.setVelocity(player, { x: vx*0.74, y: vy });   // water drags on you
       } else {
-        Body.setVelocity(player, { x: vx, y: player.velocity.y });
+        var gv = groundVel();
+        // ride what you stand on: its sideways motion comes with you, and if
+        // it is dropping away you go down with it rather than floating off
+        Body.setVelocity(player, { x: vx + gv.x, y: (gv.y > 0.05 && player.velocity.y < gv.y) ? gv.y : player.velocity.y });
         if ((input.jumpQueued || performance.now() < input.jumpBufferUntil) && canJumpNow() && !grabConstraint){
           Body.setVelocity(player, { x: player.velocity.x, y: -14 * carryJumpScale() });
           grounded = false; lastGroundedAt = -1e9; input.jumpBufferUntil = 0;
@@ -4994,7 +5123,8 @@
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
                zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdMode:g.holdMode, holdForever:g.holdMode === "forever", once:g.once, shake:g.shake, freeze:g.freeze,
                sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
-               zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null };
+               zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null,
+               line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -5121,6 +5251,7 @@
     v = !!v && mode === "build";
     if (runner.enabled === !v) return;
     runner.enabled = !v;
+    if (mode === "build"){ if (v) moverReturnAll(); else moverHomeAll(); }   // paused: everything back at its start; running: travel from here
     updatePauseState();
   }
   function togglePause(){
@@ -6053,6 +6184,16 @@
       ctx.fillStyle = "#5C3A26"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.beginPath(); ctx.rect(-w/2, -3 - h, w, h);
       ctx.fillStyle = on ? "#B3261E" : "#E4574B"; ctx.fill(); ctx.stroke();
+    } else if (g.kind === "mover"){
+      // an arrow on a round base, pointing the way it goes
+      var la = g.line && (g.line.dx || g.line.dy) ? Math.atan2(g.line.dy, g.line.dx) : 0;
+      ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI*2);
+      ctx.fillStyle = on ? (g.bounce ? "#F2A33A" : "#8CD17D") : (g.bounce ? "#C97A1C" : "#5F9E5A"); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.save(); ctx.rotate(la);
+      ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(4, 0); ctx.moveTo(1, -4); ctx.lineTo(5, 0); ctx.lineTo(1, 4);
+      ctx.lineWidth = 2.4; ctx.strokeStyle = "#F6ECD9"; ctx.lineCap = "round"; ctx.stroke();
+      ctx.restore();
     } else if (g.kind === "camera"){
       ctx.beginPath(); ctx.rect(-12, -8, 20, 16);
       ctx.fillStyle = on ? "#F2B705" : "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
@@ -6088,6 +6229,24 @@
         ctx.beginPath(); ctx.arc(0, 0, g.radius, 0, Math.PI*2);
         ctx.fillStyle = "rgba(127,212,217,0.12)"; ctx.fill();
         ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#2A7B8C"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.restore();
+      }
+      if (mode === "build" && g.kind === "mover" && g.line && (g.line.dx || g.line.dy) && (g === selectedGadget || isGadgetTool())){
+        // the travel: green one way with an arrow at the end, orange with
+        // arrows both ways for a bounce — Carson's spec
+        ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
+        var ms = moverStart(g), sx0 = ms.x - p.x, sy0 = ms.y - p.y, ex0 = sx0 + g.line.dx, ey0 = sy0 + g.line.dy;
+        var col = g.bounce ? "#E8891D" : "#5F9E5A", ang = Math.atan2(g.line.dy, g.line.dx), ah = 12/camScale;
+        ctx.beginPath(); ctx.moveTo(sx0, sy0); ctx.lineTo(ex0, ey0);
+        ctx.lineWidth = 3/camScale; ctx.strokeStyle = col; ctx.stroke();
+        var head = function(x, y, a){ ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - Math.cos(a - 0.5) * ah, y - Math.sin(a - 0.5) * ah); ctx.lineTo(x - Math.cos(a + 0.5) * ah, y - Math.sin(a + 0.5) * ah); ctx.closePath(); ctx.fillStyle = col; ctx.fill(); };
+        head(ex0, ey0, ang);
+        if (g.bounce) head(sx0, sy0, ang + Math.PI);
+        if (g === selectedGadget){
+          ctx.beginPath(); ctx.arc(ex0, ey0, 9/camScale, 0, Math.PI*2);
+          ctx.fillStyle = "#F2B705"; ctx.fill(); ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+          ctx.beginPath(); ctx.arc(ex0, ey0, 3/camScale, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
+        }
         ctx.restore();
       }
       if (mode === "build" && g.kind === "camera" && (g === selectedGadget || isGadgetTool())){
@@ -6288,6 +6447,14 @@
       drawLinkGlyph(l, 1);
       ctx.restore();
     });
+    // a mover waiting for its second click: the travel follows the cursor
+    if (moverDraft && mode === "build"){
+      var mst = gadgetWorld(moverDraft);
+      ctx.save();
+      ctx.beginPath(); ctx.moveTo(mst.x, mst.y); ctx.lineTo(mouseWorld.x, mouseWorld.y);
+      ctx.lineWidth = 3/camScale; ctx.strokeStyle = "#5F9E5A"; ctx.setLineDash([8/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.restore();
+    }
     // the half-made one follows the cursor
     if (linkDraft && mode === "build"){
       ctx.save();
@@ -7612,7 +7779,7 @@
     var grid = document.createElement("div"); grid.className = "catalogGrid";
     var defs = [["move","🕹","Move"],["bolt","🔩","Bolt"],["sprungbolt","🌀","Sprung bolt"],["motorbolt","⚙","Motor bolt"],["wobblebolt","↔","Wobble bolt"],
                 ["piston","🔩","Piston"],["rope","➰","Rope"],
-                ["sensor","👁","Player sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["camera","🎥","Camera"],
+                ["sensor","👁","Player sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["camera","🎥","Camera"],["mover","➡","Mover"],
                 ["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]];
     defs.forEach(function(d){
       var chip = document.createElement("div"); chip.className = "chip" + (currentTool===d[0] ? " active" : "");
@@ -8359,11 +8526,23 @@
   }
   function placeGadgetAt(pt){
     var kind = GADGET_TOOL_KIND[currentTool];
+    if (moverDraft){
+      // the second click: where the travel ends
+      var dm = moverDraft; moverDraft = null;
+      var st = gadgetWorld(dm), dx = pt.x - st.x, dy = pt.y - st.y;
+      if (Math.hypot(dx, dy) < 12){ dx = 200; dy = 0; }   // a click on the spot: a default run to the right
+      dm.line = { dx: dx, dy: dy };
+      selectGadget(dm); renderSelBar();
+      showToast("✨ Mover set — right-click it for speed and bounce. Drag the knob to change where it goes.");
+      sfx("glue");
+      return;
+    }
     var host = objectUnderOn(pt.x, pt.y, buildLayer, 6);
     if (!host && gadgetNeedsHost(kind)){ showToast("Put it on something on the " + LAYER_NAMES[buildLayer] + " layer."); sfx("deny"); return; }
     pushUndo("placing a " + GADGET_LABEL[kind].toLowerCase());
     var g = addGadget(kind, host, pt);
     selectGadget(g);
+    if (kind === "mover"){ moverDraft = g; showToast("Now click where it should travel to (Esc to cancel)."); sfx("bolt"); return; }
     showToast("✨ " + GADGET_LABEL[kind] + " placed — right-click it to set it up and wire it.");
     sfx("bolt");
     puff(pt.x, pt.y, 8, { color:"#7FD4D9", speed:1.6, g:0.06 });
@@ -9248,6 +9427,17 @@
         function(){ pushUndo("changing a button"); g.sticky = !g.sticky; g.on = false; renderSelBar(); sfx("tick"); }, g.sticky ? "on" : "");
       slider(opSection("Size"), "Width", g.size, 24, 200, 4, function(v){ g.size = v; }, function(v){ return Math.round(v) + "px"; }, "changing a button");
     }
+    if (g.kind === "mover"){
+      var md = opSection("Travel");
+      opBtn(md, "➜ Travels once and stops", "", function(){ pushUndo("changing a mover"); g.bounce = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.bounce ? " on" : ""));
+      opBtn(md, "⇄ Bounces back and forth", "", function(){ pushUndo("changing a mover"); g.bounce = true; renderSelBar(); sfx("tick"); }, "wide" + (g.bounce ? " on" : ""));
+      slider(opSection("Speed"), "Speed", g.speed, 5, 1500, 5, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing a mover");
+      var mlen = moverLen(g), mn = document.createElement("div"); mn.className = "noteText";
+      mn.textContent = (mlen > 0 ? "Travels " + Math.round(mlen) + "px, about " + (mlen / g.speed).toFixed(1) + "s each way. " : "") +
+        "Drag the knob on the level to set where it goes. It sets off from wherever the object is when the level starts" +
+        (g.input != null ? ", and only moves while its signal is on." : ". Wire a switch to it and it moves only while the signal is on.");
+      mn.style.flexBasis = "100%"; opSection(null).appendChild(mn);
+    }
     if (g.kind === "camera"){
       var pct = function(v){ return Math.round(v*100) + "%"; };
       slider(opSection("View"), "Zoom", g.zoom, CAM_ZOOM_MIN, CAM_ZOOM_MAX, 0.05, function(v){ g.zoom = v; }, pct, "changing a camera");
@@ -9315,7 +9505,7 @@
       }, "wide");
     });
     opBtn(ws, wiring && wiring.from === g ? "… click what it should drive (Esc cancels)" : "🔌 Connect to…",
-      "Then click a motor bolt, wobble bolt, piston or camera",
+      "Then click a motor bolt, wobble bolt, piston, camera or mover",
       function(){ wiring = wiring && wiring.from === g ? null : { from: g }; renderSelBar(); sfx("tick"); }, "wide" + (wiring && wiring.from === g ? " on" : ""));
     var vis = opSection("In play");
     opBtn(vis, g.visible === false ? "🙈 Hidden in Play" : "👁 Visible in Play",
@@ -9736,6 +9926,11 @@
       if (g.obj && g.obj.body) g.local = toBodyLocal(g.obj.body, g.pos);
     }
     var ck = attachDrag.kind;
+    if (attachDrag.moved && ck === "moverEnd"){
+      if (!attachDrag.pushed){ attachDrag.pushed = true; pushUndo("changing a mover"); }
+      var mst3 = moverStart(attachDrag.ref);
+      attachDrag.ref.line = { dx: pt.x - mst3.x, dy: pt.y - mst3.y };
+    }
     if (attachDrag.moved && (ck === "camEnd" || ck === "camZone" || ck === "camFrame" || ck === "camZoneCorner" || ck === "camFrameCorner")){
       var g2 = attachDrag.ref;
       // one undo step for the whole drag, taken before the first change
@@ -9822,7 +10017,7 @@
   function endAttachDrag(){
     if (!attachDrag) return;
     var d = attachDrag; attachDrag = null;
-    if (d.kind.indexOf("cam") === 0){ if (d.moved) renderSelBar(); return; }   // already where the cursor left it
+    if (d.kind.indexOf("cam") === 0 || d.kind === "moverEnd"){ if (d.moved) renderSelBar(); return; }   // already where the cursor left it
     if (!d.moved) return;
     var pt = d.pt, done = false;
     if (d.kind === "gadget"){
@@ -10116,6 +10311,13 @@
       var selCam = selectedGadget && selectedGadget.kind === "camera" ? selectedGadget : null;
       var camH = selCam ? cameraHandleAt(selCam, pt) : null;
       if (camH){ dragging = null; beginAttachDrag(camH.kind, selCam, pt, camH.corner); return; }
+      // a selected mover's knob: the end of its travel
+      if (selectedGadget && selectedGadget.kind === "mover" && selectedGadget.line){
+        var mst2 = moverStart(selectedGadget);
+        if (dist({ x: mst2.x + selectedGadget.line.dx, y: mst2.y + selectedGadget.line.dy }, pt) < 14/camScale + 4){
+          dragging = null; beginAttachDrag("moverEnd", selectedGadget, pt); return;
+        }
+      }
       var gh = gadgetAt(pt.x, pt.y);
       if (gh){ dragging = null; selectGadget(gh); renderSelBar(); beginAttachDrag("gadget", gh, pt); return; }
       var bh = boltAt(pt.x, pt.y);
@@ -10852,7 +11054,8 @@
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
                zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdMode:g.holdMode, holdForever:g.holdMode === "forever", once:g.once, shake:g.shake, freeze:g.freeze,
                sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
-               zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null };
+               zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null,
+               line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);

@@ -110,7 +110,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
     const bb = await postAndArm('bolt');
     await p.evaluate(([id, tt]) => window.__pg.boltSet(id, { tightness: tt }), [bb.id, tightness]);
     await p.evaluate(() => window.__pg.paused(false));
-    await p.waitForTimeout(700);
+    await p.waitForTimeout(1400);
     return Math.abs(await rel(bb.id));
   }
   const loose = await swing(0.0), tight = await swing(1.0);
@@ -167,7 +167,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const lb2 = await postAndArm('bolt');
   await p.evaluate(id => window.__pg.boltSet(id, { tightness: 0, limit: false }), lb2.id);
   await p.evaluate(() => window.__pg.paused(false));
-  await p.waitForTimeout(1200);
+  await p.waitForTimeout(2400);
   const free = await rel(lb2.id);
   ok('without limits the same arm swings well past it', Math.abs(free) > 33, free);
 
@@ -213,7 +213,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.waitForTimeout(200);
   const rpmNow = await p.evaluate(() => { const rows = Array.from(document.querySelectorAll('#opBody .settingRow')); return rows.find(r => /Speed/.test(r.querySelector('label').textContent)).querySelector('input.val').value; });
   ok('typing 20 into the speed field means 20 rpm', /^20 rpm$/.test(rpmNow), rpmNow);
-  ok('and the bolt really turns at that', Math.abs((await boltsNow())[0].speed * 60 * 60 / (Math.PI*2) - 20) < 0.5, (await boltsNow())[0].speed);
+  ok('and the bolt really turns at that', Math.abs((await boltsNow())[0].speed * 120 * 60 / (Math.PI*2) - 20) < 0.5, (await boltsNow())[0].speed);   // radians per step, 120 steps a second
   await p.evaluate(() => { Array.from(document.querySelectorAll('#opBody button')).find(x => /Wobble bolt/.test(x.textContent)).click(); });
   await p.waitForTimeout(200);
   ok('switching to Wobble shows swing and timing', await p.evaluate(() => /swing/i.test(document.getElementById('opBody').innerText) && /timing/i.test(document.getElementById('opBody').innerText)));

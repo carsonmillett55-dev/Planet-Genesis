@@ -11,8 +11,10 @@ const fs = require('fs');
 const path = require('path');
 
 const here = __dirname;
-const g = fs.readFileSync(path.join(here, 'geom.js'), 'utf8').trim();
-const h = fs.readFileSync(path.join(here, 'planet-genesis.html'), 'utf8');
+// Line endings are not drift: git's autocrlf hands one file CRLF and an
+// editor may leave the other LF. Compare the text, not the newlines.
+const g = fs.readFileSync(path.join(here, 'geom.js'), 'utf8').replace(/\r\n?/g, '\n').trim();
+const h = fs.readFileSync(path.join(here, 'planet-genesis.html'), 'utf8').replace(/\r\n?/g, '\n');
 
 const lines = g.split('\n');
 const first = lines[0];

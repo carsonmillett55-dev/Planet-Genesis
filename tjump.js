@@ -124,11 +124,11 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   console.log('   pressed', (floorY - early.y).toFixed(0) + 'px above the floor; then rose to', (floorY - bufTop).toFixed(0) + 'px');
   ok('pressed while still in the air', early.y < floorY - 10, { at: early.y, floor: floorY });
   ok('and it jumped on landing anyway', floorY - bufTop > 60, { top: bufTop, floor: floorY });
-  await p.waitForTimeout(800);
+  await p.waitForTimeout(2000);                                // let that jump land: up and down is about 1.7s
   // a press far too early is thrown away
   await p.evaluate(([x,y]) => window.__pg.playerTo(x,y), [X, floorY - 260]);
-  await p.waitForTimeout(30);
-  await p.keyboard.press('Space');                             // pressed right at the top of the drop
+  await p.waitForTimeout(200);                                 // past the grace the floor just gave (a teleport is not a real step off a ledge)
+  await p.keyboard.press('Space');                             // pressed near the top of the drop, half a second before landing
   await p.waitForTimeout(900);                                 // long landed
   const stale = await peakOver(400);
   ok('a press long before landing does not fire on landing', floorY - stale < 10, { top: stale, floor: floorY });

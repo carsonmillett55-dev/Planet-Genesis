@@ -223,11 +223,15 @@ implement it, including connected systems, rather than approximating.
 | **Rope** | DONE. Length; hangs, swings, goes slack, holds. |
 | **Emitters** | Research the LBP emitter system specifically — it is deeper than it looks. |
 | **World changer** | Driven by activators (sensors, buttons). Adjusts world lighting, world water level, etc. |
-| **Mover** | See below. |
+| **Mover** | DONE 2026-09-11, to the spec below. |
 | **Creature eye** | See below. |
 | **Camera** | DONE 2026-09-11. LBP2's Game Camera: zone, zoom, tracking, speed; wired, the switch decides. Plus the Movie Camera's hold time (or hold for good), shake, controls off, and a glide to a second spot and zoom — Carson's "easier than keyframing". Play has its own fixed zoom, set in World. **Still to do: tilt** (a camera roll; a rendering change — the frame transform, its inverse for the mouse, the light buffer and overlays all have to agree). |
 
-### Mover
+### Mover — DONE
+
+Built 2026-09-11 as specified: click the object, click where it goes; once
+or bounce; speed; wired or not; green one-way line, orange two-way; the
+player rides it. `tmover.js`.
 
 Place it on an object. Placing opens a mode where you draw a line; the object
 follows that line and stops at the end.

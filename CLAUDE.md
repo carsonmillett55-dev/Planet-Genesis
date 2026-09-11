@@ -19,11 +19,11 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 
 | file | what it is |
 | --- | --- |
-| `planet-genesis.html` | **The game.** ~408KB, the source of truth, what gets published. |
+| `planet-genesis.html` | **The game.** ~590KB, the source of truth, what gets published. |
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` | Playwright suites, 493 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` | Playwright suites, 515 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 493 checks + checkgeom, in order
+npm test                   # all 515 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -61,6 +61,7 @@ node tgadget.js            # 49 — player sensor, button, lever, wires, what th
 node tlink.js              # 59 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
 node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint; the weight slider
 node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
+node tmover.js             # 22 — the Mover: two-click placing, once and bounce, riding it, a loose host held, wired, the knob, save/load
 node tcam.js               # 91 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -412,7 +413,8 @@ Each gadget has an **output**, 0 or 1:
 | gadget | on when | settings |
 | --- | --- | --- |
 | **sensor** | the player is within `radius` (Play only) | radius |
-| **camera** | takes over the Play camera while the player is in `radius`, or while wired on — see The camera | zoom, tracking, speed, radius |
+| **camera** | takes over the Play camera while the player is in its zone, or while wired on — see The camera | zoom, tracking, speed, zone, view, hold, once, glide, shake, freeze |
+| **mover** | drives its host along a line — see The Mover | line, speed, bounce |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
 
@@ -427,7 +429,7 @@ unwired receiver behaves as it always did — that is the whole compatibility
 story. The gadget step is registered before the bolt step so the inputs are
 fresh when bolts read them.
 
-What takes an input today (`canReceive`): a **camera** (see The camera); a **motor bolt** — the signal is
+What takes an input today (`canReceive`): a **camera** (see The camera); a **mover** (moves while the signal is on); a **motor bolt** — the signal is
 the throttle, and off holds firm like a tight bolt (zeroing the velocity
 alone let gravity creep the arm 3.5° in half a second, so the stop angle is
 held and turned back to); a **wobble bolt** — wired, it is a *flipper*:
@@ -681,6 +683,74 @@ cleared by a jump, by hanging on a grab, and by a mode switch.
 `tjump.js` has both, plus the controls: too late off the ledge is just a
 fall, a press long before landing does nothing, a second press mid-jump
 adds nothing.
+
+## The physics clock
+
+**120 fixed steps a second, on every screen.** Matter's own `Runner` steps
+once per animation frame and never lets a step be shorter than 1/60s, so
+on a 120Hz screen it ran the world 120 times a second at Matter's nominal
+16.7ms — and that is the machine this was built and tuned on (measured:
+121 frames and 120 steps a second). Every speed, jump and fall Carson
+tuned by feel is a per-step number taken 120 times a second; on a 60Hz
+screen the same level ran at half speed. `physicsFrame` replaces the
+Runner: a real clock, an accumulator, and exactly as many `Engine.update`
+calls as 1/120s slices have elapsed — two per frame at 60Hz, one at
+120Hz, up to six after a stall so a tab back from the background does not
+spend a second catching up. Each step still hands Matter `MATTER_DELTA`
+(1000/60), because that is the unit every per-step number here is written
+in: velocities are *px per step*, and there are `STEPS_PER_SEC` (120)
+steps to a second. **Anything that counts real seconds goes through
+`stepSeconds()` or `STEPS_PER_SEC`**: a piston's stroke, a wobble's period,
+a mover's speed, a motor's rpm (`rpm()` — 0.02 rad/step is 23 rpm, not the
+11 the old comment said). `runner` is now a plain object; `runner.enabled`
+is still the pause switch everything reads.
+
+Test suites were written against this machine, so their timing windows
+were already 120-step windows. The two that assumed 60 (a bolt's swing in
+700ms, a jump's flight in 800ms) were widened when the clock was first
+tried at 60 and are left wide.
+
+## Riding what you stand on
+
+The walk sets the player's sideways speed outright every step, which
+wiped out whatever carry a moving platform's friction gave — you stood
+still while it slid out from under you (the player's friction is 0.02
+anyway). `groundBody` is what the feet are on (recorded with `grounded`
+in `collisionActive`), and `groundVel()` is its velocity at the feet —
+`v + ω × r`, so a turning wheel's surface counts — added to the walk. A
+platform dropping away takes you down with it rather than leaving you
+floating (`vy` follows the ground's when it is faster downward). A jump
+keeps the carried sideways speed, as it should.
+
+## The Mover
+
+Carson's own spec: place it on an object, draw a line, the object follows
+the line and stops at the end, or bounces back and forth; adjustable
+speed; activated by a sensor or other tools. `kind:"mover"`, host
+required. **Two clicks to place**: the first puts it on the object and
+sets `moverDraft`, the ghost line follows the cursor, the second sets
+`line` (`{dx, dy}` in world axes; a click on the spot gives a default
+200px run to the right); Esc removes the half-made one. Settings: `speed`
+in real px/s (5–1500, default 120), `bounce`. The line draws green with
+an arrowhead one way, orange with heads both ways for a bounce, when
+selected or with the tool in hand; a knob at the end drags (`attachDrag`
+kind `moverEnd`, one undo per drag on the first move). Resize and flip
+map the line through `carryGadgets` like the spot.
+
+**The host is driven, not solved** — the stiff piston's approach. `home`
+is taken when the world starts running (`moverHomeAll`: entering Play,
+unpausing Build), so the travel begins from wherever the object is right
+then, and an object moved in Build travels from its new spot. Each
+`afterUpdate`, `moverAdvance` moves `u` along the line at the speed
+(`moverRunning`: wired, while the signal is on; unwired, always) and
+`moverSnap` puts the body exactly where that says — the gadget's own
+point is driven to `home + line·u`, the body's angle is held at its home
+angle, the velocity is set to the motion so a character on it is carried
+and a wall feels the push. Gravity, contacts, a loose host that would
+fall: overridden every step, tested with an unlocked plank lifted 200px.
+**Pausing Build puts every mover's object back at its start**
+(`moverReturnAll`), so a paused level always shows things where they
+were built and repeated pause/unpause cannot drift them.
 
 ## Walking while paused
 
@@ -1006,13 +1076,15 @@ clears whichever matched. `regress.js` covers all four paths.
 ## Known hazards
 
 - 🔴 **`geom.js` is duplicated.** The standalone file and the copy inlined in
-  the HTML are kept in sync by hand. `node checkgeom.js` catches drift; a real
-  build step would retire the problem. Until then, edit one and copy it over.
+  the HTML are kept in sync by hand. `node checkgeom.js` catches drift (it
+  ignores line endings: git's autocrlf hands one file CRLF and a Python
+  rewrite leaves the other LF); a real build step would retire the problem.
+  Until then, edit one and copy it over.
 - 🟠 **Autosave writes ~140KB synchronously every 15 seconds.**
 - 🟠 Levels have no owner or thumbnail. They *do* now have an id — see
   **Saving** — but nothing ties one to a person.
 - 🟠 Characters and My Objects are localStorage-only.
-- 🟠 408KB in one file is at the edge of comfortable.
+- 🟠 590KB in one file is past the edge of comfortable. A split into src files with a build step is the fix, and would retire the geom.js hazard with it.
 
 ## What's next
 
