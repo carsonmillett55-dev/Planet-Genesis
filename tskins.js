@@ -95,46 +95,132 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await build();
 
   console.log('');
-  console.log('== an animated object: idle loops, a wire plays the action once and holds, and it can be walk-through ==');
+  console.log('== a custom object: draw it, draw its hitbox, then its settings ==');
   await fresh();
   await rect('wood', 1, X-300, Y+100, X+300, Y+140);
-  await rect('metal', 1, X, Y-60, X+80, Y+100);          // a door
   await lockAll();
   await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('anim'); });
-  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X+40, Y+20]);
-  const an = await kind('anim');
-  ok('an animated object can be placed from the Tools', !!an && an.actionMode === 'loop' && !an.ghost, an);
-  ok('its studio opens', await p.evaluate(id => window.__pg.skinStudio(id), an.id));
-  await p.waitForTimeout(150);
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X, Y+40]);  // on empty air: it brings its own body
+  await p.waitForTimeout(200);
+  let an = await kind('anim');
+  ok('the tool puts a drawn object down and opens the studio', !!an && an.obj && !(await p.evaluate(() => document.getElementById('charEditorOverlay').hidden)), an);
+  ok('starting as a plain box', Math.abs(an.art.w - 120) < 1 && Math.abs(an.art.h - 120) < 1, an.art);
+  const objBefore = (await stats()).filter(o => o.id === an.obj)[0];
+  ok('the body is that box for now', Math.abs(objBefore.area - 120*120) < 200, objBefore.area);
+  // the look
   await st('setColor', '#5F9E5A'); await stroke(0.2, 0.2, 0.8, 0.8);
   await st('go', 'action', 0); await stroke(0.2, 0.8, 0.8, 0.2); await st('click', '+ blank'); await stroke(0.5, 0.1, 0.5, 0.9);
-  await st('close');
-  ok('drawn: idle and a two-frame action', (await skinHasStrokes(an.id)) === 3, { strokes: await skinHasStrokes(an.id), skin: await p.evaluate(i => window.__pg.skinOf(i), an.id) });
+  // Next takes you to the hitbox
+  const nextLabel = await p.evaluate(() => Array.from(document.querySelectorAll('#ceLeft button')).map(b => b.textContent).find(t => /^Next:/.test(t)));
+  ok('a Next button leads to the hitbox', /Hitbox/.test(nextLabel || ''), nextLabel);
+  await st('click', nextLabel);
+  ok('the hitbox step is one drawing', (await st('where')).state === 'hitbox' && (await st('where')).frames === 1, await st('where'));
+  await stroke(0.5, 0.15, 0.5, 0.85);                         // a thick vertical bar: the hitbox
+  ok('the hitbox stroke is its own colour, whatever the brush had', (await st('drawing'))[0].c === '#4FA9D6');
+  const doneLabel = await p.evaluate(() => Array.from(document.querySelectorAll('#ceLeft button')).map(b => b.textContent).find(t => /Done/.test(t)));
+  ok('and then it is Done', !!doneLabel, doneLabel);
+  await st('click', doneLabel); await p.waitForTimeout(300);
+  an = await kind('anim');
+  const objAfter = (await stats()).filter(o => o.id === an.obj)[0];
+  ok('closing turns the drawn hitbox into the body: a bar, much less than the box', objAfter && objAfter.area < 120*120*0.5 && objAfter.area > 800, objAfter && objAfter.area);
+  ok('the art box is kept as it was, so the look still lands where it was drawn', Math.abs(an.art.w - 120) < 1 && Math.abs(an.art.h - 120) < 1, an.art);
+  ok('it is solid, not grabbable, locked, and its action loops', !an.ghost && an.actionMode === 'loop', an);
+  // the settings from its box
   await p.evaluate(id => window.__pg.gadgetSet(id, { actionMode: 'once' }), an.id);
   await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('lever'); });
   await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X-200, Y+100]);
-  const lv2 = await kind('lever');
-  await p.evaluate(([a,b]) => window.__pg.wire(a,b), [lv2.id, an.id]);
+  await p.evaluate(([a,b]) => window.__pg.wire(a,b), [(await kind('lever')).id, an.id]);
   await play(); await p.waitForTimeout(200);
   ok('unwired-off it shows idle', (await p.evaluate(id => window.__pg.skinState(id), (await kind('anim')).id)) === 'idle');
   await build();
   await p.evaluate(id => window.__pg.gadgetSet(id, { on: true }), (await kind('lever')).id);
   await play(); await p.waitForTimeout(300);
   ok('lever on, it plays the action', (await p.evaluate(id => window.__pg.skinState(id), (await kind('anim')).id)) === 'action');
-  // walk-through
   await build();
-  await standAt(X-60, Y+60);
+  // solid: the bar stops the player; no collision: they walk through
   await play();
-  await standAt(X-30, Y+60); await p.keyboard.down('KeyD'); await p.waitForTimeout(600); await p.keyboard.up('KeyD');
+  await standAt(X-60, Y+60); await p.keyboard.down('KeyD'); await p.waitForTimeout(700); await p.keyboard.up('KeyD');
   const solidX = (await pos()).x;
-  ok('solid, the door stops the player', solidX < X + 10, solidX);
+  ok('solid, the drawn bar stops the player', solidX < X - 5, solidX);
   await build();
   await p.evaluate(id => window.__pg.gadgetSet(id, { ghost: true }), (await kind('anim')).id);
   await p.evaluate(id => window.__pg.refreshHost(id), (await kind('anim')).id);
   await play();
-  await standAt(X-30, Y+60); await p.keyboard.down('KeyD'); await p.waitForTimeout(600); await p.keyboard.up('KeyD');
-  const ghostX = (await pos()).x;
-  ok('set to no collision, the player walks straight through it', ghostX > X + 60, ghostX);
+  await standAt(X-60, Y+60); await p.keyboard.down('KeyD'); await p.waitForTimeout(700); await p.keyboard.up('KeyD');
+  ok('set to no collision, the player walks straight through it', (await pos()).x > X + 40, (await pos()).x);
+  await build();
+  const svA = await p.evaluate(() => window.__pg.serialize('anim'));
+  const gsA = svA.gadgets.filter(g => g.kind === 'anim')[0];
+  ok('the save carries the drawing, the hitbox strokes and the art box', gsA && gsA.skin && gsA.hitbox && gsA.hitbox.length === 1 && gsA.art && gsA.art.w === 120, gsA && { hit: gsA.hitbox && gsA.hitbox.length, art: gsA.art });
+
+  console.log('');
+  console.log('== a custom creature: look, hitbox, weak spot, danger — then it lives ==');
+  await fresh();
+  await rect('wood', 1, X-380, Y+100, X+400, Y+140);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('creature'); });
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X+100, Y+40]);
+  await p.waitForTimeout(200);
+  let cr = await kind('creature');
+  ok('the tool puts a creature down and opens the studio', !!cr && !(await p.evaluate(() => document.getElementById('charEditorOverlay').hidden)), cr);
+  const cchips = await p.evaluate(() => Array.from(document.querySelectorAll('#ceLeft .ceChips button')).map(b => b.textContent));
+  ok('with Idle, Moving, Attack, Death, Action — then Hitbox, Weak spot, Danger', ['Idle','Moving','Attack','Death','Action','Hitbox','Weak spot','Danger'].every(w => cchips.some(c => c.indexOf(w) >= 0)), cchips);
+  await st('setColor', '#C89BD9'); await stroke(0.2, 0.3, 0.8, 0.7);                         // idle
+  await st('go', 'move', 0); await stroke(0.2, 0.7, 0.8, 0.3);
+  await st('go', 'attack', 0); await stroke(0.5, 0.2, 0.5, 0.8);
+  await st('go', 'die', 0); await stroke(0.2, 0.2, 0.8, 0.8); await st('click', '+ blank'); await stroke(0.8, 0.2, 0.2, 0.8);
+  await st('go', 'hitbox', 0); await stroke(0.5, 0.2, 0.5, 0.8); await stroke(0.25, 0.5, 0.75, 0.5);   // a cross: a bar down the middle and one across
+  await st('go', 'weakD', 0); await stroke(0.2, 0.2, 0.8, 0.2);                               // a band along the top edge of the bar
+  await st('go', 'dangerD', 0); await stroke(0.2, 0.8, 0.8, 0.8);                             // and one along its bottom edge
+  await st('close'); await p.waitForTimeout(300);
+  cr = await kind('creature');
+  ok('closing gives it a body from the hitbox', cr.hitStrokes === 2 && (await stats()).filter(o => o.id === cr.obj)[0].area < 120*120*0.5);
+  ok('and the weak spot and danger as areas', cr.weakArea > 300 && cr.dangerArea > 300, { weak: cr.weakArea, danger: cr.dangerArea });
+  await p.evaluate(id => window.__pg.gadgetSet(id, { speed: 150, range: 600 }), cr.id);
+  await play();
+  const crObj = () => stats().then(stt => stt.filter(o => o.pieces.some(pc => pc.indexOf('creature') === 0))[0]);
+  const c0 = await crObj();
+  await standAt(X-250, Y+60); await p.waitForTimeout(700);
+  const c1 = await crObj();
+  ok('it follows the player', c1.pos.x < c0.pos.x - 40, { from: c0.pos.x, to: c1.pos.x });
+  ok('facing them: drawn facing right, it now faces left', (await kind('creature')).face === -1 && (await kind('creature')).drawnFacing === 1);
+  ok('and shows its Moving frames', (await p.evaluate(id => window.__pg.skinState(id), (await kind('creature')).id)) === 'move');
+  // the danger: touching the bottom plays the Attack and hurts the player
+  const cx = (await crObj()).pos.x, cyD = (await crObj()).pos.y;
+  await p.evaluate(([x,y]) => window.__pg.playerTo(x,y), [cx, cyD + 44]); await p.waitForTimeout(120);   // into the band across the bottom
+  const stA = await p.evaluate(id => window.__pg.skinState(id), (await kind('creature')).id);
+  const pAfter = await pos();
+  ok('touching the danger sends the player back to the start', pAfter.x < 200, pAfter);
+  ok('and its Attack plays', stA === 'attack', stA);
+  await p.waitForTimeout(1200);
+  // the weak spot: the top; its Death plays before it goes
+  const cx2 = (await crObj()).pos.x, cy2 = (await crObj()).pos.y;
+  await p.evaluate(([x,y]) => window.__pg.playerTo(x,y), [cx2, cy2 - 50]); await p.waitForTimeout(150);   // onto the band across the top
+  const gAfter = await kind('creature');
+  ok('landing on the weak spot starts its Death', !!gAfter && gAfter.dying === true, gAfter && { dying: gAfter.dying });
+  ok('it is still there while the Death plays', !!(await crObj()));
+  await p.waitForTimeout(900);
+  ok('and gone when it is over', !(await crObj()) && !(await kind('creature')));
+  await build();
+
+  console.log('');
+  console.log('== an empty hitbox means no collision; a creature on the Back layer ==');
+  await fresh();
+  await rect('wood', 1, X-380, Y+100, X+400, Y+140);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.setLayer(0); window.__pg.setTool('creature'); });
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X+100, Y+40]);
+  await p.waitForTimeout(200);
+  await st('setColor', '#C89BD9'); await stroke(0.2, 0.3, 0.8, 0.7);
+  await st('close'); await p.waitForTimeout(300);
+  const bc = await kind('creature');
+  ok('a creature can be put on the Back layer', bc && bc.layer === 0, bc && bc.layer);
+  ok('with nothing drawn for a hitbox it has no collision', bc.ghost === true, bc.ghost);
+  await p.evaluate(id => window.__pg.gadgetSet(id, { speed: 150, range: 600 }), bc.id);
+  await play();
+  const b0 = await crObj();
+  await standAt(X-250, Y+60); await p.waitForTimeout(700);
+  ok('and floats after the player there', (await crObj()).pos.x < b0.pos.x - 40);
   await build();
 
   console.log('');
@@ -152,8 +238,8 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const emId = (await kind('emitter')).id;                   // (ids are renumbered by the mode switch)
   const opened = await p.evaluate(id => window.__pg.skinStudio(id), emId);
   await p.waitForTimeout(150);                                 // the stage lays itself out on the next frame
-  const cr = await st('canvasRect');
-  ok('its studio opens on a square box', opened && Math.abs(cr.w / cr.h - 1) < 0.05, cr);
+  const emRect = await st('canvasRect');
+  ok('its studio opens on a square box', opened && Math.abs(emRect.w / emRect.h - 1) < 0.05, emRect);
   await st('setColor', '#F2B705'); await stroke(0.3, 0.5, 0.7, 0.5);
   await st('close');
   ok('the particle is drawn', (await skinHasStrokes(emId)) === 1);
@@ -175,7 +261,9 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await build();
   const sv2 = await p.evaluate(() => window.__pg.serialize('em'));
   const ge = sv2.gadgets.filter(g => g.kind === 'emitter')[0];
-  ok('the save carries the particle drawing and its settings', ge && ge.skin && ge.skin.states.particle[0].length === 1 && ge.rate === 40 && ge.life === 0.5, ge && { rate: ge.rate, life: ge.life });
+  ok('the save carries the particle drawing and its settings', ge && ge.skin && ge.skin.states.particle[0].length === 1 && ge.rate === 40 && ge.life === 0.5 && ge.alpha === 1, ge && { rate: ge.rate, life: ge.life, alpha: ge.alpha });
+  await p.evaluate(id => window.__pg.gadgetSet(id, { alpha: 0.4 }), (await kind('emitter')).id);
+  ok('particles have an opacity', (await kind('emitter')).alpha === 0.4);
 
   console.log('');
   console.log(fail ? `FAILED ${fail} of ${pass+fail} checks` : `ALL ${pass} checks`);

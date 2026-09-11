@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` | Playwright suites, 658 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` | Playwright suites, 682 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 658 checks + checkgeom, in order
+npm test                   # all 682 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -66,7 +66,7 @@ node tworld.js             # 22 — the Water sensor (touching, not a pool above
 node tcreature.js          # 32 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, painted weak spot and danger, colour, a Back-layer creature, save/load
 node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
 node tstudio.js            # 34 — the studio: strokes, undo/redo, the tools, frames, playback, no rig
-node tskins.js             # 26 — drawn creatures, animated objects (action by wire, walk-through), particles with pictures
+node tskins.js             # 50 — the Custom creature and Custom object wizards (look, hitbox, weak spot, danger), death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -423,7 +423,8 @@ Each gadget has an **output**, 0 or 1:
 | **watersensor** | water is touching it: a wet cell within 12px, or the world's flood above it (`waterTouching`) — not "somewhere up this column", which read a pool on a shelf above as under water | — |
 | **changer** | while wired on (unwired: always; `latch`: for good once it has been), the world's light and/or water level move to its values over `secs` — see The live world | setLight, light, setWater, water, secs, latch |
 | **eye** | its host is a creature — see Creatures | range, speed, fly, weak spot, danger, colour, skin, actionMode |
-| **anim** | its host is drawn with a skin: Idle loops, a wire plays Action — see Skins | skin, actionMode, ghost |
+| **anim** | a Custom object: its own drawn body (the hitbox step) and look; Idle loops, a wire plays Action — see Drawn things | skin, hitbox, art, actionMode, ghost |
+| **creature** | a Custom creature: drawn look, hitbox, weak spot and danger; chases, faces, bites, dies — see Drawn things | skin, hitbox, weakD, dangerD, art, range, speed, fly, ghost, drawnFacing, actionMode |
 | **emitter** | throws out drawn particles while on (unwired: always) — see Skins | skin, rate, pspeed, angle, spread, grav, life, psize, spin |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
@@ -899,6 +900,82 @@ Onion skin: the frame before at 0.22 and, if wanted, the one after at
 four-part procedurally posed character, its editor, `rigSprites`,
 `rigAnchors`, `RIG_*`. A saved character with `mode: "rig"` loads as
 `animated`. `charMode` is `preset`, `simple` or `animated`.
+
+## Drawn things: the Custom creature and the Custom object
+
+Carson's spec: *first you draw the creature, then you draw the hitbox,
+then the weak spot, then the danger, and that's it*. Same for an object:
+draw it, draw its collision, then its settings. The Creature eye stays
+its own thing (a googly eye on any painted object); these two tools make
+their own object.
+
+**Placing** (`placeGadgetAt` for `creature` / `anim`): a box
+`DRAWN_DEFAULT_SIZE` (120px) square of the `creature` / `drawn`
+material — two materials never in the catalogue — is made at the click on
+the build layer (any layer: on Back or Front it is decoration that floats
+after the player), the gadget goes on it with `art = {-60,-60,120,120}`,
+and the studio opens. **`art` is the drawing box, a rect in the host's
+own frame that the hitbox does not change**: the look is always drawn
+stretched over `art` (`skinBox`), not over the body's bounds, so
+reshaping the hitbox never distorts the picture. It rides rebuilds (its
+world centre through `maskW`), resize and flip (`carryGadgets`: centre
+through the map, size by the scale; a flip also turns `drawnFacing`).
+
+**The wizard** is the studio with steps: `SKIN_STEPS[kind]` are extra
+"states" flagged `mask:true` — `hitbox` (blue), `weakD` (gold), `dangerD`
+(red) for a creature, `hitbox` alone for an object — each one drawing on
+the gadget itself (`g.hitbox`, `g.weakD`, `g.dangerD`), painted in a
+forced colour (the eraser still erases), shown at 0.6 alpha over the
+Idle look faint underneath (and the hitbox fainter under the other
+two). No frame tools on a step. `subject.next()` walks look → first step
+→ … → Done; a **Next** button on the left follows it and the step chips
+tick when drawn. `openSkinStudio(g, step)` opens straight at a step, for
+the box's "Redraw the hitbox / weak spot / danger".
+
+**Drawings become geometry when the studio closes** (`applyDrawnSteps`):
+`drawingToPoly(strokes, w, h, tol)` — every stroke is the exact shape a
+round brush of its width sweeps, a capsule per segment (`sweepRing`, the
+level brush's own geometry), unioned, an eraser stroke subtracted, in a
+box centred on (0,0), cleaned at 1.2px. The hitbox polygon is moved to
+the art box's centre in the host's frame, taken to the world through the
+body, and `rebuildFromPieces(o, {a:0,x:0,y:0})` makes it the body — so
+the drawn hitbox is as clean a polygon as a painted one. **An empty
+hitbox means no collision**: the body is the art box and `ghost` is set.
+For a creature the weak spot and danger become `g.weak` / `g.danger` the
+same way (`weakMode` is always `painted`), so the contact code is the
+eye's, unchanged.
+
+**A creature** (`kind:"creature"`): chases as the eye's creature does
+(`creatureStep`, shared), **turns to face the player whenever it sees
+them** (`g.face` from the direction to the player, not from motion —
+Carson found it "backwards"; `drawnFacing`, ±1 in the box, says which
+way the picture was drawn, and it is mirrored when `face` differs).
+Skin states: Idle, Moving, **Attack** (played once from `attackT0` when
+the player hits the danger, on top of the zap and respawn), **Death**
+(`creaturePop` sets `dying` and `dieT0` instead of removing; it holds
+still while the Death plays — `skinStateMs` — then the object is removed;
+no Death drawn, it pops at once as before), and Action for a wire.
+`skinStateFor` orders them: dying, attacking, wired action, moving, idle.
+Settings: follows on the ground or floats, speed, sight, solid or no
+collision, drawn facing.
+
+**An object** (`kind:"anim"`, "Custom object"): look and hitbox, then in
+its box solid / no collision, grabbable, locked / free, weight (the same
+`applyObjectWeight` as any object), and whether a wire's Action loops or
+plays once and holds. It starts locked (`forcedStatic`), as a built thing
+should.
+
+**What a tool shows**: a camera's zone and frame, a sensor's reach, a
+mover's line and a creature eye's range draw only when that gadget is
+selected or *its own* tool is in hand — `currentTool === "camera"` and so
+on, not `isGadgetTool()`, which showed every camera's working parts while
+you placed particles ("I can see the camera editing visuals").
+
+**Particles get a guide** (selected, or the Particles tool in hand): the
+direction and spread as a wedge, the path a middling particle flies (the
+same sums as the particles, a frame at a time — speed, gravity, life),
+an arrow head at the start and a ring the size of one particle at the
+end. And `alpha`, an opacity on the particles, in the box.
 
 ## Skins
 

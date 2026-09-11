@@ -1434,6 +1434,9 @@
     // grid instead of building a body. Its density is what everything
     // else floats or sinks against.
     water:     { label:"Water",        color:"#4FA9D6", dark:"#2F86A6", friction:0.02,restitution:0,    density:0.009, grabbable:false, hazard:false, floatForce:0, tex:"wave", isFluid:true },
+    // the bodies of drawn things — a creature's, a drawn object's — never in the catalogue; the drawing covers them
+    creature:  { label:"Creature",     color:"#8CD17D", dark:"#5F9E5A", friction:0.9, restitution:0.05, density:0.004, grabbable:false, hazard:false, floatForce:0 },
+    drawn:     { label:"Drawn object", color:"#C9C2B4", dark:"#8B8374", friction:0.8, restitution:0.05, density:0.006, grabbable:false, hazard:false, floatForce:0 },
     // pseudo-materials for painting a creature's areas — never in the catalogue, never a body
     maskweak:  { label:"Weak spot",    color:"#F6ECD9", dark:"#B3870A", friction:0, restitution:0, density:0.001, grabbable:false, hazard:false, floatForce:0, isMask:true },
     maskdanger:{ label:"Danger",       color:"#E4574B", dark:"#B3261E", friction:0, restitution:0, density:0.001, grabbable:false, hazard:false, floatForce:0, isMask:true }
@@ -1974,7 +1977,7 @@
       if (!drawingHasArt(f)) continue;
       var cv = drawingCanvas(f, Math.min(512, Math.round(q.size * 2)), Math.min(512, Math.round(q.size * 2)));
       ctx.save();
-      ctx.globalAlpha = u > 0.6 ? (1 - u) / 0.4 : 1;
+      ctx.globalAlpha = (u > 0.6 ? (1 - u) / 0.4 : 1) * (q.g.alpha != null ? q.g.alpha : 1);
       ctx.translate(q.x, q.y); ctx.rotate(q.rot);
       ctx.drawImage(cv, -q.size / 2, -q.size / 2, q.size, q.size);
       ctx.restore();
@@ -2341,7 +2344,7 @@
   }
   // an animated object set to have no collision at all
   function objectWalkThrough(obj){
-    for (var i = 0; i < gadgets.length; i++) if (gadgets[i].kind === "anim" && gadgets[i].obj === obj && gadgets[i].ghost) return true;
+    for (var i = 0; i < gadgets.length; i++) if ((gadgets[i].kind === "anim" || gadgets[i].kind === "creature") && gadgets[i].obj === obj && gadgets[i].ghost) return true;
     return false;
   }
   function refreshObjectPhysics(obj){
@@ -2501,7 +2504,13 @@
     myBolts.forEach(function(b){ b.point = boltWorldPoint(b); });
     // a creature's painted areas: out to the world off the old body, back in on the new
     var maskW = [];
-    if (oldBody) gadgets.forEach(function(g){ if (g.kind === "eye" && g.obj === obj && (g.weak || g.danger)) maskW.push({ g:g, weak: g.weak ? maskToWorld(oldBody, g.weak) : null, danger: g.danger ? maskToWorld(oldBody, g.danger) : null }); });
+    if (oldBody) gadgets.forEach(function(g){
+      if ((g.kind === "eye" || g.kind === "creature" || g.kind === "anim") && g.obj === obj && (g.weak || g.danger || g.art)){
+        var artW = null;
+        if (g.art){ var ac = toWorldPoint(oldBody, { x: g.art.x + g.art.w/2, y: g.art.y + g.art.h/2 }); artW = { cx: ac.x, cy: ac.y, w: g.art.w, h: g.art.h }; }
+        maskW.push({ g:g, weak: g.weak ? maskToWorld(oldBody, g.weak) : null, danger: g.danger ? maskToWorld(oldBody, g.danger) : null, art: artW });
+      }
+    });
     if (oldBody) World.remove(world, oldBody);
     obj.body = newBody;
     World.add(world, newBody);
@@ -2531,7 +2540,10 @@
       refreshBoltAnchors(b, true);
     });
     reanchorGadgets(obj);
-    maskW.forEach(function(m){ m.g.weak = m.weak ? maskToLocal(newBody, m.weak) : null; m.g.danger = m.danger ? maskToLocal(newBody, m.danger) : null; });
+    maskW.forEach(function(m){
+      m.g.weak = m.weak ? maskToLocal(newBody, m.weak) : null; m.g.danger = m.danger ? maskToLocal(newBody, m.danger) : null;
+      if (m.art){ var lc = toBodyLocal(newBody, { x: m.art.cx, y: m.art.cy }); m.g.art = { x: lc.x - m.art.w/2, y: lc.y - m.art.h/2, w: m.art.w, h: m.art.h }; }
+    });
     relinkAfterRebuild(obj, oldBody, newBody);
     if (typeof grabConstraint !== "undefined" && grabConstraint){
       if (oldBody && grabConstraint.bodyA === oldBody) grabConstraint.bodyA = newBody;
@@ -2743,7 +2755,7 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter"];
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature"];
 
   /* ---- Skins: drawn, animated looks on things -----------------------
      A creature, an animated object or a particle carries a SKIN: a set of
@@ -2754,11 +2766,21 @@
      Carson's "animations that can be triggered by levers or buttons or
      sensors". */
   var SKIN_STATES = {
-    eye:     [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"move", label:"Moving", emoji:"🏃" }, { id:"action", label:"Action", emoji:"⚡" }],
-    anim:    [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"action", label:"Action", emoji:"⚡" }],
-    emitter: [{ id:"particle", label:"Particle", emoji:"✨" }]
+    eye:      [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"move", label:"Moving", emoji:"🏃" }, { id:"action", label:"Action", emoji:"⚡" }],
+    creature: [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"move", label:"Moving", emoji:"🏃" }, { id:"attack", label:"Attack", emoji:"💢" }, { id:"die", label:"Death", emoji:"💀" }, { id:"action", label:"Action", emoji:"⚡" }],
+    anim:     [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"action", label:"Action", emoji:"⚡" }],
+    emitter:  [{ id:"particle", label:"Particle", emoji:"✨" }]
   };
-  var SKIN_TITLE = { eye:"🐾 Creature", anim:"🎞 Animated object", emitter:"✨ Particle" };
+  /* The drawn steps after the look: the hitbox (physics), then for a
+     creature its weak spot and its danger. Each is one drawing in the
+     same box as the art, turned into a polygon when the studio closes. */
+  var SKIN_STEPS = {
+    creature: [{ id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" }, { id:"weakD", label:"Weak spot", emoji:"🎯", mask:true, color:"#F2B705" }, { id:"dangerD", label:"Danger", emoji:"🔥", mask:true, color:"#E4574B" }],
+    anim:     [{ id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" }],
+    eye: [], emitter: []
+  };
+  var SKIN_TITLE = { eye:"🐾 Creature", creature:"🐉 Custom creature", anim:"🎨 Custom object", emitter:"✨ Particle" };
+  var DRAWN_DEFAULT_SIZE = 120;   // the box a fresh drawn thing starts in, world px
   function newSkin(kind){
     var st = {}, fps = {};
     (SKIN_STATES[kind] || []).forEach(function(d){ st[d.id] = [blankDrawing()]; fps[d.id] = d.id === "move" ? 8 : (d.id === "particle" ? 12 : 4); });
@@ -2775,6 +2797,32 @@
       if (raw.fps && typeof raw.fps[d.id] === "number") sk.fps[d.id] = Math.max(1, Math.min(30, raw.fps[d.id]));
     });
     return sk;
+  }
+  /* A drawing as a polygon: every stroke is the exact shape a round brush
+     of its width sweeps — a capsule per segment, unioned; an eraser stroke
+     subtracts — in a box `w` by `h` centred on (0,0). The same geometry
+     the level's own brush uses, so a drawn hitbox is as clean as a painted
+     one. `tol` keeps the corner count sane. */
+  function drawingToPoly(strokes, w, h, tol){
+    var acc = [], i;
+    if (!strokes) return acc;
+    tol = tol || 1.2;
+    for (i = 0; i < strokes.length; i++){
+      var st = strokes[i], pts = st.p;
+      if (!pts || pts.length < 2) continue;
+      var r = Math.max(1.5, (st.w || 0.1) * h / 2), rings = [];
+      var x0 = (pts[0] - 0.5) * w, y0 = (pts[1] - 0.5) * h;
+      if (pts.length === 2) rings.push([circleRing(x0, y0, r, 0.6)]);
+      for (var j = 2; j < pts.length; j += 2){
+        var x1 = (pts[j] - 0.5) * w, y1 = (pts[j+1] - 0.5) * h;
+        rings.push([sweepRing("circle", x0, y0, x1, y1, r, 0, 0.6)]);
+        x0 = x1; y0 = y1;
+      }
+      var shape = pgUnionMany(rings, tol);
+      if (!shape.length) continue;
+      acc = st.c ? (acc.length ? pgUnion(acc, shape, tol) : shape) : (acc.length ? pgDiff(acc, shape, tol) : acc);
+    }
+    return pgClean(acc, tol);
   }
   function skinStateHasArt(sk, st){ var a = sk && sk.states[st]; return !!a && a.some(drawingHasArt); }
   function skinHasArt(sk){ return !!sk && Object.keys(sk.states).some(function(st){ return skinStateHasArt(sk, st); }); }
@@ -2837,8 +2885,8 @@
     if (matOf(currentTool) && matOf(currentTool).isMask){ currentTool = "move"; canvas.dataset.tool = "move"; }
     renderSelBar();
   }
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Animated object", emitter:"Particles" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter" };
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   var gadgets = [], gadgetCounter = 1;
   var wires = [];                 // { from: gadget id, to: bolt or gadget id }
@@ -2851,7 +2899,7 @@
   /* A camera is the one gadget that does not need a host: put it in empty
      air and it stays there, on the layer it was placed. Everything else
      sits on an object. */
-  function gadgetNeedsHost(kind){ return kind !== "camera"; }
+  function gadgetNeedsHost(kind){ return kind !== "camera" && kind !== "anim" && kind !== "creature"; }
   function addGadget(kind, obj, pt, extra){
     if (GADGET_KINDS.indexOf(kind) < 0) return null;
     if (!obj || !obj.body){ if (gadgetNeedsHost(kind)) return null; obj = null; }
@@ -2892,16 +2940,38 @@
       g.actionMode = extra.actionMode === "once" ? "once" : "loop";
       g.face = 1; g.actT0 = 0; g.wasOn = false;
     }
-    if (kind === "anim"){
-      /* An animated object: its host is drawn with a skin instead of its
-         material. Idle loops; a wire plays the action — looping while on,
-         or once through and held with `actionMode` "once". `ghost` makes
-         the host walk-through: an animated thing with no collision at all. */
-      g.skin = extra.skin ? normalizeSkin(extra.skin, "anim") : newSkin("anim");
+    if (kind === "anim" || kind === "creature"){
+      /* A drawn thing. Its host object IS its hitbox (drawn as the
+         `hitbox` step, turned into the host's polygon); its look is the
+         skin, drawn stretched over `art` — a rect in the host's frame that
+         does not change when the hitbox does. Idle loops; a wire plays the
+         action, looping while on or once through and held. `ghost` makes
+         it walk-through. A creature besides: its weak spot and danger,
+         drawn (`weakD`, `dangerD`) and as polygons (`weak`, `danger`),
+         which way it was drawn facing, attack and death animations. */
+      g.skin = extra.skin ? normalizeSkin(extra.skin, kind) : newSkin(kind);
       g.actionMode = extra.actionMode === "once" ? "once" : "loop";
       g.ghost = !!extra.ghost;
       g.actT0 = 0; g.wasOn = false;
       g.visible = extra.visible != null ? !!extra.visible : false;   // the glyph is the maker's; the drawing is what players see
+      g.hitbox = normalizeDrawing(extra.hitbox, 10, 14);
+      g.art = extra.art && isFinite(+extra.art.w) ? { x:+extra.art.x, y:+extra.art.y, w:Math.max(8, +extra.art.w), h:Math.max(8, +extra.art.h) } : null;
+      if (kind === "creature"){
+        g.range = extra.range != null ? Math.max(60, Math.min(4000, +extra.range)) : 700;
+        g.speed = extra.speed != null ? Math.max(5, Math.min(1500, +extra.speed)) : 90;
+        g.fly = !!extra.fly;
+        g.weakD = normalizeDrawing(extra.weakD, 10, 14);
+        g.dangerD = normalizeDrawing(extra.dangerD, 10, 14);
+        g.weak = extra.weak ? pgClean(pgUnpack(extra.weak, MAX_OBJ_CORNERS), GEOM_TOL) : null;
+        g.danger = extra.danger ? pgClean(pgUnpack(extra.danger, MAX_OBJ_CORNERS), GEOM_TOL) : null;
+        if (g.weak && !g.weak.length) g.weak = null;
+        if (g.danger && !g.danger.length) g.danger = null;
+        g.weakMode = "painted";
+        g.drawnFacing = extra.drawnFacing === -1 ? -1 : 1;
+        g.color = "#E4574B";
+        g.homeAngle = null; g.face = 1; g.look = { x: 1, y: 0 };
+        g.dying = false; g.dieT0 = 0; g.attackT0 = 0;
+      }
     }
     if (kind === "emitter"){
       /* Particles: little drawn pictures thrown out of this spot. Rate a
@@ -2916,6 +2986,7 @@
       g.life = extra.life != null ? Math.max(0.1, Math.min(20, +extra.life)) : 1.4;
       g.psize = extra.psize != null ? Math.max(4, Math.min(400, +extra.psize)) : 28;
       g.spin = extra.spin != null ? Math.max(0, Math.min(720, +extra.spin)) : 0;
+      g.alpha = extra.alpha != null ? Math.max(0.05, Math.min(1, +extra.alpha)) : 1;
       g.acc = 0;
       g.visible = extra.visible != null ? !!extra.visible : false;
     }
@@ -3018,16 +3089,23 @@
         if (g.kind === "button") g.size = Math.max(12, g.size * k);
       }
       if (tip) g.line = { dx: tip.x - g.pos.x, dy: tip.y - g.pos.y };
-      if (g.kind === "eye" && g.obj.body){   // the painted areas go through the same map
+      if ((g.kind === "eye" || g.kind === "creature" || g.kind === "anim") && g.obj.body){   // the painted areas go through the same map
         var bd = g.obj.body, viaMap = function(mp){ return maskToLocal(bd, pgMap(maskToWorld(bd, mp), function(x, y){ var q = mapPt({ x:x, y:y }); return [q.x, q.y]; })); };
         if (g.weak) g.weak = viaMap(g.weak);
         if (g.danger) g.danger = viaMap(g.danger);
+        if (g.art){
+          // the art box: its centre through the map, its size by the scale; a flip mirrors which way it was drawn facing
+          var ac0 = toWorldPoint(bd, { x: g.art.x + g.art.w/2, y: g.art.y + g.art.h/2 }), ac1 = mapPt(ac0), lc1 = toBodyLocal(bd, ac1);
+          var kk = k && k !== 1 ? k : 1;
+          g.art = { x: lc1.x - g.art.w * kk / 2, y: lc1.y - g.art.h * kk / 2, w: g.art.w * kk, h: g.art.h * kk };
+          if (!k || k === 1){ var probe = mapPt({ x: ac0.x + 10, y: ac0.y }); if (probe.x < ac1.x && g.kind === "creature") g.drawnFacing = -g.drawnFacing; }
+        }
       }
       g.local = toBodyLocal(g.obj.body, g.pos);
     });
   }
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter"); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature"); }
   function addWire(from, to){
     if (!from || !to || from === to) return false;
     if (!canReceive(to)) return false;
@@ -3234,6 +3312,13 @@
      Build a mistake would take the object with it for real. */
   function creaturePop(g){
     var o = g.obj;
+    if (g.kind === "creature" && g.skin && skinStateHasArt(g.skin, "die") && !g.dying){
+      // a drawn death: play it through, then go
+      g.dying = true; g.dieT0 = performance.now();
+      sfx("delete");
+      Body.setVelocity(player, { x: player.velocity.x, y: -9 });
+      return;
+    }
     puff(g.pos.x, g.pos.y, 14, { color:"#F6ECD9", speed:2.4, g:0.08, spread:Math.PI*2, life:26, r:3 });
     puff(g.pos.x, g.pos.y, 10, { color:g.color || "#E4574B", speed:1.8, g:0.1, spread:Math.PI*2, life:22, r:2.4 });
     sfx("delete");
@@ -3250,6 +3335,7 @@
         if (Math.abs(player.position.x - g.pos.x) <= 26 * (g.scale || 1) + PW / 2 && feetY <= g.pos.y + 12 && feetY >= g.pos.y - 40){ creaturePop(g); return; }
       }
     }
+    if (g.dying) return;
     if (!g.danger && (g.weakMode !== "painted" || !g.weak)) return;
     var hits = Query.collides(player, [b]);
     if (!hits.length) return;
@@ -3267,6 +3353,7 @@
     }
     if (inWeak){ creaturePop(g); return; }
     if (inDanger && performance.now() > hazardSafeUntil){
+      if (g.kind === "creature" && g.skin && skinStateHasArt(g.skin, "attack")) g.attackT0 = performance.now();   // it bites, visibly
       sfx("zap"); shake(11);
       puff(player.position.x, player.position.y, 20, { color: g.color || "#F2B705", speed:3.4, g:0.05, r:2.8, shape:"spark", life:24 });
       respawnPlayer("Ouch! That creature bites.");
@@ -3277,9 +3364,15 @@
     if (!runner.enabled) return;
     for (var i = gadgets.length - 1; i >= 0; i--){
       var g = gadgets[i];
-      if (g.kind !== "eye") continue;
+      if (g.kind !== "eye" && g.kind !== "creature") continue;
+      if (g.dying){
+        // its death animation is playing: it holds still, then goes
+        if (g.obj && g.obj.body && !g.obj.body.isStatic){ Body.setVelocity(g.obj.body, { x: 0, y: g.obj.body.velocity.y }); }
+        if (performance.now() - g.dieT0 >= skinStateMs(g.skin, "die") + 60){ if (g.obj) removeObject(g.obj); }
+        continue;
+      }
       creatureStep(g);
-      creatureStompCheck(g);
+      if (g.kind === "eye") creatureStompCheck(g); else creatureContactCheck(g);
     }
   });
 
@@ -5524,6 +5617,8 @@
                range: g.range, fly: g.fly, deadly: g.weakMode !== "none", weakMode: g.weakMode, color: g.color,
                weak: g.weak ? pgPack(g.weak) : null, danger: g.danger ? pgPack(g.danger) : null,
                skin: g.skin ? packSkin(g.skin) : null, actionMode: g.actionMode, ghost: g.ghost,
+               hitbox: g.hitbox && g.hitbox.length ? g.hitbox : null, weakD: g.weakD && g.weakD.length ? g.weakD : null, dangerD: g.dangerD && g.dangerD.length ? g.dangerD : null,
+               art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
                rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin };
     });
     var linkSnaps = links.map(function(l){
@@ -6492,25 +6587,39 @@
   function objectSkinGadget(obj){
     for (var i = 0; i < gadgets.length; i++){
       var g = gadgets[i];
-      if ((g.kind === "eye" || g.kind === "anim") && g.obj === obj && g.skin && skinHasArt(g.skin)) return g;
+      if ((g.kind === "eye" || g.kind === "anim" || g.kind === "creature") && g.obj === obj && g.skin && skinHasArt(g.skin)) return g;
     }
     return null;
   }
+  // how long a once-through state runs, in ms
+  function skinStateMs(sk, st){ var f = sk && sk.states[st]; if (!f || !f.some(drawingHasArt)) return 0; return f.length * 1000 / Math.max(1, sk.fps[st] || 4); }
   function skinStateFor(g){
+    var now = performance.now();
+    if (g.kind === "creature"){
+      if (g.dying) return "die";
+      if (g.attackT0 && now - g.attackT0 < skinStateMs(g.skin, "attack")) return "attack";
+    }
     var on = g.input != null && g.input > 0;
     if (on) return "action";
-    if (g.kind === "eye"){
+    if (g.kind === "eye" || g.kind === "creature"){
       var b = g.obj && g.obj.body;
       var moving = g.obj && g.obj.decorative ? !!g.moving : (b && !b.isStatic && Math.abs(b.velocity.x) > 0.25);
       return moving ? "move" : "idle";
     }
     return "idle";
   }
+  // the box the look is drawn in: its own art rect if it has one, else the host's shape
+  function skinBox(obj, g){
+    if (g.art) return { x: g.art.x, y: g.art.y, x2: g.art.x + g.art.w, y2: g.art.y + g.art.h };
+    return objectPaths(obj).box;
+  }
   function drawSkinOn(obj, g, depth){
-    var b = obj.body, paths = objectPaths(obj), box = paths.box;
+    var b = obj.body, box = skinBox(obj, g);
     if (!box) return false;
     var st = skinStateFor(g);
-    var frame = skinFrame(g.skin, st, g.actT0, st === "action" && g.actionMode === "once");
+    var once = st === "die" || st === "attack" || (st === "action" && g.actionMode === "once");
+    var t0 = st === "die" ? g.dieT0 : (st === "attack" ? g.attackT0 : g.actT0);
+    var frame = skinFrame(g.skin, st, t0, once);
     if (!frame) return false;
     var w = Math.max(1, box.x2 - box.x), h = Math.max(1, box.y2 - box.y);
     var cv = drawingCanvas(frame, Math.min(2048, w * 2), Math.min(2048, h * 2));
@@ -6518,7 +6627,8 @@
     ctx.translate(b.position.x, b.position.y);
     ctx.rotate(b.angle);
     ctx.globalAlpha = depth.a;
-    if (g.kind === "eye" && g.face === -1){ ctx.translate(box.x + w/2, 0); ctx.scale(-1, 1); ctx.translate(-(box.x + w/2), 0); }
+    // a creature is drawn facing one way; it is mirrored when it faces the other
+    if ((g.kind === "eye" || g.kind === "creature") && g.face !== (g.drawnFacing || 1)){ ctx.translate(box.x + w/2, 0); ctx.scale(-1, 1); ctx.translate(-(box.x + w/2), 0); }
     ctx.drawImage(cv, box.x, box.y, w, h);
     ctx.restore();
     return true;
@@ -6625,6 +6735,11 @@
       ctx.fillStyle = "#5C3A26"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.beginPath(); ctx.rect(-w/2, -3 - h, w, h);
       ctx.fillStyle = on ? "#B3261E" : "#E4574B"; ctx.fill(); ctx.stroke();
+    } else if (g.kind === "creature"){
+      // a paw
+      ctx.fillStyle = on ? "#F2B705" : "#C97A1C"; ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12";
+      ctx.beginPath(); ctx.ellipse(0, 4, 7, 6, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+      [[-7,-4],[-2.5,-8],[2.5,-8],[7,-4]].forEach(function(t){ ctx.beginPath(); ctx.arc(t[0], t[1], 2.6, 0, Math.PI*2); ctx.fill(); ctx.stroke(); });
     } else if (g.kind === "anim"){
       // a little film frame
       ctx.beginPath(); ctx.rect(-11, -8, 22, 16);
@@ -6717,21 +6832,21 @@
         }
         ctx.restore();
       }
-      if (mode === "build" && g.kind === "eye" && (g === selectedGadget || isGadgetTool())){
+      if (mode === "build" && g.kind === "eye" && (g === selectedGadget || currentTool === "eye")){
         ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
         ctx.beginPath(); ctx.arc(0, 0, g.range, 0, Math.PI*2);
         ctx.fillStyle = "rgba(95,158,90,0.08)"; ctx.fill();
         ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#5F9E5A"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
         ctx.restore();
       }
-      if (mode === "build" && g.kind === "sensor" && (g === selectedGadget || isGadgetTool())){
+      if (mode === "build" && g.kind === "sensor" && (g === selectedGadget || currentTool === "sensor")){
         ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
         ctx.beginPath(); ctx.arc(0, 0, g.radius, 0, Math.PI*2);
         ctx.fillStyle = "rgba(127,212,217,0.12)"; ctx.fill();
         ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#2A7B8C"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
         ctx.restore();
       }
-      if (mode === "build" && g.kind === "mover" && g.line && (g.line.dx || g.line.dy) && (g === selectedGadget || isGadgetTool())){
+      if (mode === "build" && g.kind === "mover" && g.line && (g.line.dx || g.line.dy) && (g === selectedGadget || currentTool === "mover")){
         // the travel: green one way with an arrow at the end, orange with
         // arrows both ways for a bounce — Carson's spec
         ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
@@ -6749,7 +6864,28 @@
         }
         ctx.restore();
       }
-      if (mode === "build" && g.kind === "camera" && (g === selectedGadget || isGadgetTool())){
+      if (mode === "build" && g.kind === "emitter" && (g === selectedGadget || currentTool === "emitter")){
+        // so it is not guesswork: the direction and spread as a wedge, the
+        // path a middling particle flies (speed, gravity, life), and a
+        // ring the size of one at the end of it
+        ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
+        var a0 = (g.angle - 90) * Math.PI / 180, half = g.spread * Math.PI / 360, reach = Math.min(600, Math.max(40, g.pspeed * Math.min(g.life, 1.5)));
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, reach * 0.5, a0 - half, a0 + half); ctx.closePath();
+        ctx.fillStyle = "rgba(242,183,5,0.12)"; ctx.fill();
+        ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#B3870A"; ctx.setLineDash([5/camScale, 4/camScale]); ctx.stroke(); ctx.setLineDash([]);
+        // the path: the same sums the particles use, a frame at a time
+        var vx = Math.cos(a0) * g.pspeed / 60, vy = Math.sin(a0) * g.pspeed / 60, px = 0, py = 0, frames = Math.round(g.life * 60);
+        ctx.beginPath(); ctx.moveTo(0, 0);
+        for (var fi = 0; fi < frames; fi++){ px += vx; py += vy; vy += g.grav * 0.12; if (fi % 3 === 0) ctx.lineTo(px, py); }
+        ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#F2B705"; ctx.setLineDash([3/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+        // the arrow head at the start, the size ring at the end
+        ctx.beginPath(); ctx.moveTo(Math.cos(a0) * 26, Math.sin(a0) * 26); ctx.lineTo(Math.cos(a0 + 2.6) * 12 + Math.cos(a0) * 14, Math.sin(a0 + 2.6) * 12 + Math.sin(a0) * 14); ctx.lineTo(Math.cos(a0 - 2.6) * 12 + Math.cos(a0) * 14, Math.sin(a0 - 2.6) * 12 + Math.sin(a0) * 14); ctx.closePath();
+        ctx.fillStyle = "#F2B705"; ctx.fill();
+        ctx.beginPath(); ctx.arc(px, py, g.psize / 2, 0, Math.PI*2);
+        ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#F2B705"; ctx.globalAlpha = g.alpha != null ? Math.max(0.3, g.alpha) : 1; ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+      if (mode === "build" && g.kind === "camera" && (g === selectedGadget || currentTool === "camera")){
         // the zone that wakes it, and the frame it will show — as LBP
         // draws a camera's view while you set it up. Both in world axes:
         // undo the host's turn, and work from the camera's own spot.
@@ -7260,6 +7396,15 @@
         ctx.lineWidth = 2.4/camScale; ctx.strokeStyle = okEnd ? "#5F9E5A" : "#D64545";
         ctx.globalAlpha = 0.85; ctx.stroke();
         ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI*2); ctx.fillStyle = okEnd ? "#5F9E5A" : "#D64545"; ctx.globalAlpha = 0.5; ctx.fill();
+        ctx.restore();
+        showCustom = true;
+      } else if (isGadgetTool() && (currentTool === "creature" || currentTool === "anim")){
+        // a drawn thing starts as a box this big, here
+        ctx.save();
+        ctx.translate(mouseWorld.x, mouseWorld.y);
+        ctx.beginPath(); ctx.rect(-DRAWN_DEFAULT_SIZE/2, -DRAWN_DEFAULT_SIZE/2, DRAWN_DEFAULT_SIZE, DRAWN_DEFAULT_SIZE);
+        ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#5F9E5A"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.globalAlpha = 0.8; ctx.stroke(); ctx.setLineDash([]);
+        ctx.globalAlpha = 0.5; drawGadgetGlyph({ kind: currentTool, out: 0, size: 64 }, 0.6);
         ctx.restore();
         showCustom = true;
       } else if (isGadgetTool()){
@@ -8373,7 +8518,7 @@
                   note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
     logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["changer","🌗","World changer"]],
                   note:"Put them on something. Right-click one and Connect it to a motor, a piston, a camera, a mover or a world changer — it drives that while it is on." },
-    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["anim","🎞","Animated object"],["emitter","✨","Particles"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
+    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
                   note:"A camera shows its shot while the player is in its zone. A mover carries an object along a line. A creature eye makes an object chase the player." }
   };
   function renderToolsTab(el, pageId){
@@ -8596,41 +8741,110 @@
      Particles, on this device, like characters. */
   function ceSkinSubject(g){
     var kind = g.kind, host = g.obj;
+    var steps = SKIN_STEPS[kind] || [];
+    var stepOf = function(id){ for (var i = 0; i < steps.length; i++) if (steps[i].id === id) return steps[i]; return null; };
     var sub = {
       kind: "skin", g: g, title: SKIN_TITLE[kind] || "Drawing",
-      states: function(){ return SKIN_STATES[kind]; },
-      frames: function(st){ if (!g.skin.states[st]) g.skin.states[st] = [blankDrawing()]; return g.skin.states[st]; },
+      // the look's states, then the drawn steps
+      states: function(){ return SKIN_STATES[kind].concat(steps); },
+      isMask: function(st){ return !!stepOf(st); },
+      maskColor: function(st){ var d = stepOf(st); return d ? d.color : null; },
+      frames: function(st){
+        if (stepOf(st)){ if (!g[st]) g[st] = blankDrawing(); return [g[st]]; }
+        if (!g.skin.states[st]) g.skin.states[st] = [blankDrawing()]; return g.skin.states[st];
+      },
+      setFrame: function(st, d){ if (stepOf(st)) g[st] = d; else g.skin.states[st][pmEditFrame] = d; },
       count: function(st){ return sub.frames(st).length; },
-      setCount: function(st, n){ var a = sub.frames(st); while (a.length < n) a.push(blankDrawing()); a.length = Math.max(1, n); },
+      setCount: function(st, n){ if (stepOf(st)) return; var a = sub.frames(st); while (a.length < n) a.push(blankDrawing()); a.length = Math.max(1, n); },
       fps: function(st){ return g.skin.fps[st]; },
       setFps: function(st, v){ g.skin.fps[st] = v; },
       aspect: function(){
         if (kind === "emitter" || !host || !host.body) return 1;
-        var box = objectPaths(host).box; if (!box) return 1;
+        var box = skinBox(host, g); if (!box) return 1;
         return Math.max(0.2, Math.min(5, (box.x2 - box.x) / Math.max(1, box.y2 - box.y)));
       },
       persist: function(){},
-      hint: function(){ return kind === "emitter" ? "Draw one particle. Several frames play over its life." : (kind === "eye" ? "Idle, Moving, and an Action a wire can play. The faint shape is the creature's body — your drawing goes over it." : "Idle loops; a wire plays the Action. The faint shape is the object."); },
-      previewLabel: kind === "emitter" ? "One particle" : "On the object",
+      hint: function(){
+        if (kind === "emitter") return "Draw one particle. Several frames play over its life.";
+        var d = stepOf(pmEditState);
+        if (d){
+          if (d.id === "hitbox") return "Draw the hitbox — the part of it that is solid. Leave it empty for no collision at all.";
+          if (d.id === "weakD") return "Draw the weak spot — where the player has to hit it to kill it. Leave it empty and it cannot be killed.";
+          return "Draw the danger — where it hurts the player. It bites (its Attack plays) when they touch this.";
+        }
+        if (kind === "creature") return "Draw the creature: Idle, Moving, an Attack for when it bites, a Death, and an Action a wire can play. Then the steps on the left.";
+        if (kind === "anim") return "Draw the object: Idle loops; a wire plays the Action. Then draw its hitbox.";
+        return "Idle, Moving, and an Action a wire can play. The faint shape is the body — your drawing goes over it.";
+      },
+      previewLabel: kind === "emitter" ? "One particle" : "On the level",
       backdrop: function(c2, w, h){
-        if (kind === "emitter" || !host || !host.body) return;
-        var paths = objectPaths(host), box = paths.box; if (!box) return;
-        c2.save();
-        c2.translate(0, 0); c2.scale(w / (box.x2 - box.x), h / (box.y2 - box.y)); c2.translate(-box.x, -box.y);
-        c2.fillStyle = "rgba(43,27,18,0.14)";
-        for (var i = 0; i < paths.regions.length; i++) c2.fill(paths.regions[i].path);
-        c2.restore();
+        if (kind === "emitter") return;
+        var d = stepOf(pmEditState);
+        if (d){
+          // the drawn steps go over the look, faint, and the weak spot and danger over the hitbox too
+          var idle = skinFrame(g.skin, "idle", 0, false);
+          if (idle){ c2.save(); c2.globalAlpha = 0.45; c2.drawImage(drawingCanvas(idle, w, h), 0, 0); c2.restore(); }
+          if (d.id !== "hitbox" && drawingHasArt(g.hitbox)){ c2.save(); c2.globalAlpha = 0.28; c2.drawImage(drawingCanvas(g.hitbox, w, h), 0, 0); c2.restore(); }
+          return;
+        }
+        if (kind === "eye" && host && host.body){
+          var paths = objectPaths(host), box = paths.box; if (!box) return;
+          c2.save();
+          c2.scale(w / (box.x2 - box.x), h / (box.y2 - box.y)); c2.translate(-box.x, -box.y);
+          c2.fillStyle = "rgba(43,27,18,0.14)";
+          for (var i = 0; i < paths.regions.length; i++) c2.fill(paths.regions[i].path);
+          c2.restore();
+        }
+      },
+      // the guided order: the look first, then each drawn step
+      next: function(){
+        var ids = sub.states().map(function(st){ return st.id; }), i = ids.indexOf(pmEditState);
+        var firstStep = steps.length ? steps[0].id : null;
+        if (!stepOf(pmEditState)) return firstStep;            // from any look state, on to the first step
+        return i + 1 < ids.length ? ids[i + 1] : null;         // then step by step; null means done
       },
       extraRight: function(el){ ceSkinExtras(el, g); },
-      onClose: function(){ if (objects.indexOf(host) >= 0){ /* the drawing is live; nothing to rebuild */ } renderSelBar(); }
+      onClose: function(){ applyDrawnSteps(g); renderSelBar(); }
     };
     return sub;
+  }
+  /* The drawn steps become geometry: the hitbox is the host's polygon (or,
+     empty, the art box with no collision), the weak spot and danger the
+     creature's areas — all in the art box's own frame, which is where they
+     were drawn. Called when the studio closes. */
+  function applyDrawnSteps(g){
+    if (g.kind !== "creature" && g.kind !== "anim") return;
+    var o = g.obj;
+    if (!o || !o.body || objects.indexOf(o) < 0 || !g.art) return;
+    var b = o.body, art = g.art;
+    var artCentreLocal = { x: art.x + art.w/2, y: art.y + art.h/2 };
+    var toLocal = function(mp){ return pgTranslate(mp, artCentreLocal.x, artCentreLocal.y); };   // the drawing's (0,0) is the art box's centre
+    var hit = drawingToPoly(g.hitbox, art.w, art.h, 1.2);
+    var empty = !hit.length;
+    if (empty) hit = [[[[-art.w/2, -art.h/2], [art.w/2, -art.h/2], [art.w/2, art.h/2], [-art.w/2, art.h/2]]]];
+    g.ghost = empty ? true : g.ghost;
+    var hitLocal = toLocal(hit);
+    // the host's frame stays: the polygon goes to the world through the body as it is, then the rebuild bakes it in
+    var worldPoly = pgTransform(hitLocal, b.angle, b.position.x, b.position.y);
+    o.pieces = [{ m: o.pieces.length ? o.pieces[0].m : (g.kind === "creature" ? "creature" : "drawn"), poly: pgClean(worldPoly, GEOM_TOL) }];
+    if (!o.pieces[0].poly.length){ o.pieces = [{ m: g.kind === "creature" ? "creature" : "drawn", poly: pgTransform(toLocal([[[[-art.w/2, -art.h/2], [art.w/2, -art.h/2], [art.w/2, art.h/2], [-art.w/2, art.h/2]]]]), b.angle, b.position.x, b.position.y) }]; }
+    rebuildFromPieces(o, { a: 0, x: 0, y: 0 });   // the art rect rides through this (maskW) to the new centre
+    if (objects.indexOf(o) < 0) return;
+    if (g.kind === "creature"){
+      var nb = o.body, na = g.art, nc = { x: na.x + na.w/2, y: na.y + na.h/2 };
+      var wk = drawingToPoly(g.weakD, na.w, na.h, 1.2), dg = drawingToPoly(g.dangerD, na.w, na.h, 1.2);
+      g.weak = wk.length ? pgTranslate(wk, nc.x, nc.y) : null;
+      g.danger = dg.length ? pgTranslate(dg, nc.x, nc.y) : null;
+      g.weakMode = "painted";
+    }
+    refreshObjectPhysics(o);
+    afterObjectEdit(o);
   }
   var mySkins = {};
   try { mySkins = JSON.parse(localStorage.getItem("pg_my_skins") || "{}"); } catch(e){ mySkins = {}; }
   function persistMySkins(){ try { localStorage.setItem("pg_my_skins", JSON.stringify(mySkins)); } catch(e){ showToast("Couldn't save — storage is full."); } }
   function ceSkinExtras(el, g){
-    var kind = g.kind, label = kind === "eye" ? "My Creatures" : (kind === "anim" ? "My Animations" : "My Particles");
+    var kind = g.kind, label = kind === "eye" || kind === "creature" ? "My Creatures" : (kind === "anim" ? "My Objects" : "My Particles");
     ceH4(label, el);
     el.appendChild(ceBtn("💾 Save this drawing", "", function(){
       askName("Name it", "", function(name){
@@ -8651,9 +8865,11 @@
       el.appendChild(row);
     });
   }
-  function openSkinStudio(g){
+  function openSkinStudio(g, step){
     if (!g.skin) g.skin = newSkin(g.kind);
     pushUndo("drawing on a " + GADGET_LABEL[g.kind].toLowerCase());
+    if (step) pmEditState = step; else pmEditState = "idle";
+    pmEditFrame = 0;
     ceOpenWith(ceSkinSubject(g));
   }
   function ceStates(){ return ceSubject.states(); }
@@ -8665,7 +8881,7 @@
     if (!arr[pmEditFrame]) arr[pmEditFrame] = blankDrawing();
     return arr[pmEditFrame];
   }
-  function ceSetTarget(d){ ceFramesOf(pmEditState)[pmEditFrame] = d; }
+  function ceSetTarget(d){ if (ceSubject.setFrame) ceSubject.setFrame(pmEditState, d); else ceFramesOf(pmEditState)[pmEditFrame] = d; }
   function cePersist(){ ceSubject.persist(); }
   function ceAspect(){ return ceSubject.aspect(); }
   function ceEnsureState(){
@@ -8776,7 +8992,10 @@
     if (next){ ceCtx.save(); ceCtx.globalAlpha = 0.12; ceCtx.drawImage(drawingCanvas(next, rw, rh), v.x, v.y, v.w, v.h); ceCtx.restore(); }
     // composited from its own rasterisation, so eraser strokes take out
     // only this drawing and leave the onion skins alone
+    var isMaskStep = ceSubject.isMask && ceSubject.isMask(pmEditState);
+    if (isMaskStep) ceCtx.globalAlpha = 0.6;
     ceCtx.drawImage(drawingCanvas(ceTargetDrawing(), rw, rh), v.x, v.y, v.w, v.h);
+    ceCtx.globalAlpha = 1;
     if (ceGuides){
       ceCtx.save();
       ceCtx.strokeStyle = "rgba(43,27,18,0.28)"; ceCtx.lineWidth = 1; ceCtx.setLineDash([4, 4]);
@@ -8828,12 +9047,15 @@
     var n = ceNorm(e);
     ceBeginChange();
     var d = ceTargetDrawing();
-    ceStroke = { c: pmPaintColor, w: ceBrushW, p: [n.x, n.y] };
+    // a drawn step (hitbox, weak spot, danger) is always its own colour; the eraser still erases
+    var mc = ceSubject.isMask && ceSubject.isMask(pmEditState) ? ceSubject.maskColor(pmEditState) : null;
+    var col = mc && pmPaintColor !== null ? mc : pmPaintColor;
+    ceStroke = { c: col, w: ceBrushW, p: [n.x, n.y] };
     if (ceOpacity < 0.999) ceStroke.a = ceOpacity;
     ceStroke.line = ceTool === "line" || e.shiftKey;
     d.push(ceStroke);
     if (ceSymmetry){
-      ceStroke2 = { c: pmPaintColor, w: ceBrushW, p: [1 - n.x, n.y] };
+      ceStroke2 = { c: col, w: ceBrushW, p: [1 - n.x, n.y] };
       if (ceOpacity < 0.999) ceStroke2.a = ceOpacity;
       d.push(ceStroke2);
     } else ceStroke2 = null;
@@ -8942,6 +9164,7 @@
     ceSubject = subject;
     ceHistory.undo.length = 0; ceHistory.redo.length = 0; cePending = null; ceStroke = null;
     cePlaying = false; ceZoom = 1; ceCX = 0.5; ceCY = 0.5; ceTool = "brush";
+    if (pmPaintColor === null) pmPaintColor = ceRecent[0] || CHAR_PALETTE[0];   // never open on the eraser
     ceEnsureState();
     closePersonalMenu();
     input.left = input.right = input.up = input.down = false;
@@ -9045,14 +9268,34 @@
     if (sts.length > 1){
       ceH4("State", ceLeftEl);
       var stateRow = document.createElement("div"); stateRow.className = "ceChips";
-      sts.forEach(function(st){
+      var looks = sts.filter(function(st){ return !st.mask; }), drawnSteps = sts.filter(function(st){ return st.mask; });
+      looks.forEach(function(st){
         stateRow.appendChild(ceChip((st.emoji ? st.emoji + " " : "") + st.label, pmEditState === st.id, function(){
-          pmEditState = st.id; pmEditFrame = 0; cePlaying = false; renderCharEditorPanels(); ceRedraw();
+          pmEditState = st.id; pmEditFrame = 0; cePlaying = false; renderCharEditorPanels(); ceLayout();
         }));
       });
       ceLeftEl.appendChild(stateRow);
+      if (drawnSteps.length){
+        ceH4("Then draw", ceLeftEl);
+        var stepRow = document.createElement("div"); stepRow.className = "ceChips";
+        drawnSteps.forEach(function(st, i){
+          var has = drawingHasArt(ceSubject.frames(st.id)[0]);
+          stepRow.appendChild(ceChip((i + 2) + ". " + st.emoji + " " + st.label + (has ? " ✓" : ""), pmEditState === st.id, function(){
+            pmEditState = st.id; pmEditFrame = 0; cePlaying = false; renderCharEditorPanels(); ceLayout();
+          }));
+        });
+        ceLeftEl.appendChild(stepRow);
+      }
     }
     var arr = ceFramesOf(pmEditState);
+    var maskStep = ceSubject.isMask && ceSubject.isMask(pmEditState);
+    if (maskStep){
+      // one drawing, no frames: just the way on
+      var mn = document.createElement("div"); mn.className = "noteText";
+      mn.textContent = "One drawing. Paint the area; the eraser takes it back off.";
+      ceLeftEl.appendChild(mn);
+    }
+    if (!maskStep){
     ceH4("Frames — " + arr.length, ceLeftEl);
     var strip = document.createElement("div"); strip.className = "ceFrameStrip";
     ceFrameStripEl = strip;
@@ -9089,6 +9332,8 @@
       ceLeftEl.appendChild(pb);
       ceLeftEl.appendChild(sliderRow("Speed", ceSubject.fps(pmEditState) || 2, 1, 30, 1, function(v){ ceSubject.setFps(pmEditState, v); }, function(v){ return Math.round(v) + " frames/s"; }));
     }
+    }   // (not a mask step)
+    if (!maskStep){
     ceH4("Onion skin", ceLeftEl);
     var on = document.createElement("div"); on.className = "ceChips";
     on.appendChild(ceChip("Previous", ceOnion, function(){ ceOnion = !ceOnion; renderCharEditorPanels(); ceRedraw(); }, "The frame before, faint (O)"));
@@ -9101,6 +9346,18 @@
       if (pmEditState !== sts[0].id) copyRow.appendChild(ceChip(sts[0].label + " pose", false, function(){ ceCopyFrom(ceFramesOf(sts[0].id)[0]); }));
       ceLeftEl.appendChild(copyRow);
     }
+    }   // (not a mask step)
+    if (ceSubject.next){
+      // the guided way through: the look, then each drawn step, then done
+      var nx = ceSubject.next();
+      var nb = ceBtn(nx ? "Next: " + (sub_label(nx)) + " ▶" : "✔ Done", "", function(){
+        if (nx){ pmEditState = nx; pmEditFrame = 0; cePlaying = false; renderCharEditorPanels(); ceLayout(); }
+        else closeCharEditor();
+      });
+      nb.style.alignSelf = "flex-start";
+      ceLeftEl.appendChild(nb);
+    }
+    function sub_label(id){ var all = ceStates(); for (var i = 0; i < all.length; i++) if (all[i].id === id) return all[i].label; return id; }
 
     // ---- right: tools, colour, brush, preview, and the subject's own things ----
     ceRightEl.innerHTML = "";
@@ -9459,6 +9716,21 @@
       selectGadget(dm); renderSelBar();
       showToast("✨ Mover set — right-click it for speed and bounce. Drag the knob to change where it goes.");
       sfx("glue");
+      return;
+    }
+    if (kind === "anim" || kind === "creature"){
+      // a drawn thing brings its own body: a plain box to start, on this
+      // layer, that the hitbox step will reshape — then the studio opens
+      pushUndo("placing a " + GADGET_LABEL[kind].toLowerCase());
+      var hs = DRAWN_DEFAULT_SIZE / 2;
+      var host0 = newObjectFromPoly(kind === "creature" ? "creature" : "drawn", [[[[pt.x - hs, pt.y - hs], [pt.x + hs, pt.y - hs], [pt.x + hs, pt.y + hs], [pt.x - hs, pt.y + hs]]]], buildLayer);
+      if (!host0){ showToast("No room for it there."); sfx("deny"); return; }
+      host0.forcedStatic = kind === "anim"; refreshObjectPhysics(host0);
+      var g0 = addGadget(kind, host0, { x: pt.x, y: pt.y });
+      g0.art = { x: -hs, y: -hs, w: DRAWN_DEFAULT_SIZE, h: DRAWN_DEFAULT_SIZE };
+      selectGadget(g0);
+      sfx("bolt");
+      openSkinStudio(g0);
       return;
     }
     var host = objectUnderOn(pt.x, pt.y, buildLayer, 6);
@@ -10366,23 +10638,46 @@
         function(){ pushUndo("changing a button"); g.sticky = !g.sticky; g.on = false; renderSelBar(); sfx("tick"); }, g.sticky ? "on" : "");
       slider(opSection("Size"), "Width", g.size, 24, 200, 4, function(v){ g.size = v; }, function(v){ return Math.round(v) + "px"; }, "changing a button");
     }
-    if (g.kind === "eye" || g.kind === "anim"){
-      var dr = opSection(g.kind === "eye" ? "Its look" : "Its drawing");
-      opBtn(dr, (g.skin && skinHasArt(g.skin) ? "🎨 Edit the drawing" : "🎨 Draw " + (g.kind === "eye" ? "this creature" : "this object")),
-        g.kind === "eye" ? "Draw and animate the creature over its body — Idle, Moving, and an Action a wire can play" : "Draw and animate it — Idle loops, a wire plays the Action",
-        function(){ openSkinStudio(g); }, "wide" + (g.skin && skinHasArt(g.skin) ? " on" : ""));
-      if (g.skin && skinHasArt(g.skin)) opBtn(dr, "✕ Back to the plain look", "Drop the drawing; the object shows its material again", function(){ pushUndo("removing a drawing"); g.skin = g.kind === "anim" ? newSkin("anim") : null; renderSelBar(); sfx("delete"); }, "wide");
+    if (g.kind === "creature" || g.kind === "anim"){
+      var dr = opSection("Drawing");
+      opBtn(dr, "🎨 Edit the drawing", "The look, the hitbox" + (g.kind === "creature" ? ", the weak spot and the danger" : ""), function(){ openSkinStudio(g); }, "wide on");
+      opBtn(dr, "🧱 Redraw the hitbox", "", function(){ openSkinStudio(g, "hitbox"); }, "wide");
+      if (g.kind === "creature"){
+        opBtn(dr, "🎯 Redraw the weak spot", "", function(){ openSkinStudio(g, "weakD"); }, "wide");
+        opBtn(dr, "🔥 Redraw the danger", "", function(){ openSkinStudio(g, "dangerD"); }, "wide");
+      }
+      var hb = opSection("Body");
+      opBtn(hb, g.ghost ? "👻 No collision — nothing touches it" : "🧱 Solid — the drawn hitbox", g.ghost ? "Click to make it solid" : "Click to make it decoration that nothing touches",
+        function(){ pushUndo("changing a " + GADGET_LABEL[g.kind].toLowerCase()); g.ghost = !g.ghost; if (g.obj) refreshObjectPhysics(g.obj); renderSelBar(); sfx("tick"); }, "wide" + (g.ghost ? " on" : ""));
+      if (g.kind === "anim" && g.obj){
+        var ho = g.obj, hMatGrab = ho.pieces.some(function(pc){ var m = matOf(pc.m); return m && m.grabbable; });
+        var hGrab = ho.grabbable === true || (ho.grabbable !== false && hMatGrab);
+        opBtn(hb, hGrab ? "🤚 Grabbable" : "✋ Not grabbable", "", function(){ pushUndo(hGrab ? "making it not grabbable" : "making it grabbable"); ho.grabbable = !hGrab; renderSelBar(); sfx("tick"); }, "wide" + (hGrab ? " on" : ""));
+        opBtn(hb, ho.forcedStatic ? "🔒 Locked in place" : "🔓 Free to move", "", function(){ pushUndo(ho.forcedStatic ? "unlocking" : "locking"); ho.forcedStatic = !ho.forcedStatic; refreshObjectPhysics(ho); renderSelBar(); sfx("tick"); }, "wide" + (ho.forcedStatic ? " on" : ""));
+        var pushedW = false;
+        var wsl = sliderRow("⚖ Weight", ho.weight == null ? 1 : ho.weight, WEIGHT_MIN, WEIGHT_MAX, 0.01,
+          function(v){ if (!pushedW){ pushUndo("changing an object's weight"); pushedW = true; } ho.weight = v; applyObjectWeight(ho); },
+          function(v){ return Math.round(v * 100) + "%"; });
+        wsl.style.flexBasis = "100%"; hb.appendChild(wsl);
+      }
       var am = opSection("When wired on");
       opBtn(am, "🔁 Action loops while the signal is on", "", function(){ pushUndo("changing an animation"); g.actionMode = "loop"; renderSelBar(); sfx("tick"); }, "wide" + (g.actionMode !== "once" ? " on" : ""));
       opBtn(am, "1️⃣ Action plays once and holds its last frame", "A door opening, a switch flipping", function(){ pushUndo("changing an animation"); g.actionMode = "once"; renderSelBar(); sfx("tick"); }, "wide" + (g.actionMode === "once" ? " on" : ""));
     }
-    if (g.kind === "anim"){
-      var hb = opSection("Body");
-      opBtn(hb, g.ghost ? "👻 No collision — walk straight through" : "🧱 Solid — the painted shape is the hitbox", g.ghost ? "Click to make it solid again" : "Click to make it decoration that nothing touches",
-        function(){ pushUndo("changing an animated object"); g.ghost = !g.ghost; if (g.obj) refreshObjectPhysics(g.obj); renderSelBar(); sfx("tick"); }, "wide" + (g.ghost ? " on" : ""));
-      var an = document.createElement("div"); an.className = "noteText";
-      an.textContent = "The drawing covers the object exactly, so paint the object in the shape you want the hitbox to be, then draw the look over it.";
-      an.style.flexBasis = "100%"; opSection(null).appendChild(an);
+    if (g.kind === "creature"){
+      var cm = opSection("Moves");
+      opBtn(cm, "↔ Follows the player on the ground", "", function(){ pushUndo("changing a creature"); g.fly = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.fly ? " on" : ""));
+      opBtn(cm, "✦ Floats toward the player", "", function(){ pushUndo("changing a creature"); g.fly = true; renderSelBar(); sfx("tick"); }, "wide" + (g.fly ? " on" : ""));
+      slider(opSection("Speed"), "Speed", g.speed, 5, 800, 5, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing a creature");
+      slider(opSection("Sight"), "Notices the player within", g.range, 60, 4000, 20, function(v){ g.range = v; }, function(v){ return Math.round(v) + "px"; }, "changing a creature");
+      var fc = opSection("Drawn facing");
+      opBtn(fc, "➡ Right", "The drawing looks to the right; it is mirrored when it faces left", function(){ pushUndo("changing a creature"); g.drawnFacing = 1; renderSelBar(); sfx("tick"); }, (g.drawnFacing !== -1 ? "on" : ""));
+      opBtn(fc, "⬅ Left", "The drawing looks to the left; it is mirrored when it faces right", function(){ pushUndo("changing a creature"); g.drawnFacing = -1; renderSelBar(); sfx("tick"); }, (g.drawnFacing === -1 ? "on" : ""));
+      var cn = document.createElement("div"); cn.className = "noteText";
+      cn.textContent = "It turns to face the player whenever it can see them. " + (g.obj && g.obj.decorative ? "On the Back or Front layer it floats after the player, since there is no ground there. " : "") +
+        (g.weak ? "The weak spot kills it" + (g.skin && skinStateHasArt(g.skin, "die") ? " — its Death plays first" : "") + ". " : "No weak spot drawn: it cannot be killed. ") +
+        (g.danger ? "The danger hurts the player" + (g.skin && skinStateHasArt(g.skin, "attack") ? " and its Attack plays" : "") + "." : "No danger drawn: it is harmless.");
+      cn.style.flexBasis = "100%"; opSection(null).appendChild(cn);
     }
     if (g.kind === "emitter"){
       var pd = opSection("The particle");
@@ -10397,6 +10692,7 @@
       slider(pf, "Size", g.psize, 4, 400, 2, function(v){ g.psize = v; }, function(v){ return Math.round(v) + "px"; }, "changing particles");
       slider(pf, "Gravity", g.grav, -3, 3, 0.1, function(v){ g.grav = v; }, function(v){ return v < -0.05 ? "floats up" : (v > 0.05 ? (+v).toFixed(1) + "× falls" : "none"); }, "changing particles");
       slider(pf, "Spin", g.spin, 0, 720, 10, function(v){ g.spin = v; }, function(v){ return v <= 0 ? "none" : Math.round(v) + "°/s"; }, "changing particles");
+      slider(pf, "Opacity", g.alpha, 0.05, 1, 0.05, function(v){ g.alpha = v; }, function(v){ return Math.round(v * 100) + "%"; }, "changing particles");
       var pn = document.createElement("div"); pn.className = "noteText";
       pn.textContent = g.input != null ? "Wired: it emits while its signal is on." : "It emits all the time. Wire a switch to it and it emits only while the signal is on.";
       pn.style.flexBasis = "100%"; opSection(null).appendChild(pn);
@@ -12088,6 +12384,8 @@
                range: g.range, fly: g.fly, deadly: g.weakMode !== "none", weakMode: g.weakMode, color: g.color,
                weak: g.weak ? pgPack(g.weak) : null, danger: g.danger ? pgPack(g.danger) : null,
                skin: g.skin ? packSkin(g.skin) : null, actionMode: g.actionMode, ghost: g.ghost,
+               hitbox: g.hitbox && g.hitbox.length ? g.hitbox : null, weakD: g.weakD && g.weakD.length ? g.weakD : null, dangerD: g.dangerD && g.dangerD.length ? g.dangerD : null,
+               art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
                rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin };
     });
     var linkSnaps = links.map(function(l){
