@@ -2710,6 +2710,7 @@
       g.hold = extra.hold != null ? Math.max(0.5, Math.min(60, +extra.hold)) : 3;
       g.holdMode = extra.holdMode === "time" || extra.holdMode === "forever" ? extra.holdMode : (extra.holdForever ? "forever" : "zone");
       g.holdForever = g.holdMode === "forever";
+      g.once = !!extra.once;           // fires one shot per play, then never again until Play restarts
       g.shake = extra.shake != null ? Math.max(0, Math.min(1, +extra.shake)) : 0;
       g.freeze = !!extra.freeze;
       g.sweep = extra.sweep && isFinite(+extra.sweep.dx) ? { dx:+extra.sweep.dx, dy:+extra.sweep.dy||0,
@@ -4991,7 +4992,7 @@
       var wp = gadgetWorld(g);
       return { kind:g.kind, o:g.obj ? objIndex[g.obj.id] : null, x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
-               zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdMode:g.holdMode, holdForever:g.holdMode === "forever", shake:g.shake, freeze:g.freeze,
+               zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdMode:g.holdMode, holdForever:g.holdMode === "forever", once:g.once, shake:g.shake, freeze:g.freeze,
                sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
                zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null };
     });
@@ -5213,7 +5214,7 @@
      the player by its tracking. Moves between views ease at the camera's
      speed; with no camera ever involved the view sits exactly on the
      character, as it always did, so nothing built on that changes. */
-  var playCam = { cx:0, cy:0, zoom:1, ever:false, easing:false, lastSpeed:0.5, active:null };
+  var playCam = { cx:0, cy:0, zoom:1, ever:false, easing:false, lastSpeed:0.5, active:null, fired:[] };
   function cameraView(g){ var gp = gadgetWorld(g); return { x: gp.x + (g.view ? g.view.dx : 0), y: gp.y + (g.view ? g.view.dy : 0) }; }
   function cameraZoneRect(g){ var gp = gadgetWorld(g), z = g.zone; return { x: gp.x + z.dx - z.w/2, y: gp.y + z.dy - z.h/2, w: z.w, h: z.h }; }
   function cameraFrameRect(g, zoom, c){ var fw = viewRectW / (baseScale * zoom), fh = viewRectH / (baseScale * zoom); return { x: c.x - fw/2, y: c.y - fh/2, w: fw, h: fh }; }
@@ -5249,6 +5250,7 @@
     for (var i = 0; i < gadgets.length; i++){
       var g = gadgets[i];
       if (g.kind !== "camera" || !g.zone) continue;
+      if (g.once && playCam.fired.indexOf(g) >= 0) continue;   // had its one shot
       var zr = cameraZoneRect(g);
       var inside = px >= zr.x && px <= zr.x + zr.w && py >= zr.y && py <= zr.y + zr.h;
       var on = g.input != null ? g.input > 0 : inside;
@@ -5258,7 +5260,7 @@
     }
     return best;
   }
-  function resetPlayCamera(){ playCam.ever = false; playCam.easing = false; playCam.active = null; playCam.spent = null; playCam.t0 = 0; }
+  function resetPlayCamera(){ playCam.ever = false; playCam.easing = false; playCam.active = null; playCam.spent = null; playCam.t0 = 0; playCam.fired = []; }
   function updatePlayCamera(){
     var now = performance.now();
     var trig = activeCamera(), cg = null;
@@ -5276,6 +5278,8 @@
       if (a.holdMode === "forever") cg = a;
       else if (a.holdMode === "time" && now - playCam.t0 < a.hold * 1000) cg = a;
     }
+    // a one-shot camera whose shot has just ended is done for this play
+    if (playCam.active && playCam.active !== cg && playCam.active.once && playCam.fired.indexOf(playCam.active) < 0) playCam.fired.push(playCam.active);
     playCam.active = cg;
     var wantZoom = cg ? cg.zoom : (mode === "play" ? worldNum("playZoom") : (edCam ? edCam.zoom : buildZoom));
     var aim = playerAim(), wx = aim.x, wy = aim.y;
@@ -9273,6 +9277,8 @@
       opBtn(hd, "⏱ For a set time, then back to the player", "The shot runs its time out even if the player stays; it starts again once they have left and come back", function(){ setHold("time"); }, "wide" + (g.holdMode === "time" ? " on" : ""));
       if (g.holdMode === "time") slider(hd, "How long", g.hold, 0.5, 60, 0.5, function(v){ g.hold = v; }, function(v){ return (+v).toFixed(1) + "s"; }, "changing a camera");
       opBtn(hd, "∞ Until another camera takes over", "", function(){ setHold("forever"); }, "wide" + (g.holdMode === "forever" ? " on" : ""));
+      opBtn(hd, g.once ? "1️⃣ Only ever triggers once" : "🔁 Triggers every time", g.once ? "One shot per play — after it, this camera stays quiet until the level is played again" : "Click to make it a one-off",
+        function(){ pushUndo("changing a camera"); g.once = !g.once; renderSelBar(); sfx("tick"); }, "wide" + (g.once ? " on" : ""));
       var sw = opSection("Move");
       opBtn(sw, g.sweep ? "➜ Glides to a second spot" : "▪ Stays on its spot", g.sweep ? "Click to stop it moving" : "Click and a second spot appears — drag the knob to where the shot should end up",
         function(){
@@ -10844,7 +10850,7 @@
       var wp = gadgetWorld(g);
       return { kind:g.kind, o:g.obj ? objIndex[g.obj.id] : null, x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
-               zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdMode:g.holdMode, holdForever:g.holdMode === "forever", shake:g.shake, freeze:g.freeze,
+               zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdMode:g.holdMode, holdForever:g.holdMode === "forever", once:g.once, shake:g.shake, freeze:g.freeze,
                sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
                zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null };
     });

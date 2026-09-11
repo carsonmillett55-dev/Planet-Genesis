@@ -209,6 +209,23 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await standAt(MX-200, MY+60); await p.waitForTimeout(1500);
   ok('set to hold for good, it keeps the shot long after the player has gone', (await p.evaluate(() => window.__pg.playCam())).active === fId);
   await build(); await camMid();
+  // "only once": one shot per play
+  await p.evaluate(id => window.__pg.gadgetSet(id, { holdMode: 'zone', once: true }), (await theCamera()).id);
+  await play();
+  const oId = (await theCamera()).id;
+  await standAt(MX+360, MY+60); await p.waitForTimeout(400);
+  ok('a one-off camera fires the first time', (await p.evaluate(() => window.__pg.playCam())).active === oId);
+  await standAt(MX-200, MY+60); await p.waitForTimeout(300);
+  await standAt(MX+360, MY+60); await p.waitForTimeout(500);
+  ok('and never again in that play', (await p.evaluate(() => window.__pg.playCam())).active === null, await p.evaluate(() => window.__pg.playCam()));
+  await build(); await camMid();
+  await play();
+  await standAt(MX+360, MY+60); await p.waitForTimeout(500);
+  ok('playing the level again, it has its one shot again', (await p.evaluate(() => window.__pg.playCam())).active === (await theCamera()).id);
+  await build(); await camMid();
+  const svO = await p.evaluate(() => window.__pg.serialize('once'));
+  ok('the save carries the one-off flag', svO.gadgets.filter(g => g.kind === 'camera')[0].once === true);
+  await p.evaluate(id => window.__pg.gadgetSet(id, { once: false }), (await theCamera()).id);
   // the glide: a second spot 300px to the right and zoomed in, over half a second
   await p.evaluate(id => window.__pg.gadgetSet(id, { holdMode: 'zone', sweep: { dx: 300, dy: -100, zoom: 1.5, secs: 0.5 } }), (await theCamera()).id);
   await play();
