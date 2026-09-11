@@ -4544,14 +4544,12 @@
       // and the player walks, jumps and everything as usual, carrying it
     }
     if (grabConstraint){
-      // hanging on: left/right pump the swing, Space lets go and jumps
+      // hanging on: left/right pump the swing. Jump does nothing here —
+      // only letting go of the grab lets go. (Carson: jumping should not
+      // break the grab.) The queued jump is dropped so it does not fire the
+      // instant you release.
       if (vx !== 0) Body.applyForce(player, player.position, { x: vx * player.mass * 0.0009, y: 0 });
-      if (input.jumpQueued){
-        input.jumpQueued = false;
-        releaseRope(); grabHeld = false;
-        Body.setVelocity(player, { x: player.velocity.x, y: Math.min(player.velocity.y, -11) });
-        sfx("jump");
-      }
+      input.jumpQueued = false;
       return;
     }
     if (flying){

@@ -105,11 +105,9 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const hang2 = await pos();
   ok('pushing sideways swings you', Math.abs(hang2.x - hang1.x) > 15, { from: hang1.x, to: hang2.x });
   await p.keyboard.press('Space'); await p.waitForTimeout(200);
-  ok('Space lets go', !(await grabbing()));
-  const jumped = await pos();
-  await p.waitForTimeout(150);
-  ok('and jumps you off it', (await pos()).y < jumped.y + 40, { before: jumped.y, after: (await pos()).y });
-  await p.keyboard.up('KeyQ');
+  ok('Space does not break the grab', await grabbing());
+  await p.keyboard.up('KeyQ'); await p.waitForTimeout(200);
+  ok('only letting go does', !(await grabbing()));
 
   console.log('');
   console.log('== dragging a loose sponge ==');

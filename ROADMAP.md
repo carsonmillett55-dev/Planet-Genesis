@@ -98,7 +98,7 @@ Carried over from the earlier near-term list in `CLAUDE.md`, still wanted:
 Built 2026-09-10: hold the right mouse button (or Q) while touching
 sponge and your hands close on it. Swing from a hanging one, drag a heavy
 loose one, pick up a light loose one and carry it wherever the cursor
-points, catch one mid-air, Space to let go and jump. Any object can be
+points, catch one mid-air; only letting go of the button lets go. Any object can be
 made grabbable from its box. Sponge within reach glows
 while the key is held. Covered by `tgrab.js`.
 

@@ -516,8 +516,8 @@ sponge — on a rope, a bolt, a piston — you swing with; loose sponge on the
 ground you drag. Grab in mid-air to catch a swinging one. Grab is a held
 key, as LBP's R1 is: the **right mouse button in Play** (`grabMouse`) is
 the default, with **Q** on the keyboard (rebindable, `grab`) for Build or
-preference. No aiming: the mouse position means nothing to it. Space while
-holding lets go and jumps.
+preference. No aiming: the mouse position means nothing to it. Jump does
+nothing while hanging — only letting go of the grab lets go.
 
 **Carrying.** A grabbed object that is **light enough and loose** is not
 pinned to — it is picked up. `canCarry`: dynamic, mass at most
