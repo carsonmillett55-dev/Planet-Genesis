@@ -445,15 +445,22 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(() => { window.__pg.worldSet('playZoom', 0.7); window.__pg.worldSet('camHeight', -120); });
   ok('the World page opens', await p.evaluate(() => window.__pg.menu('world')));
   await p.waitForTimeout(150);
+  ok('just opening it leaves the editor view alone', !(await p.evaluate(() => window.__pg.camFollowing())) && Math.abs((await view()).zoom - 1.3) < 0.01, (await view()).zoom);
+  // press on the zoom slider: while it is being worked, the level shows the Play view
+  const zoomRow = () => p.evaluate(() => { const rows = Array.from(document.querySelectorAll('#pmBody .settingRow')); const inp = rows.find(r => /Zoom in Play/.test(r.querySelector('label').textContent)).querySelector('input[type=range]'); inp.scrollIntoView({ block: 'center' }); const r = inp.getBoundingClientRect(); return { x: r.x + r.width * 0.3, y: r.y + r.height / 2 }; });
+  const zsl = await zoomRow();
+  await p.mouse.move(zsl.x, zsl.y); await p.mouse.down(); await p.waitForTimeout(150);
   const wpc = await centre(), wpp = await pos();
-  ok('with it open the level shows the character at the Play zoom', Math.abs((await view()).zoom - 0.7) < 0.01, (await view()).zoom);
+  ok('while the zoom slider is held, the level shows the character at the Play zoom', Math.abs((await view()).zoom - (await p.evaluate(() => window.__pg.worldGet('playZoom')))) < 0.01, { view: (await view()).zoom, setting: await p.evaluate(() => window.__pg.worldGet('playZoom')) });
   ok('and at the Play height', Math.abs(wpc.x - wpp.x) < 2 && Math.abs(wpc.y - (wpp.y - 120)) < 2, { centre: wpc, player: wpp });
-  await p.evaluate(() => { window.__pg.worldSet('camHeight', 40); window.__pg.worldSet('playZoom', 1.1); }); await p.waitForTimeout(120);
+  await p.mouse.move(zsl.x + 40, zsl.y, { steps: 4 }); await p.waitForTimeout(120);
   const wpc2 = await centre();
-  ok('changing the height and zoom shows at once', Math.abs((await view()).zoom - 1.1) < 0.01 && Math.abs(wpc2.y - (wpp.y + 40)) < 2, { zoom: (await view()).zoom, centre: wpc2, player: wpp });
-  await p.evaluate(() => window.__pg.menu(null)); await p.waitForTimeout(150);
+  const setNow = await p.evaluate(() => window.__pg.worldGet('playZoom'));
+  ok('dragging it changes the view as you go', setNow !== 0.7 && Math.abs((await view()).zoom - Math.max(setNow, 0.334)) < 0.02, { view: (await view()).zoom, setting: setNow });   // (the map's edges floor the zoom at about a third, and clamp the view)
+  await p.mouse.up(); await p.waitForTimeout(1300);          // let go: a moment later the editor's view is back, page still open
   const ed1 = await view();
-  ok('closing the page puts the editor view back exactly where it was', !(await p.evaluate(() => window.__pg.camFollowing())) && Math.abs(ed1.zoom - 1.3) < 0.01 && Math.abs(ed1.x - ed0.x) < 2 && Math.abs(ed1.y - ed0.y) < 2, { before: ed0, after: ed1 });
+  ok('let go, and the editor view comes back with the page still open', !(await p.evaluate(() => window.__pg.camFollowing())) && Math.abs(ed1.zoom - 1.3) < 0.01 && Math.abs(ed1.x - ed0.x) < 2 && Math.abs(ed1.y - ed0.y) < 2, { before: ed0, after: ed1 });
+  await p.evaluate(() => window.__pg.menu(null)); await p.waitForTimeout(150);
   await p.evaluate(() => { window.__pg.worldSet('playZoom', 1); window.__pg.worldSet('camHeight', -70); window.__pg.paused(true); });
 
   console.log('');

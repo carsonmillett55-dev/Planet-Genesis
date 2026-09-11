@@ -1430,7 +1430,10 @@
     // Water is not a solid at all — painting it pours into the fluid
     // grid instead of building a body. Its density is what everything
     // else floats or sinks against.
-    water:     { label:"Water",        color:"#4FA9D6", dark:"#2F86A6", friction:0.02,restitution:0,    density:0.009, grabbable:false, hazard:false, floatForce:0, tex:"wave", isFluid:true }
+    water:     { label:"Water",        color:"#4FA9D6", dark:"#2F86A6", friction:0.02,restitution:0,    density:0.009, grabbable:false, hazard:false, floatForce:0, tex:"wave", isFluid:true },
+    // pseudo-materials for painting a creature's areas — never in the catalogue, never a body
+    maskweak:  { label:"Weak spot",    color:"#F6ECD9", dark:"#B3870A", friction:0, restitution:0, density:0.001, grabbable:false, hazard:false, floatForce:0, isMask:true },
+    maskdanger:{ label:"Danger",       color:"#E4574B", dark:"#B3261E", friction:0, restitution:0, density:0.001, grabbable:false, hazard:false, floatForce:0, isMask:true }
   };
   var MATERIAL_ORDER = ["wood","sponge","rubber","metal","ice","dissolve","floaty","hazard","darkmatter","glass","light","water"];
 
@@ -1496,13 +1499,7 @@
   var QUICK_TOOLS = [
     { id:"move",  label:"Move & Select" },
     { id:"erase", label:"Erase" },
-    { id:"vacuum", label:"Vacuum" },
-    { id:"bolt",  label:"Bolt" },
-    { id:"motorbolt", label:"Motor bolt" },
-    { id:"piston", label:"Piston" },
-    { id:"rope", label:"Rope" },
-    { id:"camera", label:"Camera" },
-    { id:"checkpoint", label:"Checkpoint" }
+    { id:"vacuum", label:"Vacuum" }
   ];
   function quickKeyFor(id){ for (var i = 0; i < QUICK_TOOLS.length; i++) if (QUICK_TOOLS[i].id === id) return i + 1; return 0; }
   MATERIAL_ORDER.forEach(function(id){ if (MATERIALS[id]){ MATERIALS[id].base = id; MATERIALS[id].tint = 0; } });
@@ -1543,7 +1540,7 @@
     ["vacuum","🌀","Vacuum","Sucks up water and nothing else. Lives on the Materials tab."],
     ["undo","↶","Undo & Redo","Ctrl+Z takes back your last edit — a stroke, a shape, a move, a rotation, a glue, a delete — however long ago you made it, and the toast tells you exactly what it undid. Ctrl+Y puts it back. Forty steps deep, and the ↶ ↷ buttons top right do the same thing."],
     ["camera","🔍","Camera","Scroll to zoom in and out around your cursor; middle-drag, or right-drag empty space with the Move tool, to look around the level. Press C or the ⦿ chip to snap the camera back to your character."],
-    ["keys","⌨","1 to 9","The number row is your tools: 1 Move & Select, 2 Erase, 3 Vacuum, 4 Bolt, 5 Motor bolt, 6 Piston, 7 Rope, 8 Camera, 9 Checkpoint — every chip in the Tools bag shows its number. In Play mode 1-4 pull faces instead."]
+    ["keys","⌨","1, 2, 3","The editing tools are on the number row: 1 Move & Select, 2 Erase, 3 Vacuum — the chips show their numbers. In Play mode 1-4 pull faces instead."]
   ];
 
   var CHAR_COLORS = ["#E8567A","#2F86A6","#F2B705","#5F9E5A","#C89BD9","#F27E42"];
@@ -2460,6 +2457,9 @@
        "all the sponges shifted wayyy over". */
     var myBolts = bolts.filter(function(b){ return b.objA === obj || b.objB === obj; });
     myBolts.forEach(function(b){ b.point = boltWorldPoint(b); });
+    // a creature's painted areas: out to the world off the old body, back in on the new
+    var maskW = [];
+    if (oldBody) gadgets.forEach(function(g){ if (g.kind === "eye" && g.obj === obj && (g.weak || g.danger)) maskW.push({ g:g, weak: g.weak ? maskToWorld(oldBody, g.weak) : null, danger: g.danger ? maskToWorld(oldBody, g.danger) : null }); });
     if (oldBody) World.remove(world, oldBody);
     obj.body = newBody;
     World.add(world, newBody);
@@ -2489,6 +2489,7 @@
       refreshBoltAnchors(b, true);
     });
     reanchorGadgets(obj);
+    maskW.forEach(function(m){ m.g.weak = m.weak ? maskToLocal(newBody, m.weak) : null; m.g.danger = m.danger ? maskToLocal(newBody, m.danger) : null; });
     relinkAfterRebuild(obj, oldBody, newBody);
     if (typeof grabConstraint !== "undefined" && grabConstraint){
       if (oldBody && grabConstraint.bodyA === oldBody) grabConstraint.bodyA = newBody;
@@ -2701,6 +2702,46 @@
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
   var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye"];
+  /* Painting a creature's weak spot or danger: `maskPaint` names the
+     creature and which area, and the brush becomes one of two pseudo-
+     materials (never in the catalogue) so every stroke, shape and
+     right-drag cut goes through the ordinary painting code — and is
+     caught at the commit and put into the area instead of the level. */
+  var maskPaint = null;   // { g, kind: "weak" | "danger" }
+  function maskUnion(o, worldPoly, existing){
+    var local = objToLocal(o, worldPoly);
+    var hostPoly = pgUnionMany(o.pieces.map(function(pc){ return pc.poly; }), GEOM_TOL);
+    var clipped = pgIntersect(local, hostPoly, GEOM_TOL);
+    if (!clipped.length) return existing;
+    var out = existing && existing.length ? pgUnion(existing, clipped, GEOM_TOL) : clipped;
+    return out.length ? out : null;
+  }
+  function maskCut(o, worldPoly, existing){
+    if (!existing || !existing.length) return null;
+    var out = pgDiff(existing, objToLocal(o, worldPoly), GEOM_TOL);
+    return out.length ? out : null;
+  }
+  function commitMask(worldPoly, add){
+    if (!maskPaint || !maskPaint.g.obj || !maskPaint.g.obj.body || !worldPoly || !worldPoly.length) return false;
+    var g = maskPaint.g, o = g.obj, key = maskPaint.kind;
+    pushUndo(add ? "painting a creature's " + (key === "weak" ? "weak spot" : "danger") : "cutting a creature's " + (key === "weak" ? "weak spot" : "danger"));
+    g[key] = add ? maskUnion(o, worldPoly, g[key]) : maskCut(o, worldPoly, g[key]);
+    if (key === "weak" && g.weak) g.weakMode = "painted";
+    renderSelBar(); sfx(add ? "paint" : "erase");
+    return true;
+  }
+  function beginMaskPaint(g, kind){
+    maskPaint = { g: g, kind: kind };
+    currentTool = kind === "weak" ? "maskweak" : "maskdanger"; canvas.dataset.tool = "paint";
+    if (paintMode !== "brush" && paintMode !== "rect" && paintMode !== "ellipse") paintMode = "brush";
+    showToast(kind === "weak" ? "Paint the weak spot onto the creature. Right-drag takes it off. Esc when done." : "Paint the danger onto the creature. Right-drag takes it off. Esc when done.");
+  }
+  function endMaskPaint(){
+    if (!maskPaint) return;
+    maskPaint = null;
+    if (matOf(currentTool) && matOf(currentTool).isMask){ currentTool = "move"; canvas.dataset.tool = "move"; }
+    renderSelBar();
+  }
   var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye" };
   var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
@@ -2740,6 +2781,17 @@
       g.speed = extra.speed != null ? Math.max(5, Math.min(1500, +extra.speed)) : 90;
       g.fly = !!extra.fly;
       g.deadly = extra.deadly != null ? !!extra.deadly : true;
+      /* The weak spot and the danger are areas the maker PAINTS onto the
+         creature, kept as polygons in the host's own frame like its
+         pieces (`weak`, `danger`). `weakMode`: "eye" is the old rule,
+         landing on the eye; "painted" uses the drawn area; "none" makes
+         it unsquashable. The danger is always the drawn area. */
+      g.weakMode = extra.weakMode === "painted" || extra.weakMode === "none" ? extra.weakMode : (extra.deadly === false ? "none" : "eye");
+      g.weak = extra.weak ? pgClean(pgUnpack(extra.weak, MAX_OBJ_CORNERS), GEOM_TOL) : null;
+      g.danger = extra.danger ? pgClean(pgUnpack(extra.danger, MAX_OBJ_CORNERS), GEOM_TOL) : null;
+      if (g.weak && !g.weak.length) g.weak = null;
+      if (g.danger && !g.danger.length) g.danger = null;
+      g.color = typeof extra.color === "string" && /^#[0-9a-fA-F]{6}$/.test(extra.color) ? extra.color : "#2B1B12";
       g.homeAngle = null; g.look = { x: 1, y: 0 };
     }
     if (kind === "changer"){
@@ -2823,6 +2875,8 @@
   function reanchorGadgets(obj){
     gadgets.forEach(function(g){ if (g.obj === obj && obj.body) g.local = toBodyLocal(obj.body, g.pos); });
   }
+  function maskToWorld(body, mp){ return pgTransform(mp, body.angle, body.position.x, body.position.y); }
+  function maskToLocal(body, mp){ return pgTransform(pgTranslate(mp, -body.position.x, -body.position.y), -body.angle, 0, 0); }
   /* Objects in `list` have just been transformed in place by `mapPt`. A
      gadget on one of them goes to the same spot ON the object — through the
      same map — and, for a scale, grows with it: a button's pad is as wide
@@ -2839,6 +2893,11 @@
         if (g.kind === "button") g.size = Math.max(12, g.size * k);
       }
       if (tip) g.line = { dx: tip.x - g.pos.x, dy: tip.y - g.pos.y };
+      if (g.kind === "eye" && g.obj.body){   // the painted areas go through the same map
+        var bd = g.obj.body, viaMap = function(mp){ return maskToLocal(bd, pgMap(maskToWorld(bd, mp), function(x, y){ var q = mapPt({ x:x, y:y }); return [q.x, q.y]; })); };
+        if (g.weak) g.weak = viaMap(g.weak);
+        if (g.danger) g.danger = viaMap(g.danger);
+      }
       g.local = toBodyLocal(g.obj.body, g.pos);
     });
   }
@@ -3002,10 +3061,19 @@
     if (!b) return;
     var sees = eyeSees(g);
     if (sees){ var lx = player.position.x - g.pos.x, ly = player.position.y - g.pos.y, ll = Math.hypot(lx, ly) || 1; g.look = { x: lx / ll, y: ly / ll }; }
-    if (b.isStatic) return;                       // a locked creature only watches
-    if (g.homeAngle == null) g.homeAngle = b.angle;
     var v = g.speed / STEPS_PER_SEC;              // px per step
     var dx = player ? player.position.x - b.position.x : 0, dy = player ? player.position.y - b.position.y : 0;
+    if (o.decorative){
+      // a Back or Front creature has no physics to walk with: it is moved
+      // by hand toward the player, floating whichever way it is set
+      if (!sees) return;
+      var sx0 = (b.bounds.max.x - b.bounds.min.x) / 2 + PW / 2 + 8, sy0 = (b.bounds.max.y - b.bounds.min.y) / 2 + PH / 2 + 8;
+      var mx = Math.abs(dx) > sx0 ? (dx > 0 ? v : -v) : 0, my = g.fly && Math.abs(dy) > sy0 ? (dy > 0 ? v : -v) : 0;
+      if (mx || my) Body.setPosition(b, { x: b.position.x + mx, y: b.position.y + my });
+      return;
+    }
+    if (b.isStatic) return;                       // a locked creature only watches
+    if (g.homeAngle == null) g.homeAngle = b.angle;
     var vx = b.velocity.x, vy = b.velocity.y;
     if (sees){
       var stopX = (b.bounds.max.x - b.bounds.min.x) / 2 + PW / 2 + 8;   // stop short of the player
@@ -3019,20 +3087,55 @@
     if (Math.abs(b.angle - g.homeAngle) > 1e-6) Body.setAngle(b, g.homeAngle);
     Body.setAngularVelocity(b, 0);
   }
-  /* Stood on the eye: the creature dies. Only in Play — in Build a
-     mistake would take the object with it for real. */
-  function creatureStompCheck(g){
-    if (mode !== "play" || !g.deadly || !player || !grounded || !groundBody || !g.obj || !g.obj.body) return;
-    if (groundBody !== g.obj.body) return;
-    var feetY = player.position.y + PH / 2;
-    if (Math.abs(player.position.x - g.pos.x) > 26 * (g.scale || 1) + PW / 2 || feetY > g.pos.y + 12 || feetY < g.pos.y - 40) return;
+  /* Contact with the creature, by geometry rather than the physics
+     engine's pairs — `Query.collides` ignores collision filters, so a
+     Back or Front creature, which the player can never physically touch,
+     still counts when they overlap it. Where the player touches it is
+     the collision's support points, taken into the host's own frame and
+     asked against the painted areas. The danger kills the player as a
+     hazard does; the weak spot kills the creature. Only in Play — in
+     Build a mistake would take the object with it for real. */
+  function creaturePop(g){
     var o = g.obj;
     puff(g.pos.x, g.pos.y, 14, { color:"#F6ECD9", speed:2.4, g:0.08, spread:Math.PI*2, life:26, r:3 });
-    puff(g.pos.x, g.pos.y, 10, { color:"#E4574B", speed:1.8, g:0.1, spread:Math.PI*2, life:22, r:2.4 });
+    puff(g.pos.x, g.pos.y, 10, { color:g.color || "#E4574B", speed:1.8, g:0.1, spread:Math.PI*2, life:22, r:2.4 });
     sfx("delete");
     Body.setVelocity(player, { x: player.velocity.x, y: -9 });   // a little bounce off it
     removeObject(o);
   }
+  function creatureContactCheck(g){
+    if (mode !== "play" || !player || !g.obj || !g.obj.body) return;
+    var o = g.obj, b = o.body;
+    if (g.weakMode === "eye"){
+      // the old rule: feet on the eye
+      if (grounded && groundBody === b){
+        var feetY = player.position.y + PH / 2;
+        if (Math.abs(player.position.x - g.pos.x) <= 26 * (g.scale || 1) + PW / 2 && feetY <= g.pos.y + 12 && feetY >= g.pos.y - 40){ creaturePop(g); return; }
+      }
+    }
+    if (!g.danger && (g.weakMode !== "painted" || !g.weak)) return;
+    var hits = Query.collides(player, [b]);
+    if (!hits.length) return;
+    var pts = [];
+    for (var h = 0; h < hits.length; h++){
+      var sup = hits[h].supports;
+      for (var k = 0; k < sup.length; k++) if (sup[k]) pts.push(sup[k]);
+    }
+    if (!pts.length) pts.push(player.position);
+    var inWeak = false, inDanger = false;
+    for (var q = 0; q < pts.length; q++){
+      var lp = worldPtToLocal(o, pts[q].x, pts[q].y);
+      if (g.weakMode === "painted" && g.weak && pgContains(g.weak, lp.x, lp.y)) inWeak = true;
+      if (g.danger && pgContains(g.danger, lp.x, lp.y)) inDanger = true;
+    }
+    if (inWeak){ creaturePop(g); return; }
+    if (inDanger && performance.now() > hazardSafeUntil){
+      sfx("zap"); shake(11);
+      puff(player.position.x, player.position.y, 20, { color: g.color || "#F2B705", speed:3.4, g:0.05, r:2.8, shape:"spark", life:24 });
+      respawnPlayer("Ouch! That creature bites.");
+    }
+  }
+  var creatureStompCheck = creatureContactCheck;
   onStep("beforeUpdate", function(){
     if (!runner.enabled) return;
     for (var i = gadgets.length - 1; i >= 0; i--){
@@ -5020,6 +5123,7 @@
   }
   function pickTool(id, label){
     if (mode !== "build") return;
+    if (maskPaint) endMaskPaint();
     currentTool = id; canvas.dataset.tool = id === "vacuum" ? "erase" : id;
     shapeDrag = null; marquee = null;
     if (id !== "move") clearSelection();
@@ -5358,7 +5462,8 @@
                zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null,
                line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce,
                setLight: g.setLight, light: g.light, setWater: g.setWater, water: g.water, secs: g.secs, latch: g.latch,
-               range: g.range, fly: g.fly, deadly: g.deadly };
+               range: g.range, fly: g.fly, deadly: g.weakMode !== "none", weakMode: g.weakMode, color: g.color,
+               weak: g.weak ? pgPack(g.weak) : null, danger: g.danger ? pgPack(g.danger) : null };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -5687,7 +5792,10 @@
      camera will show — the character at the level's zoom and height —
      whatever the editor camera was doing, so the two sliders can be set
      by eye. Closing the page puts the editor's view back exactly. */
-  function worldPagePreviewWanted(){ return mode === "build" && pmOpen && pmActiveSection === "world" && !!player; }
+  var camEditHeld = false, camEditUntil = 0;
+  function noteCamEdit(){ camEditUntil = performance.now() + 900; }
+  window.addEventListener("pointerup", function(){ camEditHeld = false; if (camEditUntil) noteCamEdit(); });
+  function worldPagePreviewWanted(){ return mode === "build" && pmOpen && pmActiveSection === "world" && !!player && (camEditHeld || performance.now() < camEditUntil); }
   function beginEditorHold(){
     if (edCam) return;
     var visW = viewRectW / camScale, visH = viewRectH / camScale;
@@ -6419,13 +6527,13 @@
       ctx.beginPath(); ctx.rect(-w/2, -3 - h, w, h);
       ctx.fillStyle = on ? "#B3261E" : "#E4574B"; ctx.fill(); ctx.stroke();
     } else if (g.kind === "eye"){
-      // an eyeball; the pupil looks toward the player
+      // a googly eye: white, a dark rim, and a big pupil in the maker's
+      // colour that rolls toward the player
       var lk = g.look || { x: 1, y: 0 };
-      ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI*2);
-      ctx.fillStyle = "#F6ECD9"; ctx.fill(); ctx.lineWidth = 2.2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
-      ctx.beginPath(); ctx.arc(lk.x * 5, lk.y * 5, 6, 0, Math.PI*2); ctx.fillStyle = on ? "#5F9E5A" : "#2A7B8C"; ctx.fill();
-      ctx.beginPath(); ctx.arc(lk.x * 6, lk.y * 6, 3, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
-      ctx.beginPath(); ctx.arc(lk.x * 4 - 2, lk.y * 4 - 2.5, 1.3, 0, Math.PI*2); ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI*2);
+      ctx.fillStyle = "#FFFFFF"; ctx.fill(); ctx.lineWidth = 2.4; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(lk.x * 5.5, lk.y * 5.5, 7, 0, Math.PI*2); ctx.fillStyle = g.color || "#2B1B12"; ctx.fill();
+      ctx.beginPath(); ctx.arc(lk.x * 5.5 - 2.4, lk.y * 5.5 - 2.6, 2.2, 0, Math.PI*2); ctx.fillStyle = "#FFFFFF"; ctx.fill();
     } else if (g.kind === "watersensor"){
       // a drop on a round base
       ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2);
@@ -6478,6 +6586,25 @@
       ctx.translate(p.x, p.y);
       if (g.obj && g.obj.body) ctx.rotate(g.obj.body.angle);
       var gsc = g.scale || 1;
+      if (g.kind === "eye" && (g.weak || g.danger) && g.obj && g.obj.body && !(mode === "play" && g.visible === false)){
+        // the painted areas, on the host, in every mode: the danger reads
+        // as a warning, the weak spot as a soft target
+        ctx.save();
+        // back to the host's frame: undo this gadget's offset, keep the host's turn
+        var gl = g.local || { x:0, y:0 };
+        ctx.translate(-gl.x, -gl.y);
+        if (g.danger){
+          var dp = mpPath(g.danger);
+          ctx.globalAlpha = 0.42; ctx.fillStyle = "#E4574B"; ctx.fill(dp);
+          ctx.globalAlpha = 0.9; ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#B3261E"; ctx.setLineDash([6/camScale, 4/camScale]); ctx.stroke(dp); ctx.setLineDash([]);
+        }
+        if (g.weak && g.weakMode === "painted"){
+          var wpth = mpPath(g.weak);
+          ctx.globalAlpha = 0.38; ctx.fillStyle = "#FFFFFF"; ctx.fill(wpth);
+          ctx.globalAlpha = 0.85; ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#F6ECD9"; ctx.setLineDash([3/camScale, 4/camScale]); ctx.stroke(wpth); ctx.setLineDash([]);
+        }
+        ctx.restore();
+      }
       if (mode === "build" && g.kind === "eye" && (g === selectedGadget || isGadgetTool())){
         ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
         ctx.beginPath(); ctx.arc(0, 0, g.range, 0, Math.PI*2);
@@ -8242,12 +8369,19 @@
     gNote.textContent = "How far from the character's body a grabbable thing can be and still be caught. Small is LittleBigPlanet's touch-it-to-hold-it; bigger is more forgiving.";
     el.appendChild(gNote);
     var ch = document.createElement("h3"); ch.textContent = "Camera"; el.appendChild(ch);
-    var pzRow = sliderRow("Zoom in Play", worldNum("playZoom"), CAM_ZOOM_MIN, CAM_ZOOM_MAX, 0.05, function(v){ worldSettings.playZoom = v; }, function(v){ return Math.round(v*100) + "%"; });
+    var pzRow = sliderRow("Zoom in Play", worldNum("playZoom"), CAM_ZOOM_MIN, CAM_ZOOM_MAX, 0.05, function(v){ worldSettings.playZoom = v; noteCamEdit(); }, function(v){ return Math.round(v*100) + "%"; });
     el.appendChild(pzRow);
-    el.appendChild(sliderRow("Camera height", worldNum("camHeight"), -600, 600, 10, function(v){ worldSettings.camHeight = v; },
-      function(v){ return v < -0.5 ? Math.round(-v) + "px above the character" : (v > 0.5 ? Math.round(v) + "px below" : "level with the character"); }));
+    var chRow = sliderRow("Camera height", worldNum("camHeight"), -600, 600, 10, function(v){ worldSettings.camHeight = v; noteCamEdit(); },
+      function(v){ return v < -0.5 ? Math.round(-v) + "px above the character" : (v > 0.5 ? Math.round(v) + "px below" : "level with the character"); });
+    el.appendChild(chRow);
+    // the level shows the Play view only while these two are being worked
+    [pzRow, chRow].forEach(function(row){
+      row.addEventListener("pointerdown", function(){ camEditHeld = true; noteCamEdit(); });
+      row.addEventListener("focusin", function(){ camEditHeld = true; noteCamEdit(); });
+      row.addEventListener("focusout", function(){ camEditHeld = false; noteCamEdit(); });
+    });
     var hNote = document.createElement("div"); hNote.className = "noteText";
-    hNote.textContent = "While this page is open the level shows exactly what Play will: the character, at this zoom and height.";
+    hNote.textContent = "While you work these two, the level shows exactly what Play will: the character, at this zoom and height. Let go and the editor's view comes back.";
     el.appendChild(hNote);
     var pzBtn = document.createElement("button"); pzBtn.className = "btn tiny"; pzBtn.textContent = "Use the zoom I have now (" + Math.round(camZoom*100) + "%)";
     pzBtn.addEventListener("click", function(){ worldSettings.playZoom = camZoom; renderPersonalMenu(); sfx("tick"); });
@@ -9140,6 +9274,7 @@
     var st = stroke; stroke = null;
     if (!st || !st.poly || !st.poly.length) return;
     if (st.erase) return;                     // erasing commits as it goes
+    if (matOf(st.mat) && matOf(st.mat).isMask){ endBulk(); commitMask(st.poly, true); return; }   // a creature's area, not the level
     beginBulk();
     var hits = objectsTouching(st.poly, st.layer, FUSE_REACH);
     var target = hits.length ? hits[0] : null, i;
@@ -9329,6 +9464,12 @@
     var r = paintRadius();
     if (R.w < r*0.6 && R.h < r*0.6){ sfx("deny"); return; }   // a click, not a drag
 
+    // A creature's area: the shape goes on (left) or comes off (right)
+    if (mat.isMask){
+      var mshape = pgClean([[dragShapeRing(paintMode, R)]], GEOM_TOL);
+      if (mshape.length) commitMask(mshape, !d.erase);
+      return;
+    }
     // Right-dragged: punch this shape OUT of whatever is on this layer.
     if (d.erase){
       var hole = pgClean([[dragShapeRing(paintMode, R)]], GEOM_TOL);
@@ -9493,6 +9634,7 @@
     if (!seg.length) return;
     var pt = { x: pts[n-1][0], y: pts[n-1][1] };
     beginBulk();
+    if (stroke.cut && matOf(currentTool) && matOf(currentTool).isMask){ commitMask(seg, false); return; }   // a creature's area comes off
     var hadWater = false;
     if (stroke.layer === MID_LAYER || stroke.vacuum) hadWater = removeWaterAt(pt.x, pt.y, stroke.r);   // water is Mid's: the eraser mops it there, the vacuum anywhere
     var bit = false;
@@ -9567,6 +9709,7 @@
     selectedRegion = null;
     selection = [];
     selectedBolt = null;
+    if (maskPaint && selectedGadget === maskPaint.g) endMaskPaint();
     selectedGadget = null;
     selectedLink = null;
     /* Hide first, bail second. removeObject nulls `selected` before it
@@ -9826,12 +9969,29 @@
       opBtn(em, "✦ Any direction, floating", "", function(){ pushUndo("changing a creature"); g.fly = true; renderSelBar(); sfx("tick"); }, "wide" + (g.fly ? " on" : ""));
       slider(opSection("Speed"), "Speed", g.speed, 5, 800, 5, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing a creature");
       slider(opSection("Sight"), "Notices the player within", g.range, 60, 4000, 20, function(v){ g.range = v; }, function(v){ return Math.round(v) + "px"; }, "changing a creature");
+      var ec = opSection("Eye colour");
+      var pal = document.createElement("div"); pal.className = "gradPresets"; pal.style.flexBasis = "100%";
+      ["#2B1B12","#2F86A6","#5F9E5A","#E8567A","#F2B705","#C89BD9","#F27E42","#FFFFFF"].forEach(function(col){
+        var sw = document.createElement("button"); sw.className = g.color === col ? "active" : "";
+        sw.style.background = col; sw.title = col;
+        sw.addEventListener("click", function(){ pushUndo("changing a creature's eye"); g.color = col; renderSelBar(); sfx("tick"); });
+        pal.appendChild(sw);
+      });
+      ec.appendChild(pal);
       var ed = opSection("Weak spot");
-      opBtn(ed, g.deadly ? "💥 Dies when the player lands on the eye" : "🛡 Cannot be squashed", "",
-        function(){ pushUndo("changing a creature"); g.deadly = !g.deadly; renderSelBar(); sfx("tick"); }, "wide" + (g.deadly ? " on" : ""));
+      var painting = maskPaint && maskPaint.g === g ? maskPaint.kind : null;
+      opBtn(ed, "👣 Landing on the eye", "The player squashes it by landing on the eye", function(){ pushUndo("changing a creature"); g.weakMode = "eye"; if (painting === "weak") endMaskPaint(); renderSelBar(); sfx("tick"); }, "wide" + (g.weakMode === "eye" ? " on" : ""));
+      opBtn(ed, painting === "weak" ? "✏ Painting the weak spot… (Esc when done)" : "✏ Paint the weak spot" + (g.weak ? "" : " onto it"), "Draw the area the player has to touch to kill it — brush, shapes, right-drag to take some off",
+        function(){ if (painting === "weak") endMaskPaint(); else beginMaskPaint(g, "weak"); renderSelBar(); }, "wide" + (g.weakMode === "painted" || painting === "weak" ? " on" : ""));
+      opBtn(ed, "🛡 Cannot be squashed", "", function(){ pushUndo("changing a creature"); g.weakMode = "none"; if (painting === "weak") endMaskPaint(); renderSelBar(); sfx("tick"); }, "wide" + (g.weakMode === "none" ? " on" : ""));
+      if (g.weak) opBtn(ed, "✕ Clear the painted weak spot", "", function(){ pushUndo("changing a creature"); g.weak = null; if (g.weakMode === "painted") g.weakMode = "eye"; renderSelBar(); sfx("delete"); }, "wide");
+      var dg = opSection("Danger");
+      opBtn(dg, painting === "danger" ? "✏ Painting the danger… (Esc when done)" : "✏ Paint the danger" + (g.danger ? "" : " onto it"), "Draw the area that kills the player on touch — brush, shapes, right-drag to take some off",
+        function(){ if (painting === "danger") endMaskPaint(); else beginMaskPaint(g, "danger"); renderSelBar(); }, "wide" + (painting === "danger" ? " on" : ""));
+      if (g.danger) opBtn(dg, "✕ Clear the danger", "", function(){ pushUndo("changing a creature"); g.danger = null; renderSelBar(); sfx("delete"); }, "wide");
       var en = document.createElement("div"); en.className = "noteText";
-      en.textContent = (g.obj && g.obj.body && g.obj.body.isStatic ? "This object is locked, so the creature only watches — unlock it to let it chase. " : "") +
-        "It chases the player once they are in sight and stops just short of them. Paint the rest of it in a hazard if it should hurt.";
+      en.textContent = (g.obj && g.obj.decorative ? "On the Back or Front layer it floats after the player, since there is no ground there to walk on. " : (g.obj && g.obj.body && g.obj.body.isStatic ? "This object is locked, so the creature only watches — unlock it to let it chase. " : "")) +
+        "It chases the player once they are in sight and stops just short of them. The red area kills the player on touch; the pale area is where it can be killed.";
       en.style.flexBasis = "100%"; opSection(null).appendChild(en);
     }
     if (g.kind === "watersensor"){
@@ -11181,6 +11341,7 @@
   var pauseMenuPausedIt = false;
   var pauseView = "main";
   function onEscape(){
+    if (maskPaint){ endMaskPaint(); showToast("Done painting the creature."); return; }
     if (!nameOverlay.hidden){ closeName(false); return; }
     if (!charEditorOverlay.hidden){ closeCharEditor(); return; }
     if (!loadOverlay.hidden){ loadOverlay.hidden = true; return; }
@@ -11486,7 +11647,8 @@
                zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null,
                line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce,
                setLight: g.setLight, light: g.light, setWater: g.setWater, water: g.water, secs: g.secs, latch: g.latch,
-               range: g.range, fly: g.fly, deadly: g.deadly };
+               range: g.range, fly: g.fly, deadly: g.weakMode !== "none", weakMode: g.weakMode, color: g.color,
+               weak: g.weak ? pgPack(g.weak) : null, danger: g.danger ? pgPack(g.danger) : null };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);

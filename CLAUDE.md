@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` | Playwright suites, 581 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` | Playwright suites, 592 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 581 checks + checkgeom, in order
+npm test                   # all 592 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -50,12 +50,12 @@ Or one suite at a time:
 
 ```
 node regress.js            # 35 — geometry, save/load, play mode, loop and save safety, map edges
-node tsel.js               # 42 — selection, marquee, group transforms, resize, detach, the number row
+node tsel.js               # 38 — selection, marquee, group transforms, resize, detach, the number row
 node tlayer.js             # 12 — layer accuracy, ranked picking, the hover label
 node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
-node tmenu.js              # 32 — the personal menu's sections, the Tools bag's four pages, the number keys, the gradient
+node tmenu.js              # 31 — the personal menu's sections, the Tools bag's four pages, the number keys, the gradient
 node tbolt.js              # 56 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, typed rpm, painting onto a bolted wall, save/load
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
 node tlink.js              # 59 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
@@ -63,9 +63,9 @@ node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its 
 node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
 node tmover.js             # 22 — the Mover: two-click placing, once and bounce, riding it, a loose host held, wired, the knob, save/load
 node tworld.js             # 18 — the Water sensor, and the World changer's light and water, wired, latched, saved
-node tcreature.js          # 17 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, save/load
+node tcreature.js          # 32 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, painted weak spot and danger, colour, a Back-layer creature, save/load
 node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
-node tcam.js               # 91 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
+node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -808,13 +808,45 @@ at what it was when first driven, so a walking thing never tumbles. A
 locked host only watches. Chasing the player through a wall is not
 attempted: it walks into it and stops.
 
-**The eye is the weak spot** (`deadly`, on by default): landing on it —
-`groundBody` is the host, the feet within the eye's width of it and just
-above — pops the creature (`creatureStompCheck`: particles, the delete
-sound, a small bounce, `removeObject`). **Play only**: in Build a stomp
-would take the object with it for real, and Play's snapshot brings it
-back. It does not hurt the player by itself: the box says to paint the
-rest of it in a hazard if it should.
+**The weak spot and the danger are painted on.** `weakMode`: `eye` (the
+default — landing on the eye, `groundBody` is the host and the feet are
+within the eye's width and just above), `painted` (the drawn area), or
+`none` (unsquashable; the old `deadly:false`, still written for older
+readers). The danger is always a drawn area. Both are MultiPolys in the
+host's own frame like its pieces (`g.weak`, `g.danger`), saved packed,
+carried through a rebuild (`maskToWorld` off the old body,
+`maskToLocal` onto the new, in `rebuildFromPieces`) and through resize
+and flip (`carryGadgets` maps them through `mapPt`).
+
+**Painting them** (`maskPaint`, `beginMaskPaint`, `endMaskPaint`): the
+box's "Paint the weak spot" / "Paint the danger" swaps the brush for one
+of two pseudo-materials — `maskweak`, `maskdanger`, `isMask:true`, in
+`MATERIALS` but never in `MATERIAL_ORDER`, so they are never a body — and
+every stroke, drag-out shape and right-drag cut goes through the ordinary
+painting code, caught at the commit (`commitStroke`, `commitShapeDrag`,
+the cut stroke in `eraseStep`) and put into the area by `commitMask`:
+unioned after clipping to the host's own pieces, or differenced. Esc,
+picking another tool, or losing the selection ends it and hands back
+Move. The areas draw on the host in every mode (the danger a red warning,
+the weak spot a pale target) unless the gadget is hidden in Play.
+
+**Contact is geometry, on every layer.** `creatureContactCheck` uses
+`Query.collides(player, [host])` — it ignores collision filters, so a
+Back or Front creature, which the player can never physically touch,
+counts when they overlap it, which is what Carson asked for ("effect
+every layer"). The collision's support points go into the host's frame
+and are asked against the areas: in the danger, the player dies as a
+hazard kills them (zap, shake, `respawnPlayer`, the same 900ms grace); in
+the weak spot, `creaturePop`. **Play only**: in Build a pop would take
+the object with it for real, and Play's snapshot brings it back.
+
+**A creature on the Back or Front layer** has no physics to walk with,
+so `creatureStep` moves a `decorative` host by hand (`Body.setPosition`)
+toward the player, floating, left and right only unless `fly`.
+
+**The eye is a googly eye** — white, a dark rim, a big pupil in `g.color`
+(the box has a palette; default black) that rolls toward the player,
+with a highlight. The pop's spray takes the colour too.
 
 ## The live world
 
@@ -946,11 +978,11 @@ whole structure:
 Adding a page is one line in that table. A section with a single page hides
 the page row, since the icon already said what it is.
 
-**The number row is the tools.** `QUICK_TOOLS`, 1 to 9: Move & Select,
-Erase, Vacuum, Bolt, Motor bolt, Piston, Rope, Camera, Checkpoint. Every
-chip in the Tools bag wears its number (`.keyTag`, `quickKeyFor`). The
-materials used to sit on 5–9; they came off to make room, at Carson's
-ask. In Play 1–4 are still emotes.
+**The number row is the editing tools.** `QUICK_TOOLS`: 1 Move & Select,
+2 Erase, 3 Vacuum, and nothing else — Carson: "the bolts and stuff don't
+need to be assigned to number keys, just editing tools". The chips wear
+their numbers (`.keyTag`, `quickKeyFor`). 4–9 do nothing in Build; the
+materials used to sit on 5–9. In Play 1–4 are still emotes.
 
 **The gradient is a personal setting, not a level one.** Two colours and an
 angle, written onto `#personalMenu` as `--pop-a`, `--pop-b` and `--pop-ang`,
@@ -1013,11 +1045,16 @@ Every place the camera aims at the player uses `playerAim`: the default
 follow, a gadget's tracking, the honest frame and its inverse. A level
 saved with a zoom but no height loads centred (0), as it was built.
 
-**The World page previews the default camera live.** While the personal
-menu is open on the World section in Build (`worldPagePreviewWanted`),
+**The World page previews the default camera while its sliders are
+worked.** `worldPagePreviewWanted`: Build, the World page open, and the
+zoom or height row held (`camEditHeld`: pointerdown or focus on either
+row, cleared on the window's pointerup / focusout) or changed within the
+last 900ms (`camEditUntil`, bumped by `noteCamEdit` on every input). Then
 the level shows the character at the Play zoom and height whatever the
 editor camera was doing — detached, zoomed, anywhere — so the two sliders
-are set by eye. `beginEditorHold` keeps the editor's zoom, follow flag and
+are set by eye; let go and the editor's view comes back with the page
+still open. It used to preview the whole time the page was open, which
+Carson found got in the way of the rest of the page. `beginEditorHold` keeps the editor's zoom, follow flag and
 centre in `edCam` (the same hold the walking preview uses, now with
 follow and position too) and `endBuildPreview` puts all of it back when
 the page closes. No easing here: a slider should answer at once.

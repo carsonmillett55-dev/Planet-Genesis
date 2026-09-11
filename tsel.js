@@ -82,7 +82,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
 
   console.log('\n== number keys ==');
   await p.evaluate(()=>window.__pg.setTool('wood'));
-  for (const [key, want] of [['1','move'],['2','erase'],['3','vacuum'],['4','bolt'],['5','motorbolt'],['6','piston'],['7','rope'],['8','camera'],['9','checkpoint']]){
+  for (const [key, want] of [['1','move'],['2','erase'],['3','vacuum'],['4','vacuum'],['9','vacuum']]){   // only the editing tools have numbers; the rest leave the tool alone
     await p.keyboard.press(key);
     await p.waitForTimeout(60);
     const t = await p.evaluate(()=>window.__pg.tool());

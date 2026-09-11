@@ -59,6 +59,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('and shows their number keys', JSON.stringify(await p.evaluate(() => Array.from(document.querySelectorAll('#pmBody .chip .keyTag')).map(k => k.textContent))) === JSON.stringify(['1','2','3']));
   await clickPage('Connectors'); await p.waitForTimeout(250);
   ok('Connectors holds the bolts, the piston and the rope', (await chipsOn()).includes('Bolt') && (await chipsOn()).includes('Piston') && (await chipsOn()).includes('Rope') && !(await chipsOn()).includes('Erase'), await chipsOn());
+  ok('and none of them wears a number', (await p.evaluate(() => document.querySelectorAll('#pmBody .chip .keyTag').length)) === 0);
   await clickPage('Logic'); await p.waitForTimeout(250);
   ok('Logic holds the sensors, switches and the world changer', (await chipsOn()).includes('Player sensor') && (await chipsOn()).includes('Lever') && (await chipsOn()).includes('World changer'), await chipsOn());
   await clickPage('Gameplay'); await p.waitForTimeout(250);
@@ -73,11 +74,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.keyboard.press('3'); await p.waitForTimeout(80);
   ok('3 is Vacuum', (await tool()) === 'vacuum', await tool());
   await p.keyboard.press('4'); await p.waitForTimeout(80);
-  ok('4 is Bolt', (await tool()) === 'bolt', await tool());
-  await p.keyboard.press('6'); await p.waitForTimeout(80);
-  ok('6 is Piston', (await tool()) === 'piston', await tool());
-  await p.keyboard.press('8'); await p.waitForTimeout(80);
-  ok('8 is Camera', (await tool()) === 'camera', await tool());
+  ok('4 does nothing — only the editing tools have numbers', (await tool()) === 'vacuum', await tool());
   await p.keyboard.press('1'); await p.waitForTimeout(80);
   ok('1 is Move & Select', (await tool()) === 'move', await tool());
 
