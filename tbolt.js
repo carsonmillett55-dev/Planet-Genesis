@@ -251,6 +251,26 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('the joint is still closed after a flip', after.gap < 2, { before: before.gap, after: after.gap });
 
   console.log('');
+  console.log('== a bolt can be dragged to a new spot ==');
+  const mv = await postAndArm('motorbolt');
+  await p.evaluate(id => window.__pg.boltSet(id, { speed: 0.09, dir: -1 }), mv.id);
+  await p.evaluate(() => window.__pg.setTool('move'));
+  const dragTo = async (fx, fy, tx, ty) => {
+    const a = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [fx, fy]), c = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [tx, ty]);
+    await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(c.x, c.y, { steps: 8 }); await p.mouse.up();
+    await p.waitForTimeout(300);
+  };
+  await dragTo(mv.x, mv.y, X+45, Y+25);               // still over the post, lower down the arm
+  let bm = (await boltsNow())[0];
+  ok('dragging the bolt moves its pivot', Math.abs(bm.x - (X+45)) < 4 && Math.abs(bm.y - (Y+25)) < 4, { at:[bm.x, bm.y], want:[X+45, Y+25] });
+  ok('and it keeps its settings', bm.kind === 'motor' && Math.abs(bm.speed - 0.09) < 1e-6 && bm.dir === -1, bm);
+  await dragTo(bm.x, bm.y, X+180, Y+15);              // on the arm alone: nothing behind it there
+  const bm2 = (await boltsNow())[0];
+  ok('dropping it where there is nothing to pin to leaves it where it was', Math.abs(bm2.x - bm.x) < 3 && Math.abs(bm2.y - bm.y) < 3, { from:[bm.x,bm.y], now:[bm2.x,bm2.y] });
+  await p.evaluate(() => window.__pg.paused(false)); await p.waitForTimeout(700);
+  ok('and it still drives after the move', Math.abs(await rel(bm2.id)) > 10, await rel(bm2.id));
+
+  console.log('');
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();

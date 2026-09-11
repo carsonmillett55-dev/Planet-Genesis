@@ -285,6 +285,41 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('and you land again', Math.abs(ppL.y - yBefore) < 6, { landed: ppL.y, ground: yBefore });
 
   console.log('');
+  console.log('== a gadget can be dragged to a new spot and keeps its wires ==');
+  await fresh();
+  await rect('wood', 0, X+300, Y-60, X+380, Y+160);
+  await rect('wood', 1, X-160, Y+200, X+80, Y+240);
+  await rect('wood', 1, X+120, Y+200, X+260, Y+240);      // a second platform
+  await lockAll();
+  await rect('metal', 1, X+280, Y, X+480, Y+34);
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('motorbolt'); });
+  await p.evaluate(([x,y]) => window.__pg.boltAt(x,y), [X+340, Y+17]);
+  const mbm = (await boltsNow())[0];
+  await p.evaluate(() => window.__pg.setTool('lever'));
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X-100, Y+202]);
+  const lvm = (await gads())[0];
+  await p.evaluate(([f,t]) => window.__pg.wire(f,t), [lvm.id, mbm.id]);
+  await p.evaluate(() => window.__pg.setTool('move'));
+  const dragTo = async (fx, fy, tx, ty) => {
+    const a = await w2p(fx, fy), c = await w2p(tx, ty);
+    await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(c.x, c.y, { steps: 8 }); await p.mouse.up();
+    await p.waitForTimeout(300);
+  };
+  await dragTo(lvm.x, lvm.y, X, Y+202);                 // along the same platform
+  let gm = (await gads())[0];
+  ok('dragging along its object moves it there', Math.abs(gm.x - X) < 8 && gm.obj === lvm.obj, { x: gm.x, want: X, obj: gm.obj });
+  ok('and it is still wired to the motor', (await p.evaluate(() => window.__pg.wires())).length === 1);
+  await dragTo(gm.x, gm.y, X+190, Y+202);               // onto the second platform
+  gm = (await gads())[0];
+  ok('dragging onto another object moves it onto that one', Math.abs(gm.x - (X+190)) < 8 && gm.obj !== lvm.obj, { x: gm.x, obj: gm.obj, was: lvm.obj });
+  ok('wires survive the change of object too', (await p.evaluate(() => window.__pg.wires())).length === 1);
+  await dragTo(gm.x, gm.y, X+190, Y-300);               // into thin air
+  const gm2 = (await gads())[0];
+  ok('dropping it on nothing puts it back where it was', Math.abs(gm2.x - gm.x) < 3 && Math.abs(gm2.y - gm.y) < 3 && gm2.obj === gm.obj, { from: [gm.x, gm.y], now: [gm2.x, gm2.y] });
+  await p.evaluate(() => window.__pg.undo()); await p.waitForTimeout(350);
+  ok('undo takes it back a step', Math.abs((await gads())[0].x - X) < 8, (await gads())[0].x);
+
+  console.log('');
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();

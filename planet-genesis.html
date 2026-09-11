@@ -2792,7 +2792,7 @@
               max: extra.max != null ? +extra.max : Math.round(d * 1.5),
               time: extra.time != null ? +extra.time : 1.5,
               pause: extra.pause != null ? +extra.pause : 0.3,
-              stiff: !!extra.stiff, flipper: extra.flipper || "off",
+              stiff: extra.stiff != null ? !!extra.stiff : true, flipper: extra.flipper || "off",
               going: extra.going === -1 ? -1 : 1, wait: 0,
               len: extra.len != null ? +extra.len : d,
               length: extra.length != null ? +extra.length : Math.round(d * 1.15),
@@ -2805,7 +2805,7 @@
         length: l.len, stiffness: 0.9, damping: 0.2
       });
       World.add(world, l.constraint);
-      if (l.stiff) refreshStiffRef(l);
+      refreshStiffRef(l);            // the pose it was placed in is the design pose
     } else {
       l.constraint = Constraint.create({
         bodyA: objA.body, pointA: { x: ptA.x - objA.body.position.x, y: ptA.y - objA.body.position.y },
@@ -2818,12 +2818,17 @@
     links.push(l);
     return l;
   }
-  /* Stiff: remember the pose. `rodAng0` is the rod's world angle from the
-     base's anchor to the free end's, `baseAng0` the base's angle at that
-     moment, `relAng0` the free body's angle relative to the base. From those
-     three and the length the free end's pose is fully determined. Re-taken
-     whenever the pose is legitimately changed from outside — a resize, a
-     flip — by refreshStiffRef. */
+  /* Stiff: remember the DESIGN pose. `rodAng0` is the rod's world angle
+     from the base's anchor to the free end's, `baseAng0` the base's angle at
+     that moment, `relAng0` the free body's angle relative to the base. From
+     those three and the length the free end's pose is fully determined.
+
+     Taken when the piston is placed, and re-taken only when the pose is
+     legitimately changed from outside — a resize, a flip, one end dragged to
+     a new spot. NOT when stiff is toggled: a piston that was left loose, had
+     its far end swing down under gravity, and was then set stiff should snap
+     back to the pose it was built in, not freeze wherever gravity left it.
+     That was exactly what Carson saw. Stiff is the default, as in LBP. */
   function stiffRoles(l){
     var c = l.constraint, A = c.bodyA, B = c.bodyB;
     if (!B.isStatic) return { base: A, tgt: B, tgtIsA: false };
@@ -2845,7 +2850,8 @@
   function setPistonStiff(l, on){
     if (l.kind !== "piston" || !l.constraint) return;
     l.stiff = !!on;
-    if (on) refreshStiffRef(l); else l.stiffRef = null;
+    if (on && !l.stiffRef) refreshStiffRef(l);
+    if (on){ var r = stiffRoles(l); if (r && l.stiffRef && l.stiffRef.tgtIsA !== r.tgtIsA) refreshStiffRef(l); }
   }
   /* Place the free end. Runs after the physics step, so whatever the
      solver did to the body this frame is overwritten before it is drawn or
@@ -2856,7 +2862,19 @@
     var ref = l.stiffRef, c = l.constraint;
     if (!ref || !c) return;
     var r = stiffRoles(l);
-    if (!r || r.tgtIsA !== ref.tgtIsA){ refreshStiffRef(l); ref = l.stiffRef; r = stiffRoles(l); if (!ref || !r) return; }
+    if (!r) return;
+    if (r.tgtIsA !== ref.tgtIsA){
+      // the other end got locked or freed: same design pose, seen from the
+      // other end, rather than a fresh one taken from wherever it is now
+      var c0 = l.constraint;
+      var aP = { x: c0.bodyA.position.x + c0.pointA.x, y: c0.bodyA.position.y + c0.pointA.y };
+      var bP = { x: c0.bodyB.position.x + c0.pointB.x, y: c0.bodyB.position.y + c0.pointB.y };
+      var fromNew = r.tgtIsA ? bP : aP, toNew = r.tgtIsA ? aP : bP;
+      ref.tgtIsA = r.tgtIsA;
+      ref.rodAng0 = Math.atan2(toNew.y - fromNew.y, toNew.x - fromNew.x);
+      ref.baseAng0 = r.base.angle; ref.relAng0 = r.tgt.angle - r.base.angle;
+      ref.lastX = r.tgt.position.x; ref.lastY = r.tgt.position.y;
+    }
     var base = r.base, tgt = r.tgt;
     var basePt = r.tgtIsA ? c.pointB : c.pointA, tgtPt = r.tgtIsA ? c.pointA : c.pointB;
     var rodAng = ref.rodAng0 + (base.angle - ref.baseAng0);
@@ -4752,8 +4770,15 @@
     localStorage.setItem("pg_zoom", String(camZoom));
     if (zoomValEl) zoomValEl.textContent = Math.round(camZoom*100) + "%";
   }
+  /* Sized and measured from the CANVAS, not its wrapper. The wrapper has a
+     5px border the canvas sits inside, so measuring the wrapper made the
+     pixel buffer 10px larger than the canvas is displayed — everything
+     drawn 0.8% small and soft, and further off toward the right — and put
+     every click 5 screen pixels right and down of the cursor. The two
+     compounded: paint never landed quite under the cursor, and by how much
+     depended on where on the screen you were. */
   function resize(){
-    var rect = wrap.getBoundingClientRect();
+    var rect = canvas.getBoundingClientRect();
     dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(rect.width * dpr);
     canvas.height = Math.round(rect.height * dpr);
@@ -4809,7 +4834,7 @@
     sfx("click");
   }
   function screenToWorld(clientX, clientY){
-    var rect = wrap.getBoundingClientRect();
+    var rect = canvas.getBoundingClientRect();     // the canvas, not the wrapper — see resize()
     var x = clientX - rect.left, y = clientY - rect.top;
     return { x: x / camScale + camX, y: y / camScale + camY };
   }
@@ -5635,6 +5660,11 @@
         var e = linkEnds(l);
         ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
         ctx.lineWidth = 14/camScale; ctx.strokeStyle = "rgba(242,183,5,0.35)"; ctx.lineCap = "round"; ctx.stroke();
+        // knobs on the ends: grab one and drag it somewhere else
+        [e.a, e.b].forEach(function(q){
+          ctx.beginPath(); ctx.arc(q.x, q.y, 9/camScale, 0, Math.PI*2);
+          ctx.fillStyle = "#FFF6D8"; ctx.fill(); ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+        });
         if (l.kind === "piston") drawPistonReach(l, e);
         if (l.kind === "rope") drawRopeReach(l, e);
       }
@@ -5899,6 +5929,34 @@
         ctx.fillStyle = matOf(currentTool).color;
         ctx.globalAlpha = 0.9;
         ctx.beginPath(); ctx.arc(mouseWorld.x, mouseWorld.y, 3/camScale, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+        showCustom = true;
+      } else if (attachDrag && attachDrag.moved && attachDrag.kind === "bolt"){
+        var mpair = boltPairAt(mouseWorld.x, mouseWorld.y);
+        ctx.save();
+        ctx.translate(mouseWorld.x, mouseWorld.y);
+        ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI*2);
+        ctx.lineWidth = 2.4/camScale; ctx.strokeStyle = mpair ? "#5F9E5A" : "#D64545";
+        ctx.globalAlpha = 0.85; ctx.stroke();
+        drawBoltGlyph(attachDrag.ref.kind, attachDrag.ref.tightness, 0, mpair ? 0.6 : 0.3);
+        ctx.restore();
+        showCustom = true;
+      } else if (attachDrag && attachDrag.moved && attachDrag.kind === "link"){
+        var ld = attachDrag.ref, le2 = linkEnds(ld), fixedEnd = attachDrag.end === "A" ? le2.b : le2.a;
+        var mhost = objectUnderAny(mouseWorld.x, mouseWorld.y, 6), okDrop = mhost && mhost !== (attachDrag.end === "A" ? ld.objB : ld.objA);
+        ctx.save();
+        ctx.beginPath(); ctx.moveTo(fixedEnd.x, fixedEnd.y); ctx.lineTo(mouseWorld.x, mouseWorld.y);
+        ctx.lineWidth = 3/camScale; ctx.strokeStyle = okDrop ? "#5F9E5A" : "#D64545"; ctx.setLineDash([8/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(mouseWorld.x, mouseWorld.y, 7/camScale, 0, Math.PI*2); ctx.fillStyle = okDrop ? "#5F9E5A" : "#D64545"; ctx.globalAlpha = 0.7; ctx.fill();
+        ctx.restore();
+        showCustom = true;
+      } else if (attachDrag && attachDrag.moved && attachDrag.kind === "gadget"){
+        var ghost2 = objectUnderAny(mouseWorld.x, mouseWorld.y, 6);
+        ctx.save();
+        ctx.translate(mouseWorld.x, mouseWorld.y);
+        ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI*2);
+        ctx.lineWidth = 2.4/camScale; ctx.strokeStyle = ghost2 ? "#5F9E5A" : "#D64545";
+        ctx.globalAlpha = 0.85; ctx.stroke();
         ctx.restore();
         showCustom = true;
       } else if (isLinkTool()){
@@ -8522,7 +8580,8 @@
       var bh = opSection("Behaviour");
       opBtn(bh, l.stiff ? "▬ Stiff" : "⌇ Loose ends", l.stiff ? "The rod holds its angle at both ends" : "The ends can swivel",
         function(){ pushUndo("changing a piston"); setPistonStiff(l, !l.stiff); renderSelBar(); sfx("tick"); }, l.stiff ? "on" : "");
-      opBtn(bh, l.going === 1 ? "→ Starts extending" : "← Starts retracting", "",
+      opBtn(bh, l.going === 1 ? "↦ First move: push out" : "↤ First move: pull in",
+        "Which way it goes first when it starts cycling. Set two pistons opposite to run them out of step.",
         function(){ pushUndo("changing a piston"); l.going = -l.going; renderSelBar(); sfx("tick"); });
       var fl = opSection("When wired");
       [["off","Signal runs it"],["out","Signal pushes out"],["in","Signal pulls in"]].forEach(function(pair){
@@ -8807,6 +8866,116 @@
     sfx("glue");
   }
 
+  /* ---- Moving what is placed: a gadget, a bolt, or one end of a link.
+
+     With the Move tool, pressing on one of these and dragging picks it up;
+     letting go over somewhere valid puts it there, anywhere else snaps it
+     back. A press without a drag is just a select, as before. Wires are by
+     id and never notice. */
+  var attachDrag = null;   // { kind, ref, end, x0, y0, moved, orig }
+  function beginAttachDrag(kind, ref, pt, end){
+    attachDrag = { kind: kind, ref: ref, end: end || null, x0: pt.x, y0: pt.y, moved: false, pt: { x:pt.x, y:pt.y } };
+    if (kind === "gadget") attachDrag.orig = { obj: ref.obj, pos: { x: ref.pos.x, y: ref.pos.y }, local: { x: ref.local.x, y: ref.local.y }, layer: ref.layer };
+  }
+  function updateAttachDrag(pt){
+    if (!attachDrag) return;
+    attachDrag.pt = { x: pt.x, y: pt.y };
+    if (!attachDrag.moved && Math.hypot(pt.x - attachDrag.x0, pt.y - attachDrag.y0) > 4/camScale) attachDrag.moved = true;
+    if (attachDrag.moved && attachDrag.kind === "gadget"){
+      // rides the cursor while it is being carried
+      var g = attachDrag.ref;
+      g.pos = { x: pt.x, y: pt.y };
+      if (g.obj && g.obj.body) g.local = toBodyLocal(g.obj.body, g.pos);
+    }
+  }
+  function moveGadgetTo(g, pt){
+    var host = objectUnderAny(pt.x, pt.y, 6);
+    if (!host) return false;
+    g.obj = host; g.layer = host.layer;
+    g.pos = { x: pt.x, y: pt.y };
+    g.local = toBodyLocal(host.body, g.pos);
+    return true;
+  }
+  /* A bolt keeps its settings and its wires; it gets a new pair of objects
+     and a new joint. */
+  function moveBoltTo(b, pt){
+    var pair = boltPairAt(pt.x, pt.y);
+    if (!pair) return false;
+    World.remove(world, b.constraint);
+    b.objA = pair.front; b.objB = pair.partner; b.layer = pair.layer;
+    b.point = { x: pt.x, y: pt.y };
+    b.constraint = Constraint.create({
+      bodyA: b.objA.body, pointA: { x: pt.x - b.objA.body.position.x, y: pt.y - b.objA.body.position.y },
+      bodyB: b.objB.body, pointB: { x: pt.x - b.objB.body.position.x, y: pt.y - b.objB.body.position.y },
+      length: 0, stiffness: 0.9, damping: 0.35
+    });
+    World.add(world, b.constraint);
+    b.rest = b.objA.body.angle - b.objB.body.angle;
+    b.holdRel = null; b.t = 0;
+    applyBoltMode(b);
+    return true;
+  }
+  /* One end of a link goes to a new spot — on its own object, or onto
+     another one, as long as it is not the object the other end is on. */
+  function moveLinkEndTo(l, end, pt){
+    var host = objectUnderAny(pt.x, pt.y, 6);
+    var otherObj = end === "A" ? l.objB : l.objA;
+    if (!host || host === otherObj) return false;
+    var body = host.body, off = { x: pt.x - body.position.x, y: pt.y - body.position.y };
+    var cs = l.kind === "piston" ? [l.constraint] : [l.constraint, end === "A" ? l.endA : l.endB];
+    cs.forEach(function(c){
+      if (!c) return;
+      if (end === "A"){ c.bodyA = body; c.pointA = { x: off.x, y: off.y }; c.angleA = body.angle; }
+      else { c.bodyB = body; c.pointB = { x: off.x, y: off.y }; c.angleB = body.angle; }
+    });
+    if (end === "A") l.objA = host; else l.objB = host;
+    l.layer = Math.max(l.objA.layer, l.objB.layer);
+    if (l.kind === "piston"){
+      // the reach is measured from the placed pose; keep it sensible around the new span
+      var e = linkEnds(l), d = Math.max(8, dist(e.a, e.b));
+      if (d < l.min) l.min = Math.max(10, Math.round(d * 0.5));
+      if (d > l.max) l.max = Math.round(d * 1.5);
+      l.len = Math.max(l.min, Math.min(l.max, d));
+      l.constraint.length = l.len;
+      refreshStiffRef(l);
+    } else {
+      // a rope re-hangs from the new spot
+      var e2 = linkEnds(l);
+      tearDownRope(l); buildRope(l, e2.a, e2.b);
+    }
+    return true;
+  }
+  function endAttachDrag(){
+    if (!attachDrag) return;
+    var d = attachDrag; attachDrag = null;
+    if (!d.moved) return;
+    var pt = d.pt, done = false;
+    if (d.kind === "gadget"){
+      var g = d.ref, o = d.orig;
+      // put it back first, so the undo snapshot is of the world before the
+      // move — and so a drop on nothing leaves no trace, not even an undo step
+      g.obj = o.obj; g.pos = o.pos; g.local = o.local; g.layer = o.layer;
+      if (objectUnderAny(pt.x, pt.y, 6)){
+        pushUndo("moving a " + GADGET_LABEL[g.kind].toLowerCase());
+        done = moveGadgetTo(g, pt);
+      }
+    } else if (d.kind === "bolt"){
+      if (boltPairAt(pt.x, pt.y)){ pushUndo("moving a bolt"); done = moveBoltTo(d.ref, pt); }
+    } else if (d.kind === "link"){
+      var host = objectUnderAny(pt.x, pt.y, 6), other = d.end === "A" ? d.ref.objB : d.ref.objA;
+      if (host && host !== other){ pushUndo("moving a " + LINK_LABEL[d.ref.kind].toLowerCase() + " end"); done = moveLinkEndTo(d.ref, d.end, pt); }
+    }
+    if (done){ sfx("glue"); renderSelBar(); }
+    else { sfx("deny"); showToast(d.kind === "bolt" ? "A bolt has to go through to the layer behind or in front." : "Drop it on an object."); }
+  }
+  /* Which end of a link the point is near, if either. */
+  function linkEndAt(l, x, y){
+    var e = linkEnds(l);
+    if (dist(e.a, { x:x, y:y }) < 14) return "A";
+    if (dist(e.b, { x:x, y:y }) < 14) return "B";
+    return null;
+  }
+
   /* Corner handles. The drag scales about the OPPOSITE corner, so the corner
      you are not holding stays put — which is what makes it feel like pulling
      the shape bigger rather than watching it drift. */
@@ -9066,11 +9235,16 @@
       if (handle){ dragging = null; beginResize(pt, handle); return; }
       if (wiring){ dragging = null; finishWire(pt); return; }
       var gh = gadgetAt(pt.x, pt.y);
-      if (gh){ dragging = null; selectGadget(gh); renderSelBar(); return; }
+      if (gh){ dragging = null; selectGadget(gh); renderSelBar(); beginAttachDrag("gadget", gh, pt); return; }
       var bh = boltAt(pt.x, pt.y);
-      if (bh){ dragging = null; selectBolt(bh); renderSelBar(); return; }
+      if (bh){ dragging = null; selectBolt(bh); renderSelBar(); beginAttachDrag("bolt", bh, pt); return; }
       var lh = linkAt(pt.x, pt.y);
-      if (lh){ dragging = null; selectLink(lh); renderSelBar(); return; }
+      if (lh){
+        dragging = null; selectLink(lh); renderSelBar();
+        var le = linkEndAt(lh, pt.x, pt.y);
+        if (le) beginAttachDrag("link", lh, pt, le);
+        return;
+      }
     }
     if (goalPoint && dist(goalPoint, pt) < 34){ dragging = { type:"goal" }; clearSelection(); return; }
     for (var i = checkpoints.length - 1; i >= 0; i--){
@@ -9457,6 +9631,7 @@
     if (mode !== "build") return;
     var pt = screenToWorld(e.clientX, e.clientY);
     if (resizing){ updateResize(pt); return; }
+    if (attachDrag){ updateAttachDrag(pt); return; }
     if (shapeDrag){ shapeDrag.b = snapPt(pt); shapeDrag.square = e.shiftKey; return; }
     if (marquee){ marquee.b = pt; return; }
     if (currentTool === "move"){
@@ -9488,6 +9663,7 @@
     canvas.addEventListener(ev, function(){
       endPan();
       if (resizing) commitResize();
+      if (attachDrag) endAttachDrag();
       if (marquee) commitMarquee();
       if (shapeDrag){
         pushUndo(shapeDrag.erase ? "cutting a hole"

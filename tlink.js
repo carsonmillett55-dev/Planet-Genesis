@@ -253,6 +253,32 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('the bigger weight still hangs from it', wgt && wgt.pos.y > Y && wgt.pos.y < 2250 && Math.abs(rl2.span - rl2.length) < 40, { y: wgt && wgt.pos.y, span: rl2.span, length: rl2.length });
 
   console.log('');
+  console.log('== an end of a piston can be dragged to another object ==');
+  await twoBlocks();
+  await rect('wood', 1, X+400, Y, X+480, Y+80);        // a third block, locked below
+  await p.evaluate(() => { const o = window.__pg.objects().filter(q => !q.body.isStatic).pop(); window.__pg.select(o); window.__pg.anchor(); window.__pg.deselect(); });
+  const pm = await place('piston', X+40, Y+40, X+240, Y+40);
+  const objsBefore = { a: pm.a, b: pm.b };
+  await p.evaluate(() => window.__pg.setTool('move'));
+  await p.evaluate(id => window.__pg.selectLink(id), pm.id);
+  const dragTo = async (fx, fy, tx, ty) => {
+    const a = await w2p(fx, fy), c = await w2p(tx, ty);
+    await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(c.x, c.y, { steps: 8 }); await p.mouse.up();
+    await p.waitForTimeout(300);
+  };
+  await dragTo(pm.bx, pm.by, X+440, Y+40);            // far end onto the third block
+  let lm = (await linksNow())[0];
+  ok('the far end is now on the third block', lm.b !== objsBefore.b && Math.abs(lm.bx - (X+440)) < 4, { b: lm.b, was: objsBefore.b, at: [lm.bx, lm.by] });
+  ok('and the near end did not move', lm.a === objsBefore.a && Math.abs(lm.ax - pm.ax) < 2, { a: lm.a, ax: lm.ax });
+  ok('the reach was widened to fit the new span', lm.min <= lm.span && lm.max >= lm.span, { min: lm.min, max: lm.max, span: lm.span });
+  await dragTo(lm.ax, lm.ay, X+40, Y-200);            // near end into thin air
+  const lm2 = (await linksNow())[0];
+  ok('dropping an end on nothing leaves it alone', lm2.a === lm.a && Math.abs(lm2.ax - lm.ax) < 2, { a: lm2.a, ax: lm2.ax });
+  await dragTo(lm2.ax, lm2.ay, X+440, Y+60);          // near end onto the far end's own object
+  const lm3 = (await linksNow())[0];
+  ok('and it will not put both ends on one object', lm3.a === lm2.a, { a: lm3.a, b: lm3.b });
+
+  console.log('');
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();

@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` | Playwright suites, 296 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` | Playwright suites, 311 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 296 checks + checkgeom, in order
+npm test                   # all 311 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -56,9 +56,9 @@ node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 19 — the personal menu's sections, pages and gradient
-node tbolt.js              # 46 — bolts: through the layers, four kinds, limits, the box, the ghost, save/load
-node tgadget.js            # 43 — player sensor, button, lever, wires, what they drive, paused walking
-node tlink.js              # 44 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, save/load
+node tbolt.js              # 50 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, save/load
+node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
+node tlink.js              # 49 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -425,9 +425,18 @@ where those and the length say, every frame, after whatever the solver did
 — and hands it the velocity that motion implies, so the next integration
 lands almost there anyway and contacts feel the push. 0px of droop with a
 weight dropped on the far end. Whichever end is dynamic is the one placed;
-both static, nothing to do. The reference is re-taken after a rebuild
-(`relinkAfterRebuild`) and after resize or flip (`carryLinks`), since those
-legitimately move the anchor.
+both static, nothing to do.
+
+**That reference is the design pose, and stiff is the default.** It is
+taken when the piston is placed and re-taken only when the pose is
+legitimately changed from outside — a rebuild (`relinkAfterRebuild`), a
+resize or flip (`carryLinks`), an end dragged somewhere new. It is *not*
+re-taken when stiff is toggled: a piston left loose, whose far end swung
+down under gravity, then set stiff, snaps back to the pose it was built in
+rather than freezing wherever gravity left it. That was exactly what Carson
+saw and reported as "still moved around". If one end gets locked or freed
+mid-flight, the same pose is re-expressed from the other end rather than
+re-taken.
 
 Rotating the free body's anchor: Matter keeps `pointB` rotated to the angle
 it last saw, so after `Body.setAngle` the offset is rotated here by the same
@@ -467,6 +476,36 @@ point at a piston (`toLink`).
 Also fixed on the way: `collisionActive` counted any overlap with the player
 as ground, sensors included — a rope, a Back-layer decoration, a walk-through
 light would have let you jump in mid-air. Only a solid counts now.
+
+## Moving what is placed
+
+With the Move tool, pressing on a gadget, a bolt, or one end of a link and
+dragging picks it up; a press without a drag is just a select. `attachDrag`
+holds it. Letting go over somewhere valid puts it there; anywhere else snaps
+it back with no undo step left behind.
+
+- A **gadget** rides the cursor while carried and drops onto whatever object
+  is under it, on any layer, taking that object's layer. Wires are by id and
+  never notice.
+- A **bolt** shows the ghost while carried and needs a pair under the drop
+  point, as when placing; it gets a new joint on the new pair and keeps every
+  setting and wire (`moveBoltTo`).
+- A **link end** — the knobs on a selected piston or rope — goes to any
+  object that is not the other end's (`moveLinkEndTo`). A piston widens its
+  reach to fit the new span and re-takes its design pose; a rope re-hangs.
+
+## Screen and world
+
+**Measure from the canvas, never the wrapper.** `#canvasWrap` has a 5px
+border and the canvas sits inside it. `resize()` sized the pixel buffer from
+the wrapper's rect, 10px larger than the canvas is displayed, so everything
+was drawn 0.8% small and soft, further off toward the right; and
+`screenToWorld` subtracted the wrapper's corner, so every click landed 5
+screen pixels right and down of the cursor. The two compounded: paint never
+landed quite under the cursor, and by how much depended on where on the
+screen you were. Both now use `canvas.getBoundingClientRect()`. The test
+hook `w2sPage` always did, which is why every suite kept meeting a 5.88px
+offset — that number is 5px at the default zoom, and it was the game.
 
 ## Walking while paused
 
