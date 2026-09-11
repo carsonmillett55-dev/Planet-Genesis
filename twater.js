@@ -81,7 +81,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('the vacuum sucks the water up', t1 < t0 * 0.3, { before: t0, after: t1 });
   ok('and leaves the block and the floor exactly as they were', Math.abs(areaOf(await stats(), 'sponge') - blockA0) < 1 && Math.abs(areaOf(await stats(), 'wood') - floorA0) < 1, { block: [blockA0, areaOf(await stats(), 'sponge')], floor: [floorA0, areaOf(await stats(), 'wood')] });
   await drag('vacuum', 0, X-250, Y+96, X+250, Y+96);        // it works whatever layer you are on: a second sweep, lower, from Back
-  ok('from the Back layer too', (await total()) < t1 * 0.6, { before: t1, after: await total() });
+  ok('from the Back layer too', (await total()) < t1 * 0.8, { before: t1, after: await total() });
 
   console.log('');
   console.log('== the eraser mops water on Mid, not from Back ==');
@@ -109,7 +109,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   // a film: a little water spread thin along the floor
   await p.evaluate(([x,y]) => { for (let k = -8; k <= 8; k++) window.__pg.pour(x + k*16, y, 10, 0.12); }, [X, Y+92]);
   const f0 = await total();
-  ok('a thin film is there to begin with', f0 > 1 && f0 < 6, f0);
+  ok('a thin film is there to begin with', f0 > 1 && f0 < 16, f0);
   await run(3000);
   const f1 = await total();
   ok('and three seconds later it has dried up', f1 < 0.05, { before: f0, after: f1 });

@@ -3719,7 +3719,7 @@
      Both feed the same buoyancy code, so anything that floats in one
      floats in the other.
      ============================================================ */
-  var WATER_CELL = 16;
+  var WATER_CELL = 8;     // was 16; a saved level carries its own cell size and is resampled on load
   var WCOLS = Math.ceil(WORLD_W / WATER_CELL);
   var WROWS = Math.ceil(WORLD_H / WATER_CELL);
   var WCELLS = WCOLS * WROWS;
@@ -4066,6 +4066,44 @@
     }
   }
 
+  /* ---- Splashes -----------------------------------------------------
+     Something hitting the water fast throws up a spray and knocks the
+     surface: a dip where it went in and a crown either side, which the
+     simulation then rolls outward as a ripple. Size and speed scale it. */
+  function disturbWater(x, K, amt){
+    if (waterCount <= 0) return;
+    var c = Math.floor(x / WATER_CELL);
+    for (var k = -K; k <= K; k++){
+      var col = c + k;
+      if (col < 0 || col >= WCOLS) continue;
+      var ty = waterTopY[col];
+      if (ty !== ty) continue;
+      var row = Math.min(WROWS - 1, Math.floor(ty / WATER_CELL)), i = row*WCOLS + col;
+      if (waterSolid[i]) continue;
+      var w = 1 - Math.abs(k) / (K + 1);
+      if (Math.abs(k) <= K * 0.35){ waterLevels[i] = Math.max(0, waterLevels[i] - amt * 0.7 * w); }
+      else {
+        var d = amt * w, room = W_MAX - waterLevels[i];
+        if (d <= room) waterLevels[i] += d;
+        else { waterLevels[i] = W_MAX; if (row > 0 && !waterSolid[i - WCOLS]){ waterLevels[i - WCOLS] += d - room; noteWaterCell(col, row - 1); } }
+      }
+    }
+  }
+  function splashAt(x, y, size, vy){
+    var k = Math.min(1, Math.abs(vy) / 14), big = Math.min(2, Math.max(0.5, size / 40));
+    var n = Math.round((5 + 12 * k) * big);
+    puff(x, y, n, { color:"#8FD3F0", speed: 1.4 + 2.8*k, g:0.13, angle:-Math.PI/2, spread:1.8, life: 24 + 16*k, r: 2.6, jitter: size * 0.35 });
+    puff(x, y, Math.round(n * 0.6), { color:"#EAF8FD", speed: 2 + 3*k, g:0.13, angle:-Math.PI/2, spread:1.1, life: 22, r: 1.7, jitter: size * 0.25 });
+    disturbWater(x, Math.max(2, Math.round(size / WATER_CELL)), 0.25 + 0.5 * k);
+    if (k > 0.15) sfx("splash");
+  }
+  // where the surface is at x: painted water's, or the world's
+  function waterSurfaceY(x, fallback){
+    var s = waterSurfaceAt(x), wl = liveWater();
+    if (s !== null && (wl == null || s < wl)) return s;
+    return wl != null ? wl : fallback;
+  }
+
   // ---- save / restore ----
   function packWaterBytes(){
     var out = new Uint8Array(WCELLS);
@@ -4098,16 +4136,35 @@
     }
     return out;
   }
-  function unpackWaterSparse(arr){
+  function unpackWaterSparse(arr, savedCell){
     clearWater();
     if (!arr || !arr.length) return;
-    var n = 0;
-    for (var k = 0; k + 1 < arr.length; k += 2){
-      var i = arr[k];
-      if (i < 0 || i >= WCELLS) continue;
-      waterLevels[i] = arr[k+1]/200;
-      noteWaterCell(i % WCOLS, (i / WCOLS) | 0);
-      n++;
+    var n = 0, cell = savedCell || WATER_CELL;
+    if (cell === WATER_CELL){
+      for (var k = 0; k + 1 < arr.length; k += 2){
+        var i = arr[k];
+        if (i < 0 || i >= WCELLS) continue;
+        waterLevels[i] = arr[k+1]/200;
+        noteWaterCell(i % WCOLS, (i / WCOLS) | 0);
+        n++;
+      }
+    } else {
+      // a level saved on a coarser or finer grid: every old cell covers
+      // a block of new ones (or a fraction of one), at the same fullness
+      var oldCols = Math.ceil(WORLD_W / cell), ratio = cell / WATER_CELL;
+      for (var k2 = 0; k2 + 1 < arr.length; k2 += 2){
+        var oi = arr[k2], lv = arr[k2+1]/200;
+        var oc = oi % oldCols, orow = (oi / oldCols) | 0;
+        var c0 = Math.floor(oc * ratio), c1 = Math.max(c0, Math.ceil((oc + 1) * ratio) - 1);
+        var r0 = Math.floor(orow * ratio), r1 = Math.max(r0, Math.ceil((orow + 1) * ratio) - 1);
+        for (var rr = r0; rr <= r1; rr++) for (var cc = c0; cc <= c1; cc++){
+          if (cc < 0 || cc >= WCOLS || rr < 0 || rr >= WROWS) continue;
+          var ni = rr*WCOLS + cc;
+          if (waterLevels[ni] <= W_MIN) n++;
+          waterLevels[ni] = Math.min(W_MAX, Math.max(waterLevels[ni], lv));
+          noteWaterCell(cc, rr);
+        }
+      }
     }
     waterCount = n;
     recomputeWaterTops();
@@ -4135,7 +4192,7 @@
       if (floatSum){
         Body.applyForce(o.body, o.body.position, { x: 0, y: -o.body.mass*g.y*gscale*(floatSum/o.parts.length) });
       }
-      if (noWater) return;
+      if (noWater){ o.wet = false; return; }
       var wetness = 0;
       o.parts.forEach(function(p){
         var mat = matOf(p.plugin.materialId);
@@ -4167,9 +4224,15 @@
         // clean out of the world.
         var soak = Math.min(1, wetness / o.parts.length);
         var v = o.body.velocity;
+        // just gone in, and fast: a splash where it broke the surface
+        if (!o.wet && v.y > 3.5){
+          var bb = o.body.bounds;
+          splashAt(o.body.position.x, waterSurfaceY(o.body.position.x, bb.min.y), bb.max.x - bb.min.x, v.y);
+        }
+        o.wet = true;
         Body.setVelocity(o.body, { x: v.x * (1 - 0.05*soak), y: v.y * (1 - 0.06*soak) });
         Body.setAngularVelocity(o.body, o.body.angularVelocity * (1 - 0.06*soak));
-      }
+      } else o.wet = false;
     });
 
     // The player floats too — you bob up to the surface and can swim
@@ -4290,6 +4353,7 @@
      grows to that over a few steps. */
   function grabMinLen(){ var ch = 16; return Math.hypot(Math.max(0, PW/2 - ch), Math.max(0, PH/2 - ch)) + ch + 2; }
   var GRAB_REACH = 16;   // the default; the level's own is worldSettings.grabReach
+  var playerWet = false; // for the splash on the way in
   function grabReach(){ return worldNum("grabReach"); }
   var grabProbeReach = -1;
   var flying = false;
@@ -5065,6 +5129,8 @@
       // instead: sink with Down, rise with Up, and Space is a stroke
       // upward that can breach the surface.
       var wet = playerWetness();
+      if (wet > 0.1 && !playerWet && player.velocity.y > 3.5) splashAt(player.position.x, waterSurfaceY(player.position.x, player.position.y), PW * 1.4, player.velocity.y);
+      playerWet = wet > 0.1;
       if (wet > 0.35 && !grabConstraint){
         var vy = player.velocity.y;
         if (input.up) vy = -SWIM_SPEED;
@@ -6826,18 +6892,30 @@
       ctx.beginPath(); ctx.arc(anchor.x, anchor.y, 5.5, 0, Math.PI*2);
       ctx.fillStyle = "#F6ECD9"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.restore();
-    } else if (grabHeld && runner.enabled && !flying){
-      // hands open, reaching: light up what they could close on
-      var near = grabbablePartsNear();
+    } else if (grabHeld && !carried && runner.enabled && !flying){
+      // hands open, reaching: light up what they could close on. The
+      // OBJECT's own outline — not its convex physics parts, whose shared
+      // inner edges drew as bright lines straight through the thing (and
+      // through whatever was being carried, since carrying holds no
+      // constraint and this branch ran the whole time). Carson's "white
+      // line through the grabbable object".
+      var near = grabbablePartsNear(), seen = [];
       if (near.length){
         ctx.save();
         ctx.globalAlpha = 0.55 + Math.sin(performance.now()/180) * 0.2;
         ctx.strokeStyle = "#F6ECD9"; ctx.lineWidth = 3/camScale; ctx.lineJoin = "round";
         near.forEach(function(n){
-          var v = n.part.vertices;
-          ctx.beginPath(); ctx.moveTo(v[0].x, v[0].y);
-          for (var i = 1; i < v.length; i++) ctx.lineTo(v[i].x, v[i].y);
-          ctx.closePath(); ctx.stroke();
+          var o = n.obj;
+          if (seen.indexOf(o) >= 0 || !o.body) return;
+          seen.push(o);
+          ctx.save();
+          ctx.translate(o.body.position.x, o.body.position.y); ctx.rotate(o.body.angle);
+          for (var pi = 0; pi < o.pieces.length; pi++){
+            var pm = matOf(o.pieces[pi].m);
+            var canG = o.grabbable === true || (o.grabbable !== false && pm && pm.grabbable);
+            if (canG) ctx.stroke(mpPath(o.pieces[pi].poly));
+          }
+          ctx.restore();
         });
         ctx.restore();
       }
@@ -7019,11 +7097,29 @@
        read as a string of beads. Stray single cells still draw as drops. */
     var tops = [];          // per visible column: the open top cell's row and level, or -1
     for (var col = visC0; col <= visC1; col++) tops.push(-1, 0);
+    /* Interior cells — wet (or solid) on all four sides — need no round
+       edge: nothing of their outline shows. A row of them is one
+       rectangle, which the GPU fills for almost nothing, where a round
+       blob per cell was thousands of little arcs a frame once the cells
+       went to 8px. Only the cells on the outside of the mass are blobs. */
+    var runStart = -1;
+    var isWet = function(idx){ return waterLevels[idx] > W_MIN || waterSolid[idx]; };
     for (var row = visR0; row <= visR1; row++){
-      for (var col = visC0; col <= visC1; col++){
+      runStart = -1;
+      for (var col = visC0; col <= visC1 + 1; col++){
         var i = row*WCOLS + col;
-        var lv = waterLevels[i];
-        if (lv <= W_MIN) continue;
+        var lv = col <= visC1 ? waterLevels[i] : 0;
+        var interior = false;
+        if (lv > W_MIN && col <= visC1){
+          interior = row > 0 && row + 1 < WROWS && col > 0 && col + 1 < WCOLS &&
+                     isWet(i - WCOLS) && isWet(i + WCOLS) && isWet(i - 1) && isWet(i + 1) && waterLevels[i - WCOLS] > W_MIN;
+        }
+        if (interior){ if (runStart < 0) runStart = col; continue; }
+        if (runStart >= 0){
+          ctx.rect(runStart*WATER_CELL - 0.5, row*WATER_CELL - 0.5, (col - runStart)*WATER_CELL + 1, WATER_CELL + 1);
+          runStart = -1;
+        }
+        if (lv <= W_MIN || col > visC1) continue;
         var cx = col*WATER_CELL + WATER_CELL/2;
         var covered = row > 0 && waterLevels[i-WCOLS] > W_MIN;
         if (covered || lv >= 0.985){
@@ -11381,7 +11477,7 @@
       goal: goalPoint,
       bubbles: bubbles.map(function(b){ return { x:b.x, y:b.y }; }),
       objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps, links: linkSnaps,
-      water: packWaterSparse(),
+      water: packWaterSparse(), waterCell: WATER_CELL,
       world: packWorldSettings()
     };
   }
@@ -11454,7 +11550,7 @@
     goalPoint = data.goal || null;
     bubbles = (data.bubbles||[]).map(function(b){ return { x:b.x, y:b.y, collected:false }; });
     activeCheckpoint = 0;
-    unpackWaterSparse(data.water);
+    unpackWaterSparse(data.water, data.waterCell != null ? +data.waterCell : 16);   // levels before the cell size was saved were built at 16
   }
 
   onStep("beforeUpdate", function(){

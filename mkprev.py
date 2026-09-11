@@ -116,6 +116,9 @@ HOOK = """
     nudge: nudgeBrush, tool: function(){ return currentTool; },
     touching: function(poly,layer,reach){ return objectsTouching(poly,layer,reach); },
     waterInfo: function(){ return { count: waterCount, minRow: wMinRow, maxRow: wMaxRow }; },
+    waterTimed: function(n){ var t0 = performance.now(); for (var i = 0; i < n; i++) stepWater(); var t1 = performance.now(); for (var j = 0; j < n; j++) rebuildWaterSolid(true); var t2 = performance.now();
+      ctx.save(); for (var k = 0; k < n; k++) drawMaterialWater(); ctx.restore(); var t3 = performance.now();
+      return { step: +((t1 - t0) / n).toFixed(2), solid: +((t2 - t1) / n).toFixed(2), draw: +((t3 - t2) / n).toFixed(2) }; },
     pour: function(x, y, r, amt){ addWaterAt(x, y, r, amt); return waterCount; },
     waterLevelAt: function(x, y){ var i = waterIndexAt(x, y); return i < 0 ? null : +waterLevels[i].toFixed(4); },
     waterTotal: function(){ var t = 0; for (var i = 0; i < WCELLS; i++) t += waterLevels[i]; return +t.toFixed(3); },

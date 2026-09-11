@@ -643,6 +643,15 @@ part; the hold is the average of the collision's support points. `pointB` is
 the world offset, not `toBodyLocal`: Matter keeps it rotated itself (see
 Bolts), and the old grapple had that wrong.
 
+**The reach glow strokes the object's outline, not its physics parts.**
+With grab held and nothing held, grabbable material within reach glows.
+It used to stroke each convex *part*'s vertices, so the shared inner
+edges of a decomposed shape drew as bright lines straight through it —
+and since carrying holds no constraint, that branch ran the whole time
+something was carried. Carson's "bright white line through the grabbable
+object". Now: `mpPath` of each grabbable piece in the body's frame, and
+never while carrying.
+
 **While holding, walking pumps the swing rather than setting the speed.**
 The walk code sets the player's sideways velocity outright every step; on a
 grip that would kill the swing's momentum the instant the key was released.
@@ -713,6 +722,24 @@ full cells and is safe; a pool 1 cell deep and under 0.22 full is not,
 which is the point: that is the leak, the spray, the smear a draining
 pool leaves, "these little bits of water everywhere". `twater.js`: a
 film of 0.12 across a floor is gone in three seconds; a pool keeps 90%+.
+
+**Cells are 8px** (`WATER_CELL`; they were 16). A level file carries
+`waterCell`, and `unpackWaterSparse` resamples a save made on another
+grid — a file from before the field is taken as 16. Snapshots are in-
+session and need nothing. The cost was in the drawing, not the sim: the
+step is 0.18ms and the solid stamp 0.04ms for an 1100×250 pool, but a
+round blob per cell was 4,000 arcs a frame and the GPU took the frame to
+12.8ms. **Interior cells — wet or solid on all four sides — are drawn as
+one rectangle per run**, and only the cells on the outside of the mass
+are blobs: 0.19ms to draw, 8.3ms frames, same as no water at all.
+
+**Splashes.** `splashAt(x, y, size, vy)`: two puffs of spray scaled by
+size and speed, `disturbWater` knocking the surface (a dip in the middle
+columns, a crown either side, which the simulation rolls outward as a
+ripple), and the splash sound past a small speed. Fired for an object the
+step it first reads wet (`o.wet`) with `velocity.y > 3.5`, and for the
+player likewise (`playerWet`); static objects never. `waterSurfaceY`
+picks the painted surface or the world's, whichever is higher.
 
 **One surface, not beads.** `drawWater` used to draw every open top cell
 as its own droplet, so a calm pool read as a string of beads along the
