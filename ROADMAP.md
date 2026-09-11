@@ -78,7 +78,7 @@ the whole object. Covered by `tsel.js`.
 
 ### Other polish
 
-- **Water material** needs work and polish.
+- **Water material** needs work and polish. 2026-09-11: thin water dries up, a pool draws as one calm surface, a Vacuum tool takes water only, the eraser works by layer. More to come.
 - **Ice must get slipperier on a slope.**
 - **Level size at least 4x larger** than now — as large as possible.
 - **Replace "rope grab" with a proper LBP-style grab.** DONE — see below.

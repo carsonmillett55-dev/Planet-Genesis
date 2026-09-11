@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` | Playwright suites, 550 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` | Playwright suites, 565 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 550 checks + checkgeom, in order
+npm test                   # all 565 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -64,6 +64,7 @@ node tjump.js              # 10 — the jump: no wall climbing, grace off a ledg
 node tmover.js             # 22 — the Mover: two-click placing, once and bounce, riding it, a loose host held, wired, the knob, save/load
 node tworld.js             # 18 — the Water sensor, and the World changer's light and water, wired, latched, saved
 node tcreature.js          # 17 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, save/load
+node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
 node tcam.js               # 91 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -688,6 +689,42 @@ cleared by a jump, by hanging on a grab, and by a mode switch.
 `tjump.js` has both, plus the controls: too late off the ledge is just a
 fall, a press long before landing does nothing, a second press mid-jump
 adds nothing.
+
+## Water, the eraser and the vacuum
+
+**The eraser works on the layer you are on.** `eraseStep` used to take
+`objectsTouching(seg, null)` — any layer — so erasing a Mid detail ate the
+Back decoration behind it. It passes `stroke.layer` now, like a cut always
+did. Water is Mid's, so the eraser mops it only from Mid. Carson's ask.
+
+**The Vacuum** (`currentTool === "vacuum"`, on the Materials page beside
+Erase, `canvas.dataset.tool = "erase"` for the cursor) is an erase stroke
+with `stroke.vacuum` / `waterOnly`: `removeWaterAt` and nothing else — no
+objects on any layer, no bubbles, checkpoints or bolts, which a plain
+erase stroke also sweeps. Its cursor is the eraser's ring in water blue.
+`removeWaterAt` now reports whether it took anything (for the sound) and
+recomputes the column tops when paused, since no step will.
+
+**Thin water dries up.** `W_DRY` (0.22) and `W_EVAP` (0.0011 a step): in
+`stepWater`, before falling, a cell under `W_DRY` with less than half a
+cell of water beneath it loses `W_EVAP` — a film of 0.2 is gone in about
+two seconds, a fleck in less. The surface cell of a real pool sits on
+full cells and is safe; a pool 1 cell deep and under 0.22 full is not,
+which is the point: that is the leak, the spray, the smear a draining
+pool leaves, "these little bits of water everywhere". `twater.js`: a
+film of 0.12 across a floor is gone in three seconds; a pool keeps 90%+.
+
+**One surface, not beads.** `drawWater` used to draw every open top cell
+as its own droplet, so a calm pool read as a string of beads along the
+water line. Now, per visible column, the highest open top cell is found
+(`tops`), and runs of neighbouring columns whose tops are within a row of
+each other are drawn as one closed shape: a quadratic curve through the
+water line (with two slow ripples) along the top, straight down the
+sides, back along the bottoms of the top cells into the blob body below.
+A lone top, or a second open surface lower in the same column (a pool
+under a shelf), is still a droplet. Then a thin bright line along each
+surface and a soft wider glint under it. The blob body and the trimming
+redraw of static scenery are as they were.
 
 ## The physics clock
 

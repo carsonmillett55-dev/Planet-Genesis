@@ -1527,7 +1527,8 @@
     ["goal","🏆","Goal","Reach it in Play mode to complete the level."],
     ["cut","✂","Right-click to cut","With a material picked, the RIGHT mouse button cuts instead of painting — LittleBigPlanet's Triangle. Click to punch the brush's own shape clean out of whatever is under it, or drag to shave an edge; in a drag-out shape mode, right-drag to cut that rectangle, ellipse or triangle out instead. It only touches the layer you're building on, so it can't eat the decoration behind your work. Cut all the way through and the two halves become separate objects."],
     ["hole","◎","Holes","Paint one material inside another and it carves a socket for itself. Delete that inner piece — click it with the Move tool and press Del — and you're left with a real hole in the outer shape, edges and all."],
-    ["erase","🧹","Erase","Cuts painted material away — click or drag over what you want gone and it takes exactly the shape you swept, down to the pixel. Cut a shape clean in half and the two halves become separate objects. Mops up water too. Lives on the Materials tab."],
+    ["erase","🧹","Erase","Cuts painted material away on the layer you are on — click or drag over what you want gone and it takes exactly the shape you swept, down to the pixel. Cut a shape clean in half and the two halves become separate objects. Mops up water too, on the Mid layer. Lives on the Materials tab."],
+    ["vacuum","🌀","Vacuum","Sucks up water and nothing else. Lives on the Materials tab."],
     ["undo","↶","Undo & Redo","Ctrl+Z takes back your last edit — a stroke, a shape, a move, a rotation, a glue, a delete — however long ago you made it, and the toast tells you exactly what it undid. Ctrl+Y puts it back. Forty steps deep, and the ↶ ↷ buttons top right do the same thing."],
     ["camera","🔍","Camera","Scroll to zoom in and out around your cursor; middle-drag, or right-drag empty space with the Move tool, to look around the level. Press C or the ⦿ chip to snap the camera back to your character."],
     ["keys","⌨","1 to 9","1-4 are your tools — Move, Erase, Bolt, Checkpoint. 5-9 drop straight onto the five materials you'll reach for most: Timber, Grip Sponge, Bounce, Heavy Metal and Ice. In Play mode 1-4 pull faces instead."]
@@ -3737,6 +3738,14 @@
   var W_MIN = 0.0009;     // below this a cell counts as dry
   var W_MAX_FLOW = 0.9;   // most that can move in one step, for stability
   var W_SPREAD = 0.52;    // how fast neighbours level out
+  /* Drying. Water that is spread too thin to be a body of water — a film
+     left on a floor after a pool drained past, a droplet that leaked
+     through a crack, the spray off a splash — dries up rather than
+     lying about as specks for ever. A cell under W_DRY that has no real
+     water beneath it (so it is not the top of a pool) loses W_EVAP a
+     step: a film of 0.2 is gone in about two seconds, a fleck in less.
+     The surface cell of a proper pool sits on full cells and is safe. */
+  var W_DRY = 0.22, W_EVAP = 0.0011;
 
   // Given the water shared by a cell and the one above it, how much the
   // LOWER one should end up holding. Under a column of water the lower
@@ -3896,6 +3905,15 @@
         if (remaining <= W_MIN){ if (remaining !== 0) waterLevels[i] = 0; continue; }
         if (waterSolid[i]){ waterLevels[i] = 0; continue; }
 
+        // 0. dry up, if this is a film rather than the top of a pool
+        if (remaining < W_DRY){
+          var under = row + 1 < WROWS ? waterLevels[i + WCOLS] : 0;
+          if (under < 0.5){
+            remaining -= W_EVAP;
+            if (remaining <= W_MIN){ waterLevels[i] = 0; continue; }
+          }
+        }
+
         // 1. fall
         if (row + 1 < WROWS){
           var below = i + WCOLS;
@@ -3985,15 +4003,18 @@
     var c1 = Math.min(WCOLS-1, Math.floor((x + radius)/WATER_CELL));
     var r0 = Math.max(0, Math.floor((y - radius)/WATER_CELL));
     var r1 = Math.min(WROWS-1, Math.floor((y + radius)/WATER_CELL));
-    var rr = radius*radius;
+    var rr = radius*radius, took = false;
     for (var row = r0; row <= r1; row++){
       for (var col = c0; col <= c1; col++){
         var cx = col*WATER_CELL + WATER_CELL/2, cy = row*WATER_CELL + WATER_CELL/2;
         var dx = cx - x, dy = cy - y;
         if (dx*dx + dy*dy > rr) continue;
+        if (waterLevels[row*WCOLS + col] > W_MIN) took = true;
         waterLevels[row*WCOLS + col] = 0;
       }
     }
+    if (took && !runner.enabled) recomputeWaterTops();   // paused: nothing else will notice the change
+    return took;
   }
 
   // How submerged a dab of radius r sitting at (x,y) is, 0..1 — the
@@ -6938,9 +6959,9 @@
         drawBoltGlyph(BOLT_TOOL_KIND[currentTool], 0.85, 0, pair ? 0.55 : 0.3);
         ctx.restore();
         showCustom = true;
-      } else if (isMaterialTool() || currentTool === "erase"){
+      } else if (isMaterialTool() || currentTool === "erase" || currentTool === "vacuum"){
         var r = paintRadius();
-        var erasing = currentTool === "erase";
+        var erasing = currentTool === "erase" || currentTool === "vacuum", vac = currentTool === "vacuum";
         var fluid = !erasing && matOf(currentTool).isFluid;
         ctx.save();
         ctx.beginPath();
@@ -6951,7 +6972,7 @@
           ctx.globalAlpha = 1;
         }
         ctx.lineWidth = 2/camScale; ctx.setLineDash(erasing ? [5/camScale,4/camScale] : []);
-        ctx.strokeStyle = erasing ? "#D64545" : "rgba(43,27,18,.85)";
+        ctx.strokeStyle = vac ? "#2F86A6" : (erasing ? "#D64545" : "rgba(43,27,18,.85)");
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.restore();
@@ -6988,7 +7009,16 @@
     var RFULL = WATER_CELL*0.74;
     ctx.save();
     ctx.beginPath();
-    var surface = [];
+    /* The body: every covered or full cell is a round blob, and the blobs
+       merge into one mass in a single fill. The open surface is different:
+       each cell that has water below it but not above is the top of a
+       column, and a run of such tops across neighbouring columns is drawn
+       as ONE smooth surface — a curve through the water line, with a
+       slow ripple — down to the bottom of those cells, rather than the
+       row of separate droplets it used to be. That is what made a pool
+       read as a string of beads. Stray single cells still draw as drops. */
+    var tops = [];          // per visible column: the open top cell's row and level, or -1
+    for (var col = visC0; col <= visC1; col++) tops.push(-1, 0);
     for (var row = visR0; row <= visR1; row++){
       for (var col = visC0; col <= visC1; col++){
         var i = row*WCOLS + col;
@@ -7001,31 +7031,87 @@
           ctx.moveTo(cx + RFULL, cy);
           ctx.arc(cx, cy, RFULL, 0, TAU);
         } else {
-          // an open top cell: a smaller droplet whose crown sits at the
-          // water line, which ripples
-          var fill = Math.min(1, lv);
-          var rr = Math.max(WATER_CELL*0.3, RFULL*(0.5 + fill*0.5));
-          var topY = row*WATER_CELL + WATER_CELL*(1-fill) + Math.sin(t*1.6 + col*0.55)*1.3;
-          var scy = topY + rr*0.82;
-          ctx.moveTo(cx + rr, scy);
-          ctx.arc(cx, scy, rr, 0, TAU);
-          surface.push(cx, topY, rr);
+          var ti = (col - visC0) * 2;
+          if (tops[ti] < 0){ tops[ti] = row; tops[ti+1] = lv; }   // the highest open top in this column
+          else {
+            // a second, lower open surface in the same column (a pool under a shelf): a drop
+            var rr0 = Math.max(WATER_CELL*0.3, RFULL*(0.5 + Math.min(1, lv)*0.5));
+            var scy0 = row*WATER_CELL + WATER_CELL*(1-Math.min(1, lv)) + rr0*0.82;
+            ctx.moveTo(cx + rr0, scy0); ctx.arc(cx, scy0, rr0, 0, TAU);
+          }
         }
       }
+    }
+    // the surfaces: runs of open tops in neighbouring columns whose rows
+    // are within one of each other, each run one closed shape
+    var crest = [];
+    var c = visC0;
+    while (c <= visC1){
+      var ti0 = (c - visC0) * 2;
+      if (tops[ti0] < 0){ c++; continue; }
+      var run = [c];
+      while (run.length && c + 1 <= visC1){
+        var tn = (c + 1 - visC0) * 2;
+        if (tops[tn] < 0 || Math.abs(tops[tn] - tops[ti0 + (run.length - 1) * 2]) > 1) break;
+        run.push(++c);
+      }
+      c++;
+      if (run.length === 1){
+        // a lone top: a droplet, as before
+        var lc = run[0], lti = (lc - visC0) * 2, lfill = Math.min(1, tops[lti+1]);
+        var lrr = Math.max(WATER_CELL*0.3, RFULL*(0.5 + lfill*0.5));
+        var lcy = tops[lti]*WATER_CELL + WATER_CELL*(1-lfill) + lrr*0.82, lcx = lc*WATER_CELL + WATER_CELL/2;
+        ctx.moveTo(lcx + lrr, lcy); ctx.arc(lcx, lcy, lrr, 0, TAU);
+        continue;
+      }
+      // the water line, one point per column, rippling gently
+      var pts = [];
+      for (var k = 0; k < run.length; k++){
+        var rc = run[k], rti = (rc - visC0) * 2, rfill = Math.min(1, tops[rti+1]);
+        var ry = tops[rti]*WATER_CELL + WATER_CELL*(1 - rfill) + Math.sin(t*1.3 + rc*0.7)*1.1 + Math.sin(t*0.6 + rc*0.23)*0.8;
+        pts.push(rc*WATER_CELL + WATER_CELL/2, ry, (tops[rti] + 1) * WATER_CELL + 1);   // x, top, bottom of the top cell
+      }
+      var x0 = run[0]*WATER_CELL - 1, x1 = (run[run.length-1] + 1)*WATER_CELL + 1;
+      ctx.moveTo(x0, pts[1]);
+      ctx.lineTo(pts[0], pts[1]);
+      for (var q = 3; q < pts.length; q += 3){
+        var mx = (pts[q-3] + pts[q]) / 2, my = (pts[q-2] + pts[q+1]) / 2;
+        ctx.quadraticCurveTo(pts[q-3], pts[q-2], mx, my);
+      }
+      ctx.lineTo(pts[pts.length-3], pts[pts.length-2]);
+      ctx.lineTo(x1, pts[pts.length-2]);
+      // and back along the bottoms of the top cells, into the body below
+      for (var q2 = pts.length - 3; q2 >= 0; q2 -= 3){
+        var bx = pts[q2], by = pts[q2+2];
+        if (q2 === pts.length - 3) ctx.lineTo(x1, by);
+        ctx.lineTo(bx + WATER_CELL/2 + 1, by); ctx.lineTo(bx - WATER_CELL/2 - 1, by);
+      }
+      ctx.lineTo(x0, pts[2]);
+      ctx.closePath();
+      crest.push(pts);
     }
     ctx.globalAlpha = 0.76;
     ctx.fillStyle = MATERIALS.water.color;
     ctx.fill();
-    // a brighter crest along the open surface so it reads as liquid
-    if (surface.length){
-      ctx.beginPath();
-      for (var s = 0; s < surface.length; s += 3){
-        ctx.moveTo(surface[s] + surface[s+2]*0.9, surface[s+1] + surface[s+2]*0.5);
-        ctx.arc(surface[s], surface[s+1] + surface[s+2]*0.5, surface[s+2]*0.9, 0, TAU);
+    // a thin bright line along each surface, and a softer glint below it
+    if (crest.length){
+      ctx.lineJoin = "round"; ctx.lineCap = "round";
+      for (var pass = 0; pass < 2; pass++){
+        ctx.beginPath();
+        for (var ci = 0; ci < crest.length; ci++){
+          var cp = crest[ci];
+          ctx.moveTo(cp[0], cp[1] + (pass ? 3 : 0));
+          for (var q3 = 3; q3 < cp.length; q3 += 3){
+            var mx2 = (cp[q3-3] + cp[q3]) / 2, my2 = (cp[q3-2] + cp[q3+1]) / 2 + (pass ? 3 : 0);
+            ctx.quadraticCurveTo(cp[q3-3], cp[q3-2] + (pass ? 3 : 0), mx2, my2);
+          }
+          ctx.lineTo(cp[cp.length-3], cp[cp.length-2] + (pass ? 3 : 0));
+        }
+        ctx.globalAlpha = pass ? 0.16 : 0.55;
+        ctx.lineWidth = pass ? 5 : 1.6;
+        ctx.strokeStyle = "#EAF8FD";
+        ctx.stroke();
       }
-      ctx.globalAlpha = 0.32;
-      ctx.fillStyle = "#EAF8FD";
-      ctx.fill();
     }
     ctx.restore();
 
@@ -7811,13 +7897,19 @@
     eraseChip.innerHTML = '<div class="swatch tool">🧹</div><label>Erase</label>';
     eraseChip.addEventListener("click", function(){ currentTool="erase"; canvas.dataset.tool="erase"; renderPersonalMenu(); });
     grid.appendChild(eraseChip);
+    var vacChip = document.createElement("div");
+    vacChip.className = "chip" + (currentTool==="vacuum" ? " active" : "");
+    vacChip.innerHTML = '<div class="swatch tool">🌀</div><label>Vacuum</label>';
+    vacChip.title = "Sucks up water and nothing else";
+    vacChip.addEventListener("click", function(){ currentTool="vacuum"; canvas.dataset.tool="erase"; renderPersonalMenu(); });
+    grid.appendChild(vacChip);
     el.appendChild(grid);
 
-    if (isMaterialTool() || currentTool === "erase"){
-      var isErase = currentTool === "erase";
+    if (isMaterialTool() || currentTool === "erase" || currentTool === "vacuum"){
+      var isErase = currentTool === "erase" || currentTool === "vacuum", isVac = currentTool === "vacuum";
       var isFluid = !isErase && !!matOf(currentTool).isFluid;
       var brushHead = document.createElement("h3");
-      brushHead.textContent = isErase ? "Eraser" : (isFluid ? "Pouring water" : matOf(currentTool).label + " brush");
+      brushHead.textContent = isVac ? "Vacuum" : (isErase ? "Eraser" : (isFluid ? "Pouring water" : matOf(currentTool).label + " brush"));
       el.appendChild(brushHead);
 
       /* Colour. The same material in two colours behaves as two
@@ -7895,7 +7987,7 @@
         el.appendChild(shapeRow);
       }
 
-      el.appendChild(sliderRow(isErase ? "Eraser size" : (isFluid ? "Pour size" : "Brush size"),
+      el.appendChild(sliderRow(isVac ? "Vacuum size" : (isErase ? "Eraser size" : (isFluid ? "Pour size" : "Brush size")),
         paintScale, PAINT_SCALE_MIN, PAINT_SCALE_MAX, 0.05,
         function(v){ paintScale = v; persistPaintBrush(); }, function(v){ return Math.round(v*BRUSH_R*2) + "px"; }));
 
@@ -7914,8 +8006,10 @@
       }
 
       var tip = document.createElement("div"); tip.className = "noteText";
-      tip.textContent = isErase
-        ? "The dashed outline on your cursor shows exactly what the eraser will take out — including water. It cuts the shape rather than removing whole chunks, so you can shave an edge as finely as you like."
+      tip.textContent = isVac
+        ? "Drag over water to suck it up. It takes water and only water — nothing you built is touched, on any layer."
+        : isErase
+        ? "The dashed outline on your cursor shows exactly what the eraser will take out, on the layer you are on — water too, on the Mid layer. It cuts the shape rather than removing whole chunks, so you can shave an edge as finely as you like."
         : (paintMode !== "brush"
           ? (isFluid
             ? "Drag out an area and let go to fill it with water. Hold Shift to keep it square. Mid layer only."
@@ -8750,16 +8844,19 @@
   var FUSE_REACH = 4;                // how close counts as "touching"
 
   function strokeQuality(){ return camScale >= 1.6 ? 0.18 : 0.3; }
-  /* `cut` is LittleBigPlanet's Triangle: the material brush, used the
+    /* `cut` is LittleBigPlanet's Triangle: the material brush, used the
      other way round. It takes exactly the footprint you can already see
      on the cursor — same shape, same size — and only on the layer you
      are building on, so a cut can't quietly eat the decoration behind
-     what you are working on. The Erase tool stays a slightly oversized
-     round brush that works through every layer at once. */
+     what you are working on. The Erase tool is a slightly oversized
+     round brush, and it too works only on the layer you are on (Carson:
+     "the eraser only erases the layer you are in"); water is Mid's, so
+     it mops water only from Mid. The Vacuum takes water and nothing else. */
   function beginStroke(pt, materialId, isErase, cut){
+    var vacuum = currentTool === "vacuum";
     stroke = {
-      mat: materialId, erase: !!isErase, cut: !!cut, layer: buildLayer,
-      waterOnly: !!(cut && matOf(currentTool) && matOf(currentTool).isFluid),
+      mat: materialId, erase: !!isErase, cut: !!cut, layer: buildLayer, vacuum: vacuum,
+      waterOnly: vacuum || !!(cut && matOf(currentTool) && matOf(currentTool).isFluid),
       r: (isErase && !cut) ? paintRadius() + 8 : paintRadius(),
       shape: (isErase && !cut) ? "circle" : paintShape,
       pts: [[pt.x, pt.y]], seg: 0, poly: null, done: null
@@ -8978,7 +9075,7 @@
       lastPaint = pt;
       return;
     }
-    if (currentTool === "erase"){
+    if (currentTool === "erase" || currentTool === "vacuum"){
       beginStroke(pt, null, true, false);
       eraseStep();
       lastPaint = pt;
@@ -9267,9 +9364,10 @@
     if (!seg.length) return;
     var pt = { x: pts[n-1][0], y: pts[n-1][1] };
     beginBulk();
-    removeWaterAt(pt.x, pt.y, stroke.r);       // the eraser mops up water too
+    var hadWater = false;
+    if (stroke.layer === MID_LAYER || stroke.vacuum) hadWater = removeWaterAt(pt.x, pt.y, stroke.r);   // water is Mid's: the eraser mops it there, the vacuum anywhere
     var bit = false;
-    (stroke.waterOnly ? [] : objectsTouching(seg, stroke.cut ? stroke.layer : null, 0)).forEach(function(o){
+    (stroke.waterOnly ? [] : objectsTouching(seg, stroke.layer, 0)).forEach(function(o){
       eraseNote(o);
       if (!subPolyFromObject(o, seg, GEOM_TOL)) return;
       bit = true;
@@ -9282,7 +9380,9 @@
       else rebuildFromPieces(o);
     });
     if (bit) sfx("erase");
+    else if (stroke.vacuum && hadWater){ sfx("pour"); puff(pt.x, pt.y, 2, { color:"#8FD3F0", speed:1.2, g:-0.04, r:2.2, jitter: stroke.r*0.6, life:16 }); }
     if (!painting){ endBulk(); finishErase(); }
+    if (stroke.vacuum) return;                 // water only: bubbles, checkpoints and bolts are none of its business
     bubbles = bubbles.filter(function(b){ return dist(b, pt) >= Math.max(24, stroke.r); });
     for (var i = checkpoints.length - 1; i >= 1; i--){
       if (dist(checkpoints[i], pt) < Math.max(34, stroke.r)) checkpoints.splice(i, 1);
@@ -10856,8 +10956,8 @@
       shapeDrag = { a:a, b:a, square: e.shiftKey };
       return;
     }
-    pushUndo(currentTool === "erase" ? "erasing"
-             : (matOf(currentTool) ? "painting " + matOf(currentTool).label : "that"));
+    pushUndo(currentTool === "erase" ? "erasing" : (currentTool === "vacuum" ? "vacuuming water"
+             : (matOf(currentTool) ? "painting " + matOf(currentTool).label : "that")));
     painting = true; lastPaint = null; stroke = null;
     beginBulk();                       // one rebuild when the stroke ends
     paintAt(pt2);
