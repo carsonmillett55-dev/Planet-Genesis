@@ -324,7 +324,11 @@ hard stop: past the edge the free body is turned back to it about the pivot
 with `Body.rotate` *without* `updateVelocity` — so `positionPrev` moves with
 the body and the Verlet step does not move it a second time — and any spin
 still heading out is killed. While the bolt is selected, `drawBoltLimitArc`
-draws the allowed swing as a wedge about the pivot, as LBP does.
+draws the allowed swing as a wedge about the pivot, as LBP does. A wobble
+bolt draws the same wedge for its swing, in its own colour, with an arrow
+for the way it sets off; a selected piston draws its reach along the rod
+(`drawPistonReach`) — a band from shortest to longest, numbered ticks, and
+a mark where it is now.
 
 **A fresh motor is `BOLT_DEFAULT_SPEED = 0.02`**, about 11 rpm. New bolts do
 not inherit `worldSettings.motorSpeed`; that value exists only so old levels

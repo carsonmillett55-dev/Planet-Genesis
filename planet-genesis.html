@@ -5533,6 +5533,34 @@
     }
     ctx.globalAlpha = 1;
   }
+  /* A piston's reach, along its own line: a band from shortest to longest,
+     a tick and a number at each end, and a mark where the far end is now. */
+  function drawPistonReach(l, e){
+    var ang = Math.atan2(e.b.y - e.a.y, e.b.x - e.a.x), s = 1/camScale;
+    ctx.save();
+    ctx.translate(e.a.x, e.a.y); ctx.rotate(ang);
+    ctx.beginPath(); ctx.rect(l.min, -9*s, l.max - l.min, 18*s);
+    ctx.fillStyle = "rgba(242,183,5,0.22)"; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(l.min, -9*s); ctx.lineTo(l.max, -9*s); ctx.moveTo(l.min, 9*s); ctx.lineTo(l.max, 9*s);
+    ctx.lineWidth = 1.5*s; ctx.strokeStyle = "#F2B705"; ctx.setLineDash([5*s, 4*s]); ctx.stroke(); ctx.setLineDash([]);
+    [[l.min, Math.round(l.min)], [l.max, Math.round(l.max)]].forEach(function(t){
+      ctx.beginPath(); ctx.moveTo(t[0], -16*s); ctx.lineTo(t[0], 16*s);
+      ctx.lineWidth = 3*s; ctx.strokeStyle = "#F2B705"; ctx.stroke();
+      ctx.lineWidth = 1.2*s; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.save();
+      ctx.translate(t[0], 28*s); ctx.scale(s, s);
+      // keep the number upright whichever way the rod points
+      if (Math.abs(ang) > Math.PI/2) ctx.rotate(Math.PI);
+      ctx.font = "bold 11px 'Baloo 2', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(246,236,217,0.9)"; ctx.strokeText(t[1] + "", 0, 0);
+      ctx.fillStyle = "#2B1B12"; ctx.fillText(t[1] + "", 0, 0);
+      ctx.restore();
+    });
+    // where it is now
+    ctx.beginPath(); ctx.moveTo(l.len, -12*s); ctx.lineTo(l.len, 12*s);
+    ctx.lineWidth = 3*s; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+    ctx.restore();
+  }
   function drawLinks(layer){
     links.forEach(function(l){
       if (l.layer !== layer) return;
@@ -5542,6 +5570,7 @@
         var e = linkEnds(l);
         ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
         ctx.lineWidth = 14/camScale; ctx.strokeStyle = "rgba(242,183,5,0.35)"; ctx.lineCap = "round"; ctx.stroke();
+        if (l.kind === "piston") drawPistonReach(l, e);
       }
       drawLinkGlyph(l, 1);
       ctx.restore();
@@ -5584,22 +5613,27 @@
      lower limit to the upper, and a line where the arm is now. Angles are
      relative to the rest pose, so the wedge is placed off the free body's
      current direction minus its current relative angle. */
-  function drawBoltLimitArc(b){
+  function drawBoltLimitArc(b, loDeg, hiDeg, col){
     var c = b.constraint, A = c.bodyA, B = c.bodyB;
     var target = !A.isStatic ? A : (!B.isStatic ? B : A);
     var other = target === A ? B : A, sign = target === A ? 1 : -1;
     var pv = boltAnchorOn(b, other);
     var dNow = Math.atan2(target.position.y - pv.y, target.position.x - pv.x);
     var rest = dNow - sign * relAngle(b);
-    var a0 = rest + sign * b.minA * Math.PI/180, a1 = rest + sign * b.maxA * Math.PI/180;
+    if (loDeg == null) loDeg = b.minA;
+    if (hiDeg == null) hiDeg = b.maxA;
+    var a0 = rest + sign * loDeg * Math.PI/180, a1 = rest + sign * hiDeg * Math.PI/180;
     var R = 84 / camScale;
     ctx.save();
     ctx.translate(pv.x - boltWorldPoint(b).x, pv.y - boltWorldPoint(b).y);
     ctx.beginPath(); ctx.moveTo(0, 0);
     ctx.arc(0, 0, R, Math.min(a0, a1), Math.max(a0, a1));
     ctx.closePath();
-    ctx.fillStyle = "rgba(242,183,5,0.26)"; ctx.fill();
-    ctx.lineWidth = 2.5/camScale; ctx.strokeStyle = "#F2B705"; ctx.stroke();
+    ctx.fillStyle = col ? col.fill : "rgba(242,183,5,0.26)"; ctx.fill();
+    ctx.lineWidth = 2.5/camScale; ctx.strokeStyle = col ? col.line : "#F2B705"; ctx.stroke();
+    // the rest pose, faint, so the wedge reads as "either side of this"
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(rest)*R, Math.sin(rest)*R);
+    ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "rgba(43,27,18,0.45)"; ctx.setLineDash([5/camScale, 4/camScale]); ctx.stroke(); ctx.setLineDash([]);
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(dNow)*R*1.08, Math.sin(dNow)*R*1.08);
     ctx.lineWidth = 3/camScale; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
     ctx.restore();
@@ -5613,6 +5647,21 @@
       ctx.save();
       ctx.translate(p.x, p.y);
       if (b === selectedBolt && mode === "build" && b.limit && b.kind !== "motor" && b.kind !== "wobble") drawBoltLimitArc(b);
+      if (b === selectedBolt && mode === "build" && b.kind === "wobble"){
+        drawBoltLimitArc(b, -b.angle, b.angle, { fill:"rgba(127,212,217,0.26)", line:"#2A7B8C" });
+        // a little arrow on the arc for the way it sets off
+        var cw = b.constraint, tA = !cw.bodyA.isStatic ? cw.bodyA : cw.bodyB, oB = tA === cw.bodyA ? cw.bodyB : cw.bodyA;
+        var sg = tA === cw.bodyA ? 1 : -1, pvw = boltAnchorOn(b, oB);
+        var dN = Math.atan2(tA.position.y - pvw.y, tA.position.x - pvw.x), rst = dN - sg * relAngle(b);
+        var aArrow = rst + sg * boltDir(b) * Math.min(b.angle, 30) * Math.PI/180 * 0.6, Rw = 84/camScale;
+        ctx.save();
+        ctx.translate(pvw.x - p.x, pvw.y - p.y);
+        ctx.translate(Math.cos(aArrow)*Rw, Math.sin(aArrow)*Rw);
+        ctx.rotate(aArrow + sg * boltDir(b) * Math.PI/2);
+        ctx.beginPath(); ctx.moveTo(6/camScale, 0); ctx.lineTo(-4/camScale, -5/camScale); ctx.lineTo(-4/camScale, 5/camScale); ctx.closePath();
+        ctx.fillStyle = "#2A7B8C"; ctx.fill();
+        ctx.restore();
+      }
       if (b === selectedBolt && mode === "build"){
         ctx.beginPath(); ctx.arc(0, 0, 17, 0, Math.PI*2);
         ctx.lineWidth = 3/camScale; ctx.strokeStyle = "#F2B705";
