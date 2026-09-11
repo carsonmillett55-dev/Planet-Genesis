@@ -48,9 +48,11 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await play();
   ok('entering Play takes the level\'s zoom', Math.abs((await view()).zoom - 0.6) < 0.01, (await view()).zoom);
   const ws = await p.evaluate(() => window.__pg.worldSize());
-  await standAt(ws.w/2, ws.h/2); await p.waitForTimeout(200);   // mid-map, where the edges do not clamp the view
+  // mid-map, where the edges do not clamp the view — and held there, so the view and the character can be read together
+  await p.evaluate(([x,y]) => { window.__pg.playerTo(x, y); window.__pg.paused(true); }, [ws.w/2, ws.h/2]); await p.waitForTimeout(200);
   const c0 = await centre(), pp0 = await pos();
-  ok('and looks at the character', Math.abs(c0.x - pp0.x) < 2 && Math.abs(c0.y - pp0.y) < 40, { centre: c0, player: pp0 });
+  await p.evaluate(() => window.__pg.paused(false));
+  ok('and looks at the character', Math.abs(c0.x - pp0.x) < 2 && Math.abs(c0.y - pp0.y) < 2, { centre: c0, player: pp0 });
   const mid = await w2p(pp0.x, pp0.y);
   await p.mouse.move(mid.x, mid.y); await p.mouse.wheel(0, -300); await p.waitForTimeout(150);
   ok('the wheel does nothing in Play', Math.abs((await view()).zoom - 0.6) < 0.01, (await view()).zoom);
@@ -277,6 +279,81 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(sv => window.__pg.load(sv), svZ); await p.waitForTimeout(300);
   const gzB = await theCamera();
   ok('and a load brings them back', gzB && Math.abs(gzB.zone.w - g4.zone.w) < 0.01 && Math.abs(gzB.zone.dy - g4.zone.dy) < 0.01 && Math.abs(gzB.view.dx - g4.view.dx) < 0.01, gzB && { zone: gzB.zone, view: gzB.view });
+
+  console.log('');
+  console.log('== grab the zone anywhere inside it; the frame is the shot as it really lands ==');
+  await fresh(); await camMid(); await p.waitForTimeout(150);
+  await rect('wood', 1, MX-380, MY+100, MX+600, MY+140);
+  await rect('wood', 0, MX+300, MY-100, MX+420, MY+20);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.setLayer(0); window.__pg.setTool('camera'); });
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [MX+360, MY-40]);
+  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 1.5, tracking: 0, speed: 1, zone: { dx: -400, dy: 100, w: 600, h: 120 }, view: { dx: 150, dy: 60 } }), (await theCamera()).id);
+  await p.evaluate(id => window.__pg.selectGadget(id), (await theCamera()).id); await p.evaluate(() => { window.__pg.setTool('move'); });
+  await p.waitForTimeout(150);
+  const gi0 = await theCamera();
+  const zc = { x: MX+360 + gi0.zone.dx, y: MY-40 + gi0.zone.dy };
+  await drag(zc.x + 40, zc.y + 10, zc.x + 40 + 70, zc.y + 10 + 30);         // from well inside the box, nowhere near an edge
+  const gi1 = await theCamera();
+  ok('dragging from the middle of the zone box moves it', Math.abs(gi1.zone.dx - (gi0.zone.dx + 70)) < 3 && Math.abs(gi1.zone.dy - (gi0.zone.dy + 30)) < 3 && gi1.zone.w === gi0.zone.w, gi1.zone);
+  // the honest frame: tracking at 50%, the player standing somewhere — the shot sits halfway
+  await p.evaluate(id => window.__pg.gadgetSet(id, { tracking: 0.5 }), gi1.id);
+  await p.evaluate(() => window.__pg.setFlying(true));
+  await standAt(MX-100, MY-300); await p.waitForTimeout(200);
+  const pp = await pos(), vc = { x: MX+360 + gi1.view.dx, y: MY-40 + gi1.view.dy };
+  const shot = await p.evaluate(id => window.__pg.camShot(id), gi1.id);
+  const sc = { x: shot.x + shot.w/2, y: shot.y + shot.h/2 };
+  ok('with tracking at 50% the drawn frame sits halfway between the view spot and the player', Math.abs(sc.x - (vc.x + pp.x)/2) < 3 && Math.abs(sc.y - (vc.y + pp.y)/2) < 3, { shot: sc, view: vc, player: pp });
+  // and it agrees with what Play actually shows from there
+  await play();
+  await standAt(MX-100, MY-300); await p.waitForTimeout(100);
+  await p.evaluate(() => window.__pg.playerTo(0, 0));   // (a nudge so the physics has settled at the same spot)
+  await standAt(MX+360-400+70+100, MY+60); await p.waitForTimeout(700);   // inside the zone, so it takes over
+  const ppP = await pos();
+  const shotP = await p.evaluate(id => window.__pg.camShot(id), (await theCamera()).id);
+  const cP = await centre();
+  ok('and in Play the view lands exactly on the frame, for wherever the player is', Math.abs(cP.x - (shotP.x + shotP.w/2)) < 6 && Math.abs(cP.y - (shotP.y + shotP.h/2)) < 6, { view: cP, frame: [shotP.x + shotP.w/2, shotP.y + shotP.h/2], player: ppP });
+  await build(); await camMid();
+  // dragging the frame with tracking on still lands the frame under the cursor
+  const gi2 = await theCamera();
+  await p.evaluate(id => window.__pg.selectGadget(id), gi2.id); await p.evaluate(() => { window.__pg.setTool('move'); window.__pg.setFlying(true); });
+  await standAt(MX-100, MY-300); await p.waitForTimeout(200);
+  const sh0 = await p.evaluate(id => window.__pg.camShot(id), gi2.id);
+  await drag(sh0.x, sh0.y + sh0.h/2 + 40, sh0.x + 80, sh0.y + sh0.h/2 + 40);
+  const sh1 = await p.evaluate(id => window.__pg.camShot(id), gi2.id);
+  ok('dragging the frame by 80px moves the frame by 80px, tracking or not', Math.abs((sh1.x - sh0.x) - 80) < 4 && Math.abs(sh1.y - sh0.y) < 4, { before: sh0.x, after: sh1.x });
+  const gi3 = await theCamera();
+  ok('(which means the view spot moved twice as far)', Math.abs((gi3.view.dx - gi2.view.dx) - 160) < 6, { before: gi2.view.dx, after: gi3.view.dx });
+
+  console.log('');
+  console.log('== a camera can sit in mid-air, on any layer ==');
+  await fresh(); await camMid(); await p.waitForTimeout(150);
+  await rect('wood', 1, MX-380, MY+100, MX+600, MY+140);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.setLayer(2); window.__pg.setTool('camera'); });   // the Front layer, with nothing on it
+  const sky = await w2p(MX+360, MY-40);
+  await p.mouse.click(sky.x, sky.y); await p.waitForTimeout(200);
+  const air = await theCamera();
+  ok('clicking empty sky with the Front layer picked places a camera there', !!air && air.obj === null && air.layer === 2 && Math.abs(air.x - (MX+360)) < 2, air);
+  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 0.5, tracking: 0, speed: 1, zone: { dx: 0, dy: 0, w: 440, h: 440 } }), air.id);
+  await play();
+  await standAt(MX+360, MY+60); await p.waitForTimeout(600);
+  ok('and it works from there', (await p.evaluate(() => window.__pg.playCam())).active !== null && Math.abs((await view()).zoom - 0.5) < 0.03, (await view()).zoom);
+  await build(); await camMid();
+  const svA = await p.evaluate(() => window.__pg.serialize('air'));
+  const ga = svA.gadgets.filter(g => g.kind === 'camera')[0];
+  ok('the save keeps a camera with no object under it', ga && ga.o === null && ga.layer === 2, ga);
+  await p.evaluate(sv => window.__pg.load(sv), svA); await p.waitForTimeout(300);
+  const gaB = await theCamera();
+  ok('and a load brings it back where it was', gaB && gaB.obj === null && gaB.layer === 2 && Math.abs(gaB.x - (MX+360)) < 2, gaB);
+  // dragging it: onto the floor attaches it, back into the air frees it
+  await p.evaluate(id => window.__pg.selectGadget(id), gaB.id); await p.evaluate(() => { window.__pg.setTool('move'); });
+  await drag(MX+360, MY-40, MX+100, MY+120);
+  const gOn = await theCamera();
+  ok('dragged onto the floor, it rides the floor', gOn && gOn.obj !== null && gOn.layer === 1, gOn && { obj: gOn.obj, layer: gOn.layer });
+  await drag(MX+100, MY+120, MX+100, MY-200);
+  const gOff = await theCamera();
+  ok('dragged back into the air, it is free again', gOff && gOff.obj === null && Math.abs(gOff.y - (MY-200)) < 2, gOff && { obj: gOff.obj, y: gOff.y });
 
   console.log('');
   console.log('== in Build, walking into a zone shows the shot; flying brings the editor back ==');

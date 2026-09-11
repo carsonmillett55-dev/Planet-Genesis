@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` | Playwright suites, 465 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` | Playwright suites, 476 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 465 checks + checkgeom, in order
+npm test                   # all 476 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -61,7 +61,7 @@ node tgadget.js            # 49 — player sensor, button, lever, wires, what th
 node tlink.js              # 59 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
 node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint; the weight slider
 node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
-node tcam.js               # 63 — Play's own zoom, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, wired, hold, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
+node tcam.js               # 74 — Play's own zoom, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, hold, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -843,7 +843,27 @@ zoom from the frame's width (the frame keeps the screen's shape) and
 moves the view so the fixed corner stays. One undo step per drag, pushed
 on the first real move, so a click that moves nothing leaves nothing. The
 box has Width/Height sliders for the zone and "centre it on the camera"
-buttons for both, and the Zoom slider is the frame's other handle.
+buttons for both, and the Zoom slider is the frame's other handle. The
+zone box also moves from **anywhere inside it** — as a second pass in
+`beginDrag`, after gadgets, bolts and links have had their chance, so the
+camera sitting in its own zone is still clickable.
+
+**The gold frame is the truth, not the intent.** It draws at
+`cameraShotRect`: the view pulled toward the player by tracking *for
+where the player stands now*, then clamped to the map exactly as the Play
+camera is. With tracking at 50% the frame sits halfway between the ⌖
+view spot and the player and moves as they do; the test checks Play lands
+on it to the pixel. Dragging the frame moves the *frame* by the cursor's
+delta and puts the view spot wherever that requires (`cameraViewForShot`,
+the inverse: at 100% tracking the view is irrelevant and is left alone).
+Carson found the intent-only frame "not super accurate", which with
+tracking at 50% it was not.
+
+**A camera needs no host.** `gadgetNeedsHost(kind)` is false for cameras
+only: placed on empty air it stays there (`obj: null`, `local: null`,
+`gadgetWorld` falls back to `pos`) on the layer it was placed, saved with
+`o: null`, dragged onto an object to ride it and back into the air to be
+free again. Every other gadget still needs something to sit on.
 
 **Build previews the shot.** Walking (not flying) into a zone in Build
 shows what the camera will do — glide, hold, tracking, everything — as
