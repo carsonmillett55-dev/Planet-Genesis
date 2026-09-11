@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` | Playwright suites, 344 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` | Playwright suites, 351 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 344 checks + checkgeom, in order
+npm test                   # all 351 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -59,7 +59,7 @@ node tmenu.js              # 19 — the personal menu's sections, pages and grad
 node tbolt.js              # 50 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, save/load
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
 node tlink.js              # 49 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load
-node tgrab.js              # 30 — grabbing: by key or mouse, swinging, dragging, carrying, the grabbable toggle; sprint
+node tgrab.js              # 37 — grabbing: by key or mouse, swinging, dragging, carrying, loads, no riding; sprint
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -521,7 +521,7 @@ nothing while hanging — only letting go of the grab lets go.
 
 **Carrying.** A grabbed object that is **light enough and loose** is not
 pinned to — it is picked up. `canCarry`: dynamic, mass at most
-`CARRY_MASS_RATIO` (1.5) times the player's, and `!isAttached` — nothing on
+`CARRY_MASS_RATIO` (3) times the player's, and `!isAttached` — nothing on
 a bolt, rope or piston is carried, however light, because that is
 something you swing from. While `carried` is set the object is driven each
 step toward the cursor, clamped to `CARRY_REACH` (120px) of the player:
@@ -529,6 +529,24 @@ velocity is a fraction of the gap, capped, so it follows briskly but cannot
 punch through a wall. The player keeps walking, jumping and everything else
 while carrying; letting go on the move throws it. There is no constraint.
 `carryHoldPoint` puts the drawn hands on the object's near edge.
+
+**A load makes for a poorer jump**: `carryJumpScale` is `1 - load * 0.22`
+(floor 0.2) where load is the carried mass over the player's — about 150px
+of jump with your own weight in hand, about 30 with three times it.
+
+**You cannot ride what you are holding.** Carson found the obvious exploit:
+point the cursor under your feet, the object floats there, stand on it,
+jump, repeat to the top of the map. Three things close it, and all three
+were needed. In `collisionActive`, the carried object never counts as
+ground, and if the player's feet are at its top edge and overlapping it
+sideways (`stoodOnCarried` — *not* "player centre above object centre",
+which is true for anything shorter than you standing beside it) the object
+is dropped. `grabLatch` then refuses to pick anything up until the grab is
+released and pressed afresh — otherwise the held key re-grabs it the next
+frame and the ratchet lifts you anyway. And `dropNoFoot` keeps the dropped
+object from counting as ground for 700ms, or you got one free jump off it
+as it fell away under you. Measured: one lift, a landing, and then nothing
+but ordinary jumps off a block on the floor.
 
 **Any object can be made grabbable, or not,** from its box: `o.grabbable`
 (`true`/`false`, undefined = follow the material), saved as `grab`. So a

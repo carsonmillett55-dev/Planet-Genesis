@@ -3861,7 +3861,22 @@
      or let go on the move and throw it. Heavier things are dragged on a
      pin, as before. `carried` is the object; there is no constraint. */
   var carried = null;
-  var CARRY_REACH = 120, CARRY_MASS_RATIO = 1.5;
+  var CARRY_REACH = 120, CARRY_MASS_RATIO = 3;
+  /* How much of a jump is left with the load in hand: nothing off it for
+     something feather-light, a hop for something three times your weight. */
+  function carryJumpScale(){
+    if (!carried || !carried.body || !player) return 1;
+    var load = carried.body.mass / Math.max(0.001, player.mass);
+    return Math.max(0.2, 1 - load * 0.22);   // height goes with the square, so this is steeper than it looks
+  }
+  var stoodOnCarried = false;
+  /* Once something is dropped for being stood on, it is not picked up
+     again until the grab is released and pressed afresh — otherwise the
+     held key re-grabs it the next frame and the ratchet lifts you anyway. */
+  var grabLatch = false;
+  /* And for a moment after the drop it is not footing either, or you get
+     one free jump off it as it falls away under you. */
+  var dropNoFoot = null;   // { obj, until }
   var GRAB_REACH = 16;
   var flying = false;
   var mouseWorld = { x: 0, y: 0 };
@@ -4097,6 +4112,7 @@
   function releaseRope(){
     if (grabConstraint){ World.remove(world, grabConstraint); grabConstraint = null; sfx("unrope"); }
     if (carried){ carried = null; sfx("unrope"); }
+    stoodOnCarried = false;
   }
   function isGrabbing(){ return !!grabConstraint || !!carried; }
   /* Light enough, and LOOSE. A sponge on a rope, a bolt or a piston is
@@ -4160,12 +4176,12 @@
     return best;
   }
   function tryGrab(){
-    if (!player || grabConstraint || carried || flying) return false;
+    if (!player || grabConstraint || carried || flying || grabLatch) return false;
     var t = grabTarget();
     if (!t) return false;
     var body = t.obj.body;
     if (canCarry(t.obj)){
-      carried = t.obj;
+      carried = t.obj; stoodOnCarried = false;
       sfx("rope");
       puff(t.hold.x, t.hold.y, 5, { color:"#D9DD6B", speed:1.4, g:0.05 });
       return true;
@@ -4185,7 +4201,7 @@
     v = !!v;
     if (v === grabHeld) return;
     grabHeld = v;
-    if (!v) releaseRope();
+    if (!v){ releaseRope(); grabLatch = false; }
   }
   // Matter stores a constraint's attachment point in the body's own
   // rotating frame, so converting in either direction has to undo /
@@ -4233,9 +4249,28 @@
   onStep("collisionActive", function(ev){
     if (!player) return;
     ev.pairs.forEach(function(p){
+      if (p.bodyA !== player && p.bodyB !== player) return;
       // Sensors overlap without holding anything up — a rope, a Back-layer
       // decoration, a walk-through light. Only a solid counts as ground.
-      if ((p.bodyA === player || p.bodyB === player) && !p.bodyA.isSensor && !p.bodyB.isSensor) groundedNext = true;
+      if (p.bodyA.isSensor || p.bodyB.isSensor) return;
+      var other = p.bodyA === player ? p.bodyB : p.bodyA, owner = (other.parent || other).plugin && (other.parent || other).plugin.obj;
+      /* The thing you are carrying is not ground. Standing on it would let
+         you jump, it would float back up under you, and you could ride it
+         to the top of the map — which is exactly what Carson found. It is
+         dropped instead, and never counts as footing. */
+      if (dropNoFoot && owner === dropNoFoot.obj){
+        if (performance.now() < dropNoFoot.until) return;
+        dropNoFoot = null;
+      }
+      if (carried && owner === carried){
+        // standing on it: feet at its top edge, and overlapping it sideways
+        var cb = carried.body.bounds, pb = player.bounds;
+        var feet = pb.max.y, onTop = feet >= cb.min.y - 10 && feet <= cb.min.y + 12;
+        var overlapX = Math.min(pb.max.x, cb.max.x) - Math.max(pb.min.x, cb.min.x);
+        if (onTop && overlapX > 6) stoodOnCarried = true;
+        return;
+      }
+      groundedNext = true;
     });
   });
   onStep("collisionStart", function(ev){
@@ -4527,7 +4562,12 @@
 
     if (carried){
       if (objects.indexOf(carried) < 0 || !carried.body || carried.body.isStatic){ carried = null; }
-      else {
+      else if (stoodOnCarried){
+        stoodOnCarried = false;
+        dropNoFoot = { obj: carried, until: performance.now() + 700 };
+        releaseRope(); grabLatch = true;
+        showToast("You can't stand on what you're holding.");
+      } else {
         var cb = carried.body;
         var tx = mouseWorld.x - player.position.x, ty = mouseWorld.y - player.position.y;
         var td = Math.hypot(tx, ty);
@@ -4579,7 +4619,7 @@
       } else {
         Body.setVelocity(player, { x: vx, y: player.velocity.y });
         if (input.jumpQueued && grounded && !grabConstraint){
-          Body.setVelocity(player, { x: player.velocity.x, y: -14 });
+          Body.setVelocity(player, { x: player.velocity.x, y: -14 * carryJumpScale() });
           grounded = false;
           sfx("jump");
           puff(player.position.x, player.position.y + PH/2, 5,

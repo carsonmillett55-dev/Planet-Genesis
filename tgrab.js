@@ -230,6 +230,66 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.keyboard.up('KeyQ');
 
   console.log('');
+  console.log('== you cannot ride what you are holding ==');
+  await fresh();
+  await rect('wood', 1, X-300, Y+100, X+400, Y+140);
+  await lockAll();
+  await rect('sponge', 1, X, Y+60, X+40, Y+100);
+  await play();
+  await standAt(X-22, Y+60); await p.waitForTimeout(300);
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
+  ok('holding the little sponge', !!(await p.evaluate(() => window.__pg.carrying())));
+  const y0 = (await pos()).y;
+  // keep the cursor under your own feet, as a person trying this would, and keep jumping
+  let lowest = y0;
+  for (let i = 0; i < 12; i++){
+    const pp = await pos();
+    const under = await w2p(pp.x, pp.y + 70);
+    await p.mouse.move(under.x, under.y);
+    await p.waitForTimeout(200);
+    if (i % 2 === 1) await p.keyboard.press('Space');
+    lowest = Math.min(lowest, (await pos()).y);
+  }
+  await p.waitForTimeout(1300);                               // let the last jump land
+  const y1 = (await pos()).y;
+  ok('it gets dropped rather than becoming a lift', !(await p.evaluate(() => window.__pg.carrying())));
+  ok('and you end up no higher than a block on the floor', y1 > y0 - 60, { before: y0, after: y1 });
+  ok('never having got more than a jump off the ground', lowest > y0 - 320, { lowest, start: y0 });
+  await p.keyboard.up('KeyQ');
+
+  console.log('');
+  console.log('== a heavy load makes for a poor jump ==');
+  await fresh();
+  await rect('wood', 1, X-300, Y+100, X+400, Y+140);
+  await lockAll();
+  await play();
+  await standAt(X-100, Y+60); await p.waitForTimeout(400);
+  const j0 = (await pos()).y;
+  await p.keyboard.press('Space');
+  let peak0 = j0;
+  for (let i = 0; i < 8; i++){ await p.waitForTimeout(55); peak0 = Math.min(peak0, (await pos()).y); }
+  const freeJump = j0 - peak0;
+  await p.evaluate(() => window.__pg.setMode('build')); await p.waitForTimeout(250);
+  await p.evaluate(() => window.__pg.paused(true));
+  await rect('wood', 1, X, Y+20, X+60, Y+100);              // a hefty wooden block, about 2.3 players' worth
+  const heavy = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0];
+  await p.evaluate(id => window.__pg.setGrabbable(id, true), heavy.id);
+  await play();
+  await standAt(X-30, Y+60); await p.waitForTimeout(400);
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(300);
+  ok('the heavy block can be picked up', !!(await p.evaluate(() => window.__pg.carrying())));
+  const hi = await w2p(X+70, Y+40); await p.mouse.move(hi.x, hi.y); await p.waitForTimeout(500);   // hold it out to the side, not over your head
+  const j1 = (await pos()).y;
+  await p.keyboard.press('Space');
+  let peak = j1;                                             // a short hop peaks early: sample as it goes
+  for (let i = 0; i < 6; i++){ await p.waitForTimeout(55); peak = Math.min(peak, (await pos()).y); }
+  const loadedJump = j1 - peak;
+  console.log('   jumped', freeJump.toFixed(0) + 'px free,', loadedJump.toFixed(0) + 'px loaded');
+  ok('you still get off the ground', loadedJump > 5, loadedJump);
+  ok('but nowhere near as high', loadedJump < freeJump * 0.55, { freeJump, loadedJump });
+  await p.keyboard.up('KeyQ');
+
+  console.log('');
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();
