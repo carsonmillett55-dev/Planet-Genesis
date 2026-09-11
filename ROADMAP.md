@@ -225,7 +225,7 @@ implement it, including connected systems, rather than approximating.
 | **World changer** | Driven by activators (sensors, buttons). Adjusts world lighting, world water level, etc. |
 | **Mover** | See below. |
 | **Creature eye** | See below. |
-| **Camera** | DONE 2026-09-11. LBP2's Game Camera: zone, zoom, tracking, speed; wired, the switch decides. Play has its own fixed zoom, set in World. |
+| **Camera** | DONE 2026-09-11. LBP2's Game Camera: zone, zoom, tracking, speed; wired, the switch decides. Plus the Movie Camera's hold time (or hold for good), shake, controls off, and a glide to a second spot and zoom — Carson's "easier than keyframing". Play has its own fixed zoom, set in World. **Still to do: tilt** (a camera roll; a rendering change — the frame transform, its inverse for the mouse, the light buffer and overlays all have to agree). |
 
 ### Mover
 

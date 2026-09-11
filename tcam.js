@@ -156,6 +156,70 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await build();
 
   console.log('');
+  console.log('== hold, the glide to a second spot, shake, and freezing the player ==');
+  await fresh(); await camMid(); await p.waitForTimeout(150);
+  await rect('wood', 1, MX-380, MY+100, MX+600, MY+140);
+  await rect('wood', 0, MX+300, MY-100, MX+420, MY+20);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.setLayer(0); window.__pg.setTool('camera'); });
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [MX+360, MY-40]);
+  // hold for a second after the player leaves
+  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 0.5, tracking: 0, speed: 1, radius: 220, hold: 1 }), (await theCamera()).id);
+  await play();
+  const hId = (await theCamera()).id;
+  await standAt(MX+360, MY+60); await p.waitForTimeout(500);
+  ok('in the zone, it is in charge', (await p.evaluate(() => window.__pg.playCam())).active === hId);
+  await standAt(MX-200, MY+60); await p.waitForTimeout(400);
+  ok('gone from the zone, it holds the shot for its hold time', (await p.evaluate(() => window.__pg.playCam())).active === hId, await p.evaluate(() => window.__pg.playCam()));
+  await p.waitForTimeout(1000);
+  ok('and hands back when the hold is up', (await p.evaluate(() => window.__pg.playCam())).active === null, await p.evaluate(() => window.__pg.playCam()));
+  await build(); await camMid();
+  // holding for good
+  await p.evaluate(id => window.__pg.gadgetSet(id, { holdForever: true }), (await theCamera()).id);
+  await play();
+  const fId = (await theCamera()).id;
+  await standAt(MX+360, MY+60); await p.waitForTimeout(400);
+  await standAt(MX-200, MY+60); await p.waitForTimeout(1500);
+  ok('set to hold for good, it keeps the shot long after the player has gone', (await p.evaluate(() => window.__pg.playCam())).active === fId);
+  await build(); await camMid();
+  // the glide: a second spot 300px to the right and zoomed in, over half a second
+  await p.evaluate(id => window.__pg.gadgetSet(id, { holdForever: false, hold: 0, sweep: { dx: 300, dy: -100, zoom: 1.5, secs: 0.5 } }), (await theCamera()).id);
+  await play();
+  await standAt(MX+360, MY+60); await p.waitForTimeout(1200);
+  const cEnd = await centre();
+  ok('after the glide the view sits on the second spot', Math.abs(cEnd.x - (MX+360+300)) < 8 && Math.abs(cEnd.y - (MY-40-100)) < 8, { centre: cEnd, wanted: [MX+660, MY-140] });
+  ok('at the end zoom', Math.abs((await view()).zoom - 1.5) < 0.03, (await view()).zoom);
+  await build(); await camMid();
+  const svS = await p.evaluate(() => window.__pg.serialize('sweep'));
+  const gsS = svS.gadgets.filter(g => g.kind === 'camera')[0];
+  ok('the save carries hold, shake, freeze and the second spot', gsS && gsS.sweep && gsS.sweep.dx === 300 && gsS.sweep.zoom === 1.5 && gsS.sweep.secs === 0.5 && gsS.hold === 0 && gsS.holdForever === false, gsS);
+  await p.evaluate(sv => window.__pg.load(sv), svS); await p.waitForTimeout(300);
+  const gsB = await theCamera();
+  ok('and a load brings them back', gsB && gsB.sweep && gsB.sweep.dx === 300 && gsB.sweep.dy === -100 && gsB.sweep.zoom === 1.5, gsB && gsB.sweep);
+  // shake: the view jitters while it is in charge
+  await camMid();
+  await p.evaluate(id => window.__pg.gadgetSet(id, { sweep: null, shake: 1 }), (await theCamera()).id);
+  await play();
+  await standAt(MX+360, MY+60); await p.waitForTimeout(600);
+  const xs = []; for (let i = 0; i < 10; i++){ xs.push((await centre()).x); await p.waitForTimeout(25); }
+  const spread = Math.max(...xs) - Math.min(...xs);
+  ok('shake at 100% makes the view jitter', spread > 3, { spread, xs: xs.map(x => Math.round(x)) });
+  await build(); await camMid();
+  // freeze: the player cannot walk while the shot is on
+  await p.evaluate(id => window.__pg.gadgetSet(id, { shake: 0, freeze: true }), (await theCamera()).id);
+  await play();
+  await standAt(MX+360, MY+60); await p.waitForTimeout(400);
+  const fx0 = (await pos()).x;
+  await p.keyboard.down('KeyD'); await p.waitForTimeout(500); await p.keyboard.up('KeyD');
+  const fx1 = (await pos()).x;
+  ok('with the controls off for the shot, D does not walk you', Math.abs(fx1 - fx0) < 3, { from: fx0, to: fx1 });
+  await standAt(MX-200, MY+60); await p.waitForTimeout(400);
+  const gx0 = (await pos()).x;
+  await p.keyboard.down('KeyD'); await p.waitForTimeout(500); await p.keyboard.up('KeyD');
+  ok('and outside the zone you walk as usual', (await pos()).x > gx0 + 80, { from: gx0, to: (await pos()).x });
+  await build();
+
+  console.log('');
   console.log('== the level sets the walking and sprinting pace ==');
   await fresh();
   await rect('wood', 1, X-380, Y+100, X+600, Y+140);

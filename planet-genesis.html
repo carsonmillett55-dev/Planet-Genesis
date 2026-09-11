@@ -2684,6 +2684,17 @@
       g.tracking = extra.tracking != null ? Math.max(0, Math.min(1, +extra.tracking)) : 0.5;
       g.speed = extra.speed != null ? Math.max(0, Math.min(1, +extra.speed)) : 0.5;
       g.visible = extra.visible != null ? !!extra.visible : false;   // a camera is scenery only to its maker
+      /* And LBP2's Movie Camera tweaks, the ones that make sense in 2D:
+         hold time after the trigger ends (or for good, until another camera),
+         shake, and freezing the player for the shot. `sweep` is the
+         easier-than-keyframes move: a second spot (an offset from the
+         camera, in world axes) and zoom it glides to over `secs`. */
+      g.hold = extra.hold != null ? Math.max(0, Math.min(60, +extra.hold)) : 0;
+      g.holdForever = !!extra.holdForever;
+      g.shake = extra.shake != null ? Math.max(0, Math.min(1, +extra.shake)) : 0;
+      g.freeze = !!extra.freeze;
+      g.sweep = extra.sweep && isFinite(+extra.sweep.dx) ? { dx:+extra.sweep.dx, dy:+extra.sweep.dy||0,
+        zoom: Math.max(CAM_ZOOM_MIN, Math.min(CAM_ZOOM_MAX, +extra.sweep.zoom || g.zoom)), secs: Math.max(0.2, Math.min(60, +extra.sweep.secs || 3)) } : null;
     }
     if (extra.on) g.on = true;
     gadgets.push(g);
@@ -4685,8 +4696,10 @@
     // this stays modest enough that levels built at walking pace still work.
     var speed = flying ? FLY_SPEED : walkSpeedNow();
     var vx = 0;
-    if (input.left) vx -= speed;
-    if (input.right) vx += speed;
+    var frozen = cameraFreezesPlayer();   // a camera shot with the controls off
+    if (input.left && !frozen) vx -= speed;
+    if (input.right && !frozen) vx += speed;
+    if (frozen){ input.jumpQueued = false; input.jumpBufferUntil = 0; }
     if (vx !== 0) facing = vx > 0 ? 1 : -1;
 
     if (carried){
@@ -4955,7 +4968,8 @@
       var wp = gadgetWorld(g);
       return { kind:g.kind, o:objIndex[g.obj.id], x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
-               zoom:g.zoom, tracking:g.tracking, speed:g.speed };
+               zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdForever:g.holdForever, shake:g.shake, freeze:g.freeze,
+               sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -5187,14 +5201,32 @@
     }
     return best;
   }
-  function resetPlayCamera(){ playCam.ever = false; playCam.easing = false; playCam.active = null; }
+  function cameraSweepEnd(g){ var gp = gadgetWorld(g); return g.sweep ? { x: gp.x + g.sweep.dx, y: gp.y + g.sweep.dy } : gp; }
+  function resetPlayCamera(){ playCam.ever = false; playCam.easing = false; playCam.active = null; playCam.holdUntil = -1; playCam.t0 = 0; }
   function updatePlayCamera(){
-    var cg = activeCamera();
+    var now = performance.now();
+    var trig = activeCamera(), cg = null;
+    if (trig){
+      if (playCam.active !== trig) playCam.t0 = now;   // a fresh shot: the sweep starts from its first spot
+      playCam.holdUntil = -1; cg = trig;
+    } else if (playCam.active){
+      // the trigger has ended: the camera holds its shot for its hold time
+      // (or for good) before handing back
+      if (playCam.holdUntil < 0) playCam.holdUntil = playCam.active.holdForever ? Infinity : now + (playCam.active.hold || 0) * 1000;
+      cg = now < playCam.holdUntil ? playCam.active : null;
+    }
     playCam.active = cg;
     var wantZoom = cg ? cg.zoom : worldNum("playZoom");
     var wx = player.position.x, wy = player.position.y;
     if (cg){
       var gp = gadgetWorld(cg), t = cg.tracking;
+      if (cg.sweep){
+        // the glide from its first spot to its second, eased, then it stays there
+        var u = Math.max(0, Math.min(1, (now - playCam.t0) / (cg.sweep.secs * 1000)));
+        u = u * u * (3 - 2 * u);
+        gp = { x: gp.x + cg.sweep.dx * u, y: gp.y + cg.sweep.dy * u };
+        wantZoom = cg.zoom + (cg.sweep.zoom - cg.zoom) * u;
+      }
       wx = gp.x + (wx - gp.x) * t; wy = gp.y + (wy - gp.y) * t;
       playCam.lastSpeed = cg.speed; playCam.easing = true;
     }
@@ -5205,9 +5237,12 @@
     if (!cg && Math.abs(wx - playCam.cx) < 0.3 && Math.abs(wy - playCam.cy) < 0.3 && Math.abs(wantZoom - playCam.zoom) < 0.0005) playCam.easing = false;
     if (Math.abs(playCam.zoom - camZoom) > 1e-6){ camZoom = playCam.zoom; applyCamScale(); }
     var visW = viewRectW / camScale, visH = viewRectH / camScale;
-    camX = clampCam(playCam.cx - visW/2, WORLD_W, visW);
-    camY = clampCam(playCam.cy - visH/2, WORLD_H, visH);
+    var sx = 0, sy = 0;
+    if (cg && cg.shake > 0){ var amp = cg.shake * 9 / camScale; sx = (Math.random() - 0.5) * 2 * amp; sy = (Math.random() - 0.5) * 2 * amp; }
+    camX = clampCam(playCam.cx + sx - visW/2, WORLD_W, visW);
+    camY = clampCam(playCam.cy + sy - visH/2, WORLD_H, visH);
   }
+  function cameraFreezesPlayer(){ return mode === "play" && !!(playCam.active && playCam.active.freeze); }
   function updateCamera(){
     var visW = viewRectW / camScale, visH = viewRectH / camScale;
     if (camFollow && player && mode === "play"){
@@ -5952,6 +5987,18 @@
         ctx.beginPath(); ctx.rect(-fw/2, -fh/2, fw, fh);
         ctx.lineWidth = 2.5/camScale; ctx.strokeStyle = "#F2B705"; ctx.stroke();
         ctx.lineWidth = 1/camScale; ctx.strokeStyle = "rgba(43,27,18,0.6)"; ctx.stroke();
+        if (g.sweep){
+          // the second spot: a line out to it, its own frame, and the knob you drag
+          var ex = g.sweep.dx, ey = g.sweep.dy;
+          ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(ex, ey);
+          ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#B3870A"; ctx.setLineDash([8/camScale, 6/camScale]); ctx.stroke(); ctx.setLineDash([]);
+          var fw2 = viewRectW / (baseScale * g.sweep.zoom), fh2 = viewRectH / (baseScale * g.sweep.zoom);
+          ctx.beginPath(); ctx.rect(ex - fw2/2, ey - fh2/2, fw2, fh2);
+          ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#B3870A"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+          ctx.beginPath(); ctx.arc(ex, ey, 9/camScale, 0, Math.PI*2);
+          ctx.fillStyle = "#F2B705"; ctx.fill(); ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+          ctx.beginPath(); ctx.arc(ex, ey, 3/camScale, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
+        }
         ctx.restore();
       }
       if (g === selectedGadget && mode === "build"){
@@ -9073,6 +9120,29 @@
       var zn = document.createElement("div"); zn.className = "noteText";
       zn.textContent = g.input != null ? "Wired: it takes over while its signal is on, wherever the player is." : "It takes over while the player is inside the zone. Wire it to a switch and the switch decides instead.";
       zn.style.flexBasis = "100%"; opSection(null).appendChild(zn);
+      var hd = opSection("Hold");
+      opBtn(hd, g.holdForever ? "∞ Holds until another camera takes over" : "⏱ Holds for a while, then hands back", "",
+        function(){ pushUndo("changing a camera"); g.holdForever = !g.holdForever; renderSelBar(); sfx("tick"); }, "wide" + (g.holdForever ? " on" : ""));
+      if (!g.holdForever) slider(hd, "After the trigger ends", g.hold, 0, 30, 0.5, function(v){ g.hold = v; },
+        function(v){ return v <= 0 ? "hands back at once" : (+v).toFixed(1) + "s"; }, "changing a camera");
+      var sw = opSection("Move");
+      opBtn(sw, g.sweep ? "➜ Glides to a second spot" : "▪ Stays on its spot", g.sweep ? "Click to stop it moving" : "Click and a second spot appears — drag the knob to where the shot should end up",
+        function(){
+          pushUndo("changing a camera");
+          g.sweep = g.sweep ? null : { dx: 240, dy: 0, zoom: g.zoom, secs: 3 };
+          renderSelBar(); sfx("tick");
+        }, "wide" + (g.sweep ? " on" : ""));
+      if (g.sweep){
+        slider(sw, "Zoom at the end", g.sweep.zoom, CAM_ZOOM_MIN, CAM_ZOOM_MAX, 0.05, function(v){ g.sweep.zoom = v; }, pct, "changing a camera");
+        slider(sw, "Takes", g.sweep.secs, 0.2, 30, 0.1, function(v){ g.sweep.secs = v; }, function(v){ return (+v).toFixed(1) + "s"; }, "changing a camera");
+        var sn = document.createElement("div"); sn.className = "noteText";
+        sn.textContent = "Drag the knob on the level to set where it ends up. It starts the glide each time it takes over, and stays at the end.";
+        sn.style.flexBasis = "100%"; sw.appendChild(sn);
+      }
+      var fx = opSection("Shot");
+      slider(fx, "Shake", g.shake, 0, 1, 0.05, function(v){ g.shake = v; }, function(v){ return v <= 0.001 ? "none" : pct(v); }, "changing a camera");
+      opBtn(fx, g.freeze ? "🧊 Player can't move during it" : "🏃 Player keeps control", "",
+        function(){ pushUndo("changing a camera"); g.freeze = !g.freeze; renderSelBar(); sfx("tick"); }, "wide" + (g.freeze ? " on" : ""));
     }
     if (g.kind === "lever"){
       var ls = opSection("Behaviour");
@@ -9472,6 +9542,10 @@
       g.pos = { x: pt.x, y: pt.y };
       if (g.obj && g.obj.body) g.local = toBodyLocal(g.obj.body, g.pos);
     }
+    if (attachDrag.kind === "camEnd" && attachDrag.ref.sweep){
+      var gp = gadgetWorld(attachDrag.ref);
+      attachDrag.ref.sweep.dx = pt.x - gp.x; attachDrag.ref.sweep.dy = pt.y - gp.y;
+    }
   }
   function moveGadgetTo(g, pt){
     var host = objectUnderAny(pt.x, pt.y, 6);
@@ -9533,6 +9607,7 @@
   function endAttachDrag(){
     if (!attachDrag) return;
     var d = attachDrag; attachDrag = null;
+    if (d.kind === "camEnd"){ renderSelBar(); return; }   // already where the cursor left it
     if (!d.moved) return;
     var pt = d.pt, done = false;
     if (d.kind === "gadget"){
@@ -9821,6 +9896,10 @@
       var handle = resizeHandleAt(pt);
       if (handle){ dragging = null; beginResize(pt, handle); return; }
       if (wiring){ dragging = null; finishWire(pt); return; }
+      // a selected camera's second spot: the knob is dragged straight, no host needed
+      if (selectedGadget && selectedGadget.kind === "camera" && selectedGadget.sweep && dist(cameraSweepEnd(selectedGadget), pt) < 14/camScale + 4){
+        dragging = null; pushUndo("moving a camera's second spot"); beginAttachDrag("camEnd", selectedGadget, pt); return;
+      }
       var gh = gadgetAt(pt.x, pt.y);
       if (gh){ dragging = null; selectGadget(gh); renderSelBar(); beginAttachDrag("gadget", gh, pt); return; }
       var bh = boltAt(pt.x, pt.y);
@@ -10550,7 +10629,8 @@
       var wp = gadgetWorld(g);
       return { kind:g.kind, o:objIndex[g.obj.id], x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
-               zoom:g.zoom, tracking:g.tracking, speed:g.speed };
+               zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdForever:g.holdForever, shake:g.shake, freeze:g.freeze,
+               sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);

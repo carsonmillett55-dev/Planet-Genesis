@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` | Playwright suites, 436 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` | Playwright suites, 447 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 436 checks + checkgeom, in order
+npm test                   # all 447 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -61,7 +61,7 @@ node tgadget.js            # 49 — player sensor, button, lever, wires, what th
 node tlink.js              # 59 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
 node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint; the weight slider
 node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
-node tcam.js               # 34 — Play's own zoom, zooming on the cursor, Camera gadgets, walking and sprinting pace, grab reach
+node tcam.js               # 45 — Play's own zoom, zooming on the cursor, Camera gadgets (zone, wired, hold, glide, shake, freeze), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -836,6 +836,36 @@ test reads the camera as exact-follow, and levels without cameras play as
 they always did. `resetPlayCamera` on entering Play. Zone membership is
 read every frame off `gadgetWorld`, so a camera on a moving object moves
 its zone with it.
+
+**The Movie Camera tweaks**, from LBP2's real list (Transition type and
+time, Track Player, Camera Shake, Hold Time with Infinite, Disable
+Controllers — Flatness, Depth of Field and Skippable do not apply), on the
+same gadget rather than a second kind:
+
+- **Hold** — `hold` seconds after the trigger ends before it hands back,
+  or `holdForever` until another camera takes over. `playCam.holdUntil`
+  is set the frame the trigger drops; a fresh trigger clears it, and
+  another camera's zone wins over a held shot.
+- **Move** — Carson wanted something easier than keyframes: `sweep`
+  is one second spot (`dx, dy`, an offset from the camera in world axes,
+  so it rides with the host), an end `zoom`, and `secs`. Each time the
+  camera takes over (`playCam.t0`), the view glides from its spot to the
+  second, smoothstepped, and stays there; tracking still pulls toward
+  the player on top. In Build a selected camera draws the line, the end
+  frame and a knob; the knob drags straight with `attachDrag` kind
+  `camEnd` — no host needed, a view can point at sky — and the undo step
+  is pushed at press since there is no snap-back. Two keys cover a pan
+  or a push-in; more keys are more cameras, chained by zones or wires.
+- **Shake** — `shake` 0–1, a random offset of up to 9 screen px a frame
+  on the final camera position.
+- **Freeze** — `freeze`: `cameraFreezesPlayer()` in the movement step
+  drops walking and jumping while the shot is on. LBP's Disable
+  Controllers.
+
+Not done: **tilt**. A camera roll means a rotation in the frame transform
+and its inverse in `screenToWorld`/`worldToScreen`, and the lighting
+buffer and every screen-space overlay would need to agree; it is a
+rendering change, not a camera setting, and is parked in the roadmap.
 
 **Player settings** live in World too: `walkSpeed` (a multiplier, 25–300%),
 `sprintSpeed` (100–300% *of walking*), `grabReach` (2–120px). `walkSpeedNow()`

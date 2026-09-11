@@ -56,7 +56,7 @@ HOOK = """
     engineSet: function(k, v){ engine[k] = v; return engine[k]; },
     gadgets: function(){ return gadgets.map(function(g){ var wp = gadgetWorld(g); return { id:g.id, kind:g.kind, x:Math.round(wp.x), y:Math.round(wp.y),
       out:g.out, on:g.on, radius:g.radius, size:g.size, sticky:g.sticky, springs:g.springs, visible:g.visible, obj:g.obj?g.obj.id:null, input:g.input, scale:g.scale||1,
-      zoom:g.zoom, tracking:g.tracking, speed:g.speed }; }); },
+      zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdForever:g.holdForever, shake:g.shake, freeze:g.freeze, sweep:g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null }; }); },
     worldSet: function(k, v){ worldSettings[k] = v; applyWorldSettings(); return worldSettings[k]; },
     worldGet: function(k){ return worldSettings[k]; },
     camFollowing: function(){ return camFollow; },
