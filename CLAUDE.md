@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` | Playwright suites, 284 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` | Playwright suites, 296 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 284 checks + checkgeom, in order
+npm test                   # all 296 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -58,7 +58,7 @@ node tctx.js               # 24 — the object box: opening, closing, moving, re
 node tmenu.js              # 19 — the personal menu's sections, pages and gradient
 node tbolt.js              # 46 — bolts: through the layers, four kinds, limits, the box, the ghost, save/load
 node tgadget.js            # 43 — player sensor, button, lever, wires, what they drive, paused walking
-node tlink.js              # 32 — pistons and rope: placing, cycling, stiff, wired modes, hanging, save/load
+node tlink.js              # 44 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, save/load
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -414,14 +414,28 @@ seconds per stroke, `pause` at each end. A Matter constraint with its
 the cycling runs while the signal is on; `in` / `out`: the rod goes to that
 end while the signal is on and back when it drops.
 
-**Stiff is a rigid linkage, not a damping.** A single distance constraint
-cannot hold an angle at all — the rod swung to vertical under any load, 209px
-of droop either way, measured. `setPistonStiff` adds two constraints: `c2`
-parallel to the rod, `STIFF_OFF` px to one side in each body's frame (with
-the first, a parallelogram, which keeps the far body's orientation), and `c3`
-diagonal from A1 to B2 (which stops the parallelogram shearing). Two
-triangles: rigid in every way but the length, and all three lengths are kept
-in step each frame. 4px of droop after.
+**Stiff is kinematic, not solved.** A single distance constraint cannot
+hold an angle at all — the rod swung to vertical under any load, 209px of
+droop, measured. A truss of three constraints held it to 4px. Carson wanted
+bulletproof, so the free end is not solved at all: it is *placed*.
+`refreshStiffRef` remembers the rod's world angle from the base's anchor,
+the base's angle at that moment, and the free body's angle relative to the
+base; `pistonSnap`, in an **`afterUpdate`** step, puts the free body exactly
+where those and the length say, every frame, after whatever the solver did
+— and hands it the velocity that motion implies, so the next integration
+lands almost there anyway and contacts feel the push. 0px of droop with a
+weight dropped on the far end. Whichever end is dynamic is the one placed;
+both static, nothing to do. The reference is re-taken after a rebuild
+(`relinkAfterRebuild`) and after resize or flip (`carryLinks`), since those
+legitimately move the anchor.
+
+Rotating the free body's anchor: Matter keeps `pointB` rotated to the angle
+it last saw, so after `Body.setAngle` the offset is rotated here by the same
+delta and `angleB` set to the new angle — or Matter would rotate it again at
+the next solve.
+
+Reach runs to 3000px on both piston sliders and rope length; a rope can be
+80 segments.
 
 **Rope**: `length` long. **The load is carried by one tether; the chain is
 for looks.** A chain of small bodies that bore the load stretched to half
@@ -438,6 +452,11 @@ distance the rope happened to be, and it could never pay out. Each step:
 ends further apart than the rope is long → length = rope, stiffness 1;
 closer → stiffness and damping 0. The step where it first goes taut
 overshoots a few pixels and snaps back, which is the jerk of a rope catching.
+
+A selected rope draws its reach (`drawRopeReach`): a faint circle of the
+rope's length about the end that does not move, a dashed line the rope's
+length toward the far end, and the number — most useful paused, before it
+has hung.
 
 `relinkAfterRebuild` re-points every constraint of a link at a host's new
 body after a rebuild and re-derives the anchor from where it was;

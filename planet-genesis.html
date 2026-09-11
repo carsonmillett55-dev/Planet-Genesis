@@ -2728,11 +2728,15 @@
 
        piston   a rigid rod that extends and retracts between MIN and MAX,
                 taking TIME seconds per stroke and PAUSING at each end.
-                STIFF holds the angle at both ends: a single distance
-                constraint cannot hold an angle at all — the rod just swung
-                to vertical under any load — so stiff is a rigid linkage of
-                three constraints, two parallel to the rod and one diagonal,
-                all sharing the animated length. Wired, FLIPPER decides what
+                STIFF is bulletproof: the moving end is not solved at all,
+                it is PLACED. Every frame after the physics step, the free
+                body is put exactly where the rod says — the rod's own
+                direction in the fixed body's frame, the length, and the
+                angle it was placed at — and given the velocity that motion
+                implies so whatever it is pushing feels it. Nothing can bend
+                it, because nothing gets a vote. (A single constraint cannot
+                hold an angle at all; a truss of three could, to within a
+                few pixels; this holds to nothing.) Wired, FLIPPER decides what
                 the signal does: off = the cycling runs while the signal is
                 on; in / out = the rod goes to that end while the signal is
                 on and back when it drops.
@@ -2801,7 +2805,7 @@
         length: l.len, stiffness: 0.9, damping: 0.2
       });
       World.add(world, l.constraint);
-      if (l.stiff){ l.stiff = false; setPistonStiff(l, true); }
+      if (l.stiff) refreshStiffRef(l);
     } else {
       l.constraint = Constraint.create({
         bodyA: objA.body, pointA: { x: ptA.x - objA.body.position.x, y: ptA.y - objA.body.position.y },
@@ -2814,42 +2818,80 @@
     links.push(l);
     return l;
   }
-  /* Stiff: two more constraints. A2/B2 sit `off` px to one side of the
-     rod, in each body's frame, and c2 keeps them the rod's length apart —
-     with c1 that is a parallelogram, which keeps the far body's orientation.
-     c3 is a diagonal, A1 to B2, which stops the parallelogram shearing.
-     Two triangles: rigid, in every way but the length. */
-  var STIFF_OFF = 22;
+  /* Stiff: remember the pose. `rodAng0` is the rod's world angle from the
+     base's anchor to the free end's, `baseAng0` the base's angle at that
+     moment, `relAng0` the free body's angle relative to the base. From those
+     three and the length the free end's pose is fully determined. Re-taken
+     whenever the pose is legitimately changed from outside — a resize, a
+     flip — by refreshStiffRef. */
+  function stiffRoles(l){
+    var c = l.constraint, A = c.bodyA, B = c.bodyB;
+    if (!B.isStatic) return { base: A, tgt: B, tgtIsA: false };
+    if (!A.isStatic) return { base: B, tgt: A, tgtIsA: true };
+    return null;
+  }
+  function refreshStiffRef(l){
+    if (l.kind !== "piston" || !l.constraint) return;
+    var r = stiffRoles(l);
+    if (!r){ l.stiffRef = null; return; }
+    var c = l.constraint;
+    var bp = r.tgtIsA ? { x: c.bodyB.position.x + c.pointB.x, y: c.bodyB.position.y + c.pointB.y }
+                      : { x: c.bodyA.position.x + c.pointA.x, y: c.bodyA.position.y + c.pointA.y };
+    var tp = r.tgtIsA ? { x: c.bodyA.position.x + c.pointA.x, y: c.bodyA.position.y + c.pointA.y }
+                      : { x: c.bodyB.position.x + c.pointB.x, y: c.bodyB.position.y + c.pointB.y };
+    l.stiffRef = { tgtIsA: r.tgtIsA, rodAng0: Math.atan2(tp.y - bp.y, tp.x - bp.x), baseAng0: r.base.angle,
+                   relAng0: r.tgt.angle - r.base.angle, lastX: r.tgt.position.x, lastY: r.tgt.position.y };
+  }
   function setPistonStiff(l, on){
     if (l.kind !== "piston" || !l.constraint) return;
-    if (!!l.stiff === !!on) return;
     l.stiff = !!on;
-    if (!on){
-      if (l.c2) World.remove(world, l.c2);
-      if (l.c3) World.remove(world, l.c3);
-      l.c2 = null; l.c3 = null; l.off = 0;
-      return;
-    }
-    var c = l.constraint, A = c.bodyA, B = c.bodyB;
-    var a1 = { x: A.position.x + c.pointA.x, y: A.position.y + c.pointA.y };
-    var b1 = { x: B.position.x + c.pointB.x, y: B.position.y + c.pointB.y };
-    var L = Math.max(1, dist(a1, b1)), ux = (b1.x - a1.x)/L, uy = (b1.y - a1.y)/L;
-    var px = -uy * STIFF_OFF, py = ux * STIFF_OFF;
-    l.off = STIFF_OFF;
-    l.c2 = Constraint.create({ bodyA: A, pointA: { x: c.pointA.x + px, y: c.pointA.y + py },
-                               bodyB: B, pointB: { x: c.pointB.x + px, y: c.pointB.y + py },
-                               length: l.len, stiffness: 0.9, damping: 0.2 });
-    l.c3 = Constraint.create({ bodyA: A, pointA: { x: c.pointA.x, y: c.pointA.y },
-                               bodyB: B, pointB: { x: c.pointB.x + px, y: c.pointB.y + py },
-                               length: Math.hypot(l.len, STIFF_OFF), stiffness: 0.9, damping: 0.2 });
-    World.add(world, [l.c2, l.c3]);
+    if (on) refreshStiffRef(l); else l.stiffRef = null;
   }
+  /* Place the free end. Runs after the physics step, so whatever the
+     solver did to the body this frame is overwritten before it is drawn or
+     anything else reads it. The velocity handed back is the pose's own
+     change since last frame, so the next integration lands the body almost
+     where it will be snapped to anyway, and contacts feel the motion. */
+  function pistonSnap(l){
+    var ref = l.stiffRef, c = l.constraint;
+    if (!ref || !c) return;
+    var r = stiffRoles(l);
+    if (!r || r.tgtIsA !== ref.tgtIsA){ refreshStiffRef(l); ref = l.stiffRef; r = stiffRoles(l); if (!ref || !r) return; }
+    var base = r.base, tgt = r.tgt;
+    var basePt = r.tgtIsA ? c.pointB : c.pointA, tgtPt = r.tgtIsA ? c.pointA : c.pointB;
+    var rodAng = ref.rodAng0 + (base.angle - ref.baseAng0);
+    var wantAng = base.angle + ref.relAng0;
+    var bx = base.position.x + basePt.x, by = base.position.y + basePt.y;
+    var ax = bx + Math.cos(rodAng) * l.len, ay = by + Math.sin(rodAng) * l.len;
+    // turn the free body to its angle, and its anchor offset with it —
+    // Matter keeps the offset rotated to the angle it last saw, so rotate
+    // it here and tell Matter which angle that was
+    var dAng = wantAng - tgt.angle;
+    if (Math.abs(dAng) > 1e-9){
+      Body.setAngle(tgt, wantAng);
+      var cs = Math.cos(dAng), sn = Math.sin(dAng);
+      var nx = tgtPt.x * cs - tgtPt.y * sn, ny = tgtPt.x * sn + tgtPt.y * cs;
+      tgtPt.x = nx; tgtPt.y = ny;
+      if (r.tgtIsA) c.angleA = wantAng; else c.angleB = wantAng;
+    }
+    var px = ax - tgtPt.x, py = ay - tgtPt.y;
+    Body.setPosition(tgt, { x: px, y: py });
+    Body.setVelocity(tgt, { x: px - ref.lastX, y: py - ref.lastY });
+    Body.setAngularVelocity(tgt, base.angularVelocity);
+    ref.lastX = px; ref.lastY = py;
+  }
+  onStep("afterUpdate", function(){
+    for (var i = 0; i < links.length; i++){
+      var l = links[i];
+      if (l.kind === "piston" && l.stiff) pistonSnap(l);
+    }
+  });
   /* The rope is N small sensor bodies in a line from A to B, each tied to
      the next, the first tied to object A and the last to object B. Sensor
      so it passes through everything, as LBP's string does, but it still has
      mass and falls, which is what makes it hang. */
   function buildRope(l, ptA, ptB){
-    var n = Math.max(3, Math.min(40, Math.round(l.length / ROPE_SEG)));
+    var n = Math.max(3, Math.min(80, Math.round(l.length / ROPE_SEG)));
     var segLen = l.length / n;
     var segs = [], joints = [], i;
     for (i = 0; i < n; i++){
@@ -2886,8 +2928,6 @@
     var i = links.indexOf(l);
     if (i < 0) return;
     if (l.constraint) World.remove(world, l.constraint);
-    if (l.c2) World.remove(world, l.c2);
-    if (l.c3) World.remove(world, l.c3);
     tearDownRope(l);
     links.splice(i, 1);
     wires = wires.filter(function(w){ return w.to !== l.id; });
@@ -2926,7 +2966,7 @@
   function relinkAfterRebuild(obj, oldBody, newBody){
     links.forEach(function(l){
       if (l.objA !== obj && l.objB !== obj) return;
-      var cs = l.kind === "piston" ? [l.constraint, l.c2, l.c3] : [l.constraint, l.endA, l.endB];
+      var cs = l.kind === "piston" ? [l.constraint] : [l.constraint, l.endA, l.endB];
       cs.forEach(function(c){
         if (!c) return;
         if (c.bodyA === oldBody){ var wa = { x: oldBody.position.x + c.pointA.x, y: oldBody.position.y + c.pointA.y };
@@ -2934,11 +2974,13 @@
         if (c.bodyB === oldBody){ var wb = { x: oldBody.position.x + c.pointB.x, y: oldBody.position.y + c.pointB.y };
           c.bodyB = newBody; c.pointB = { x: wb.x - newBody.position.x, y: wb.y - newBody.position.y }; c.angleB = newBody.angle; }
       });
+      if (l.stiff) refreshStiffRef(l);
     });
   }
   function carryLinks(list, mapPt){
     links.forEach(function(l){
-      var cs = l.kind === "piston" ? [l.constraint, l.c2, l.c3] : [l.constraint, l.endA, l.endB];
+      var touched = list.indexOf(l.objA) >= 0 || list.indexOf(l.objB) >= 0;
+      var cs = l.kind === "piston" ? [l.constraint] : [l.constraint, l.endA, l.endB];
       cs.forEach(function(c){
         if (!c) return;
         [["A", l.objA], ["B", l.objB]].forEach(function(pair){
@@ -2951,6 +2993,7 @@
           if (pair[0] === "A"){ c.pointA = np; c.angleA = body.angle; } else { c.pointB = np; c.angleB = body.angle; }
         });
       });
+      if (touched && l.stiff) refreshStiffRef(l);
     });
   }
   onStep("beforeUpdate", function(){
@@ -2975,7 +3018,6 @@
         }
       }
       l.constraint.length = l.len;
-      if (l.c2){ l.c2.length = l.len; l.c3.length = Math.hypot(l.len, l.off || STIFF_OFF); }
     }
   });
   /* The rope's tether, made one-sided. A distance constraint is a rod: it
@@ -5561,6 +5603,29 @@
     ctx.lineWidth = 3*s; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
     ctx.restore();
   }
+  /* A rope's reach: how far the far end can get from the near one. A faint
+     circle of the rope's length about the end on the object that does not
+     move (or the first, if both do), a dashed line the rope's length toward
+     the far end, and the number. Most useful paused, before it has hung. */
+  function drawRopeReach(l, e){
+    var c = l.constraint, s = 1/camScale;
+    var fixedA = c.bodyA.isStatic || !c.bodyB.isStatic;
+    var from = fixedA ? e.a : e.b, to = fixedA ? e.b : e.a;
+    var ang = Math.atan2(to.y - from.y, to.x - from.x);
+    ctx.save();
+    ctx.beginPath(); ctx.arc(from.x, from.y, l.length, 0, Math.PI*2);
+    ctx.lineWidth = 1.5*s; ctx.strokeStyle = "rgba(196,164,106,0.7)"; ctx.setLineDash([6*s, 6*s]); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(from.x + Math.cos(ang)*l.length, from.y + Math.sin(ang)*l.length);
+    ctx.lineWidth = 2*s; ctx.strokeStyle = "#C4A46A"; ctx.stroke(); ctx.setLineDash([]);
+    var tx = from.x + Math.cos(ang)*l.length, ty = from.y + Math.sin(ang)*l.length;
+    ctx.beginPath(); ctx.arc(tx, ty, 5*s, 0, Math.PI*2); ctx.fillStyle = "#C4A46A"; ctx.fill();
+    ctx.lineWidth = 1.5*s; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+    ctx.translate(tx, ty + 18*s); ctx.scale(s, s);
+    ctx.font = "bold 11px 'Baloo 2', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(246,236,217,0.9)"; ctx.strokeText(Math.round(l.length) + "", 0, 0);
+    ctx.fillStyle = "#2B1B12"; ctx.fillText(Math.round(l.length) + "", 0, 0);
+    ctx.restore();
+  }
   function drawLinks(layer){
     links.forEach(function(l){
       if (l.layer !== layer) return;
@@ -5571,6 +5636,7 @@
         ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
         ctx.lineWidth = 14/camScale; ctx.strokeStyle = "rgba(242,183,5,0.35)"; ctx.lineCap = "round"; ctx.stroke();
         if (l.kind === "piston") drawPistonReach(l, e);
+        if (l.kind === "rope") drawRopeReach(l, e);
       }
       drawLinkGlyph(l, 1);
       ctx.restore();
@@ -8448,8 +8514,8 @@
     var px = function(v){ return Math.round(v) + "px"; }, sec = function(v){ return (+v).toFixed(1) + "s"; };
     if (l.kind === "piston"){
       var rg = opSection("Reach");
-      slider(rg, "Shortest", l.min, 10, 800, 5, function(v){ l.min = Math.min(v, l.max - 5); }, px, "changing a piston");
-      slider(rg, "Longest", l.max, 15, 900, 5, function(v){ l.max = Math.max(v, l.min + 5); }, px, "changing a piston");
+      slider(rg, "Shortest", l.min, 10, 2990, 10, function(v){ l.min = Math.min(v, l.max - 10); }, px, "changing a piston");
+      slider(rg, "Longest", l.max, 20, 3000, 10, function(v){ l.max = Math.max(v, l.min + 10); }, px, "changing a piston");
       var tm = opSection("Timing");
       slider(tm, "Seconds per stroke", l.time, 0.2, 8, 0.1, function(v){ l.time = v; }, sec, "changing a piston");
       slider(tm, "Pause at each end", l.pause, 0, 4, 0.1, function(v){ l.pause = v; }, sec, "changing a piston");
@@ -8463,7 +8529,7 @@
         opBtn(fl, pair[1], "", function(){ pushUndo("changing a piston"); l.flipper = pair[0]; renderSelBar(); sfx("tick"); }, l.flipper === pair[0] ? "on" : "");
       });
     } else {
-      slider(opSection("Rope"), "Length", l.length, 20, 1200, 10, function(v){ setRopeLength(l, v); renderSelBar(); }, px, "changing a rope");
+      slider(opSection("Rope"), "Length", l.length, 20, 3000, 10, function(v){ setRopeLength(l, v); renderSelBar(); }, px, "changing a rope");
     }
     var vis = opSection("In play");
     opBtn(vis, l.visible === false ? "🙈 Hidden in Play" : "👁 Visible in Play",

@@ -185,6 +185,74 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('deleting one of its objects removes the link too', (await linksNow()).length === 0);
 
   console.log('');
+  console.log('== a stiff piston is bulletproof ==');
+  // A stiff piston holding a plate straight out, and a heavy block dropped
+  // on the far end of the plate. It must not bend, sag or turn.
+  await fresh();
+  await rect('wood', 1, X, Y, X+80, Y+80);
+  await lockAll();
+  await rect('metal', 1, X+200, Y+20, X+420, Y+60);          // a long plate
+  const bp = await place('piston', X+40, Y+40, X+220, Y+40);
+  await p.evaluate(id => window.__pg.linkSet(id, { min: 180, max: 180, stiff: true }), bp.id);
+  await rect('metal', 1, X+360, Y-200, X+420, Y-140);        // a weight above the far end
+  await run(); await p.waitForTimeout(2000);
+  const st = (await linksNow())[0];
+  const dbg = await p.evaluate(i => window.__pg.linkDebug(i), bp.id);
+  console.log('   far anchor', st.bx, st.by, ' wanted', X+220, Y+40, ' plate angle', dbg.B.ang);
+  ok('the far end is exactly where the rod says', Math.abs(st.bx - (X+220)) < 1 && Math.abs(st.by - (Y+40)) < 1, { at:[st.bx, st.by], want:[X+220, Y+40] });
+  ok('and the plate has not tilted under the weight', Math.abs(dbg.B.ang) < 0.002, dbg.B.ang);
+  ok('nor slid along the rod', Math.abs(st.span - 180) < 0.5, st.span);
+  // now with the world running it should still push: extend and the plate goes with it
+  await p.evaluate(id => window.__pg.linkSet(id, { min: 180, max: 380, time: 0.6, pause: 0 }), bp.id);
+  const drive = []; for (let i = 0; i < 8; i++){ await p.waitForTimeout(110); drive.push((await linksNow())[0].span); }
+  ok('it drives out, weight and all', Math.max(...drive) > 300, drive.map(v=>v.toFixed(0)));
+
+  console.log('');
+  console.log('== resizing an object with links on it ==');
+  await twoBlocks();
+  const rz = await place('piston', X+40, Y+40, X+240, Y+40);
+  await p.evaluate(() => { window.__pg.setTool('move'); const o = window.__pg.objects().find(q => q.body.isStatic && q.pieces[0].m === 'wood' && window.__pg.stats().find(s => s.id === q.id && s.pos.y < 2300)); window.__pg.select(o); });
+  const base0 = await p.evaluate(() => { const o = window.__pg.objects().find(q => q.body.isStatic && q.pieces[0].m === 'wood' && window.__pg.stats().find(s => s.id === q.id && s.pos.y < 2300)); return window.__pg.bounds(o.id); });
+  const r0 = (rz.ax - base0.x) / (base0.x2 - base0.x);    // where on the base block the anchor sits, 0..1
+  const hf = await w2p(base0.x2+5, base0.y2+5);
+  const ht = await w2p(base0.x-5 + (base0.x2-base0.x+10)*1.7, base0.y-5 + (base0.y2-base0.y+10)*1.7);
+  await p.mouse.move(hf.x, hf.y); await p.mouse.down(); await p.mouse.move(ht.x, ht.y, { steps: 8 }); await p.mouse.up();
+  await p.waitForTimeout(400);
+  const base1 = await p.evaluate(() => { const o = window.__pg.objects().find(q => q.body.isStatic && q.pieces[0].m === 'wood' && window.__pg.stats().find(s => s.id === q.id && s.pos.y < 2300)); return window.__pg.bounds(o.id); });
+  const l1 = (await linksNow())[0];
+  const r1 = (l1.ax - base1.x) / (base1.x2 - base1.x);
+  ok('the base grew', (base1.x2 - base1.x) > 120, base1.x2 - base1.x);
+  ok('the piston end stayed on the same spot of it', Math.abs(r1 - r0) < 0.06, { before: r0, after: r1 });
+  ok('and the piston still exists and still spans something sensible', (await linksNow()).length === 1 && l1.span > 100, l1.span);
+  await p.evaluate(() => window.__pg.flip()); await p.waitForTimeout(300);
+  const l2 = (await linksNow())[0];
+  ok('flipping the base keeps the piston attached', (await linksNow()).length === 1 && Math.abs(l2.ay - l1.ay) < 3, { before: l1.ay, after: l2.ay });
+  await run(); await p.waitForTimeout(800);
+  ok('and it still works afterwards', Math.abs((await linksNow())[0].span - l2.span) > 10 || (await linksNow())[0].span > 100);
+
+  console.log('');
+  console.log('== resizing an object with a rope on it ==');
+  await fresh();
+  await rect('wood', 1, X, Y-40, X+80, Y+40);
+  await lockAll();
+  await rect('metal', 1, X+200, Y+140, X+260, Y+200);
+  const rr = await place('rope', X+40, Y, X+230, Y+170);
+  await p.evaluate(() => { window.__pg.setTool('move'); const o = window.__pg.objects().find(q => !q.body.isStatic); window.__pg.select(o); });
+  const wb0 = await p.evaluate(() => { const o = window.__pg.objects().find(q => !q.body.isStatic); return window.__pg.bounds(o.id); });
+  const wf = await w2p(wb0.x2+5, wb0.y2+5);
+  const wto = await w2p(wb0.x-5 + (wb0.x2-wb0.x+10)*2, wb0.y-5 + (wb0.y2-wb0.y+10)*2);
+  await p.mouse.move(wf.x, wf.y); await p.mouse.down(); await p.mouse.move(wto.x, wto.y, { steps: 8 }); await p.mouse.up();
+  await p.waitForTimeout(400);
+  const wb1 = await p.evaluate(() => { const o = window.__pg.objects().find(q => !q.body.isStatic); return window.__pg.bounds(o.id); });
+  const rl1 = (await linksNow())[0];
+  ok('the weight grew', (wb1.x2 - wb1.x) > 100, wb1.x2 - wb1.x);
+  ok('the rope end is still inside it', rl1.bx >= wb1.x - 2 && rl1.bx <= wb1.x2 + 2 && rl1.by >= wb1.y - 2 && rl1.by <= wb1.y2 + 2, { end:[rl1.bx, rl1.by], box: wb1 });
+  await run(); await p.waitForTimeout(2500);
+  const rl2 = (await linksNow())[0];
+  const wgt = (await stats()).filter(o => !o.static)[0];
+  ok('the bigger weight still hangs from it', wgt && wgt.pos.y > Y && wgt.pos.y < 2250 && Math.abs(rl2.span - rl2.length) < 40, { y: wgt && wgt.pos.y, span: rl2.span, length: rl2.length });
+
+  console.log('');
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();

@@ -65,6 +65,10 @@ HOOK = """
     linkSet: function(id, props){ var l = linkById(id); if (!l) return false; for (var k in props){ if (k === 'length'){ setRopeLength(l, props[k]); } else if (k === 'stiff'){ setPistonStiff(l, !!props[k]); } else l[k] = props[k]; } return true; },
     ropePoints: function(id){ var l = linkById(id); return l && l.segs ? ropePoints(l).map(function(q){ return [Math.round(q.x), Math.round(q.y)]; }) : null; },
     selectLink: function(id){ var l = linkById(id); if (l){ selectLink(l); opWanted = true; renderSelBar(); } },
+    linkDebug: function(id){ var l = linkById(id); if (!l || !l.constraint) return null; var c = l.constraint;
+      return { A:{ x:+c.bodyA.position.x.toFixed(2), y:+c.bodyA.position.y.toFixed(2), ang:+c.bodyA.angle.toFixed(4), pt:[+c.pointA.x.toFixed(2), +c.pointA.y.toFixed(2)], angA:+(c.angleA||0).toFixed(4), st:c.bodyA.isStatic },
+               B:{ x:+c.bodyB.position.x.toFixed(2), y:+c.bodyB.position.y.toFixed(2), ang:+c.bodyB.angle.toFixed(4), pt:[+c.pointB.x.toFixed(2), +c.pointB.y.toFixed(2)], angB:+(c.angleB||0).toFixed(4), st:c.bodyB.isStatic },
+               ref: l.stiffRef ? { rod:+l.stiffRef.rodAng0.toFixed(4), base:+l.stiffRef.baseAng0.toFixed(4), rel:+l.stiffRef.relAng0.toFixed(4), tgtIsA:l.stiffRef.tgtIsA } : null, len:l.len }; },
     setFlying: function(v){ setFlying(!!v); return flying; },
     gadgetAt: function(x,y){ placeGadgetAt({x:x,y:y}); return gadgets.length; },
     gadgetSet: function(id, props){ var g = gadgetById(id); if (!g) return false; for (var k in props) g[k] = props[k]; return true; },
