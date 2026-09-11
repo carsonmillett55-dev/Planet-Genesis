@@ -50,6 +50,37 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await clickSection('World'); await p.waitForTimeout(300);
   ok('a one-page section hides the page row', await p.evaluate(() => document.getElementById('pmPages').hidden));
 
+  console.log('\n== the Tools bag: editing tools apart from the connectors, logic and gameplay ==');
+  await clickSection('Tools'); await p.waitForTimeout(300);
+  ok('Tools holds Editing, Connectors, Logic and Gameplay',
+     JSON.stringify(await pageNames()) === JSON.stringify(['Editing','Connectors','Logic','Gameplay']), await pageNames());
+  const chipsOn = () => p.evaluate(() => Array.from(document.querySelectorAll('#pmBody .chip label')).map(l => l.textContent));
+  ok('Editing holds Move & Select, Erase and Vacuum, and nothing else', JSON.stringify(await chipsOn()) === JSON.stringify(['Move & Select','Erase','Vacuum']), await chipsOn());
+  ok('and shows their number keys', JSON.stringify(await p.evaluate(() => Array.from(document.querySelectorAll('#pmBody .chip .keyTag')).map(k => k.textContent))) === JSON.stringify(['1','2','3']));
+  await clickPage('Connectors'); await p.waitForTimeout(250);
+  ok('Connectors holds the bolts, the piston and the rope', (await chipsOn()).includes('Bolt') && (await chipsOn()).includes('Piston') && (await chipsOn()).includes('Rope') && !(await chipsOn()).includes('Erase'), await chipsOn());
+  await clickPage('Logic'); await p.waitForTimeout(250);
+  ok('Logic holds the sensors, switches and the world changer', (await chipsOn()).includes('Player sensor') && (await chipsOn()).includes('Lever') && (await chipsOn()).includes('World changer'), await chipsOn());
+  await clickPage('Gameplay'); await p.waitForTimeout(250);
+  ok('Gameplay holds the camera, mover, creature and the level pieces', (await chipsOn()).includes('Camera') && (await chipsOn()).includes('Mover') && (await chipsOn()).includes('Checkpoint') && (await chipsOn()).includes('Goal'), await chipsOn());
+  await clickSection('Build'); await p.waitForTimeout(250);
+  ok('the Materials page is materials only now', !(await chipsOn()).includes('Erase') && !(await chipsOn()).includes('Vacuum'), await chipsOn());
+  await p.keyboard.press('Escape'); await p.waitForTimeout(200);
+  // the number row
+  const tool = () => p.evaluate(() => window.__pg.tool());
+  await p.keyboard.press('2'); await p.waitForTimeout(80);
+  ok('2 is Erase', (await tool()) === 'erase', await tool());
+  await p.keyboard.press('3'); await p.waitForTimeout(80);
+  ok('3 is Vacuum', (await tool()) === 'vacuum', await tool());
+  await p.keyboard.press('4'); await p.waitForTimeout(80);
+  ok('4 is Bolt', (await tool()) === 'bolt', await tool());
+  await p.keyboard.press('6'); await p.waitForTimeout(80);
+  ok('6 is Piston', (await tool()) === 'piston', await tool());
+  await p.keyboard.press('8'); await p.waitForTimeout(80);
+  ok('8 is Camera', (await tool()) === 'camera', await tool());
+  await p.keyboard.press('1'); await p.waitForTimeout(80);
+  ok('1 is Move & Select', (await tool()) === 'move', await tool());
+
   console.log('\n== your menu gradient ==');
   await clickSection('Character'); await p.waitForTimeout(300);
   await clickPage('Menu Colour'); await p.waitForTimeout(300);

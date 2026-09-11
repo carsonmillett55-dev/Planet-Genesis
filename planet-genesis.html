@@ -908,6 +908,10 @@
   .chip .swatch{ width:1.6rem; height:1.6rem; border-radius:6px; border:2px solid var(--ink); }
   .chip label{ font-family:'Patrick Hand',cursive; font-size:.68rem; color:var(--ink); pointer-events:none; }
   .chip.tool .swatch{ display:flex; align-items:center; justify-content:center; font-size:1rem; background:var(--stitch); }
+  .chip{ position:relative; }
+  .chip .keyTag{ position:absolute; top:-.45rem; right:-.35rem; min-width:1.1rem; height:1.1rem; padding:0 .25rem; border-radius:.55rem;
+    background:var(--ink); color:var(--paper); font-family:'Baloo 2',sans-serif; font-size:.62rem; font-weight:700; line-height:1.1rem; text-align:center;
+    border:2px solid var(--paper); pointer-events:none; }
   .catalogGrid{ display:flex; flex-wrap:wrap; gap:.5rem; justify-content:center; flex:0 0 auto; }
   .colorGrid{ display:grid; grid-template-columns:repeat(7,1fr); gap:.3rem; flex:0 0 auto; margin:.15rem 0 .35rem; }
   .colorSw{ aspect-ratio:1; border-radius:.42rem; border:2px solid rgba(43,27,18,.32); cursor:pointer; padding:0;
@@ -1485,14 +1489,22 @@
     _matCache[key] = rec;
     return rec;
   }
-  /* 1-4 are the tools you reach for constantly while building. 5-9 stay
-     on the materials you reach for most, so nothing was taken away. */
+  /* The number row, 1 to 9, is the tools: the editing tools first, then
+     the connectors and the things reached for most. Carson asked for the
+     editing tools on the numbers; the materials came off them to make
+     room. Each chip in the Tools bag shows its number. */
   var QUICK_TOOLS = [
     { id:"move",  label:"Move & Select" },
     { id:"erase", label:"Erase" },
+    { id:"vacuum", label:"Vacuum" },
     { id:"bolt",  label:"Bolt" },
+    { id:"motorbolt", label:"Motor bolt" },
+    { id:"piston", label:"Piston" },
+    { id:"rope", label:"Rope" },
+    { id:"camera", label:"Camera" },
     { id:"checkpoint", label:"Checkpoint" }
   ];
+  function quickKeyFor(id){ for (var i = 0; i < QUICK_TOOLS.length; i++) if (QUICK_TOOLS[i].id === id) return i + 1; return 0; }
   MATERIAL_ORDER.forEach(function(id){ if (MATERIALS[id]){ MATERIALS[id].base = id; MATERIALS[id].tint = 0; } });
   var DISSOLVE_MS = 650;
   var WATER_DENSITY = MATERIALS.water.density;
@@ -1531,7 +1543,7 @@
     ["vacuum","🌀","Vacuum","Sucks up water and nothing else. Lives on the Materials tab."],
     ["undo","↶","Undo & Redo","Ctrl+Z takes back your last edit — a stroke, a shape, a move, a rotation, a glue, a delete — however long ago you made it, and the toast tells you exactly what it undid. Ctrl+Y puts it back. Forty steps deep, and the ↶ ↷ buttons top right do the same thing."],
     ["camera","🔍","Camera","Scroll to zoom in and out around your cursor; middle-drag, or right-drag empty space with the Move tool, to look around the level. Press C or the ⦿ chip to snap the camera back to your character."],
-    ["keys","⌨","1 to 9","1-4 are your tools — Move, Erase, Bolt, Checkpoint. 5-9 drop straight onto the five materials you'll reach for most: Timber, Grip Sponge, Bounce, Heavy Metal and Ice. In Play mode 1-4 pull faces instead."]
+    ["keys","⌨","1 to 9","The number row is your tools: 1 Move & Select, 2 Erase, 3 Vacuum, 4 Bolt, 5 Motor bolt, 6 Piston, 7 Rope, 8 Camera, 9 Checkpoint — every chip in the Tools bag shows its number. In Play mode 1-4 pull faces instead."]
   ];
 
   var CHAR_COLORS = ["#E8567A","#2F86A6","#F2B705","#5F9E5A","#C89BD9","#F27E42"];
@@ -4992,7 +5004,6 @@
       if (mode === "build"){
         var idx = parseInt(e.key, 10) - 1;
         if (idx < QUICK_TOOLS.length) quickPickTool(idx);
-        else quickPickMaterial(idx - QUICK_TOOLS.length);
       }
       else if (EMOTE_KEYS[e.key]){ triggerEmote(EMOTE_KEYS[e.key]); }
     }
@@ -5009,7 +5020,7 @@
   }
   function pickTool(id, label){
     if (mode !== "build") return;
-    currentTool = id; canvas.dataset.tool = id;
+    currentTool = id; canvas.dataset.tool = id === "vacuum" ? "erase" : id;
     shapeDrag = null; marquee = null;
     if (id !== "move") clearSelection();
     if (pmOpen) renderPersonalMenu();
@@ -7988,22 +7999,11 @@
       });
       grid.appendChild(chip);
     });
-    var eraseChip = document.createElement("div");
-    eraseChip.className = "chip" + (currentTool==="erase" ? " active" : "");
-    eraseChip.innerHTML = '<div class="swatch tool">🧹</div><label>Erase</label>';
-    eraseChip.addEventListener("click", function(){ currentTool="erase"; canvas.dataset.tool="erase"; renderPersonalMenu(); });
-    grid.appendChild(eraseChip);
-    var vacChip = document.createElement("div");
-    vacChip.className = "chip" + (currentTool==="vacuum" ? " active" : "");
-    vacChip.innerHTML = '<div class="swatch tool">🌀</div><label>Vacuum</label>';
-    vacChip.title = "Sucks up water and nothing else";
-    vacChip.addEventListener("click", function(){ currentTool="vacuum"; canvas.dataset.tool="erase"; renderPersonalMenu(); });
-    grid.appendChild(vacChip);
     el.appendChild(grid);
 
-    if (isMaterialTool() || currentTool === "erase" || currentTool === "vacuum"){
-      var isErase = currentTool === "erase" || currentTool === "vacuum", isVac = currentTool === "vacuum";
-      var isFluid = !isErase && !!matOf(currentTool).isFluid;
+    if (isMaterialTool()){
+      var isErase = false, isVac = false;
+      var isFluid = !!matOf(currentTool).isFluid;
       var brushHead = document.createElement("h3");
       brushHead.textContent = isVac ? "Vacuum" : (isErase ? "Eraser" : (isFluid ? "Pouring water" : matOf(currentTool).label + " brush"));
       el.appendChild(brushHead);
@@ -8127,23 +8127,53 @@
     });
     el.appendChild(clearBtn);
   }
-  function renderToolsTab(el){
-    var h = document.createElement("h3"); h.textContent = "Tools"; el.appendChild(h);
+  /* The Tools bag, in LBP2's own groupings: the editing tools you work
+     with (Move & Select, Erase, Vacuum), the connectors that join things
+     (bolts, piston, rope), the logic that senses and switches, and the
+     gameplay pieces (camera, mover, creature, the start, checkpoints,
+     bubbles, the goal). Carson wanted the editing tools in a different
+     spot from the bolts and pistons and all. */
+  var TOOL_PAGES = {
+    editing:    { title:"Editing", defs:[["move","🕹","Move & Select"],["erase","🧹","Erase"],["vacuum","🌀","Vacuum"]],
+                  note:"Move & Select drags, resizes and picks things to set up. Erase takes material off the layer you are on. Vacuum takes water and nothing else. Hold Tab anywhere to glue two objects into one." },
+    connectors: { title:"Connectors", defs:[["bolt","🔩","Bolt"],["sprungbolt","🌀","Sprung bolt"],["motorbolt","⚙","Motor bolt"],["wobblebolt","↔","Wobble bolt"],["piston","🔩","Piston"],["rope","➰","Rope"]],
+                  note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
+    logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["changer","🌗","World changer"]],
+                  note:"Put them on something. Right-click one and Connect it to a motor, a piston, a camera, a mover or a world changer — it drives that while it is on." },
+    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
+                  note:"A camera shows its shot while the player is in its zone. A mover carries an object along a line. A creature eye makes an object chase the player." }
+  };
+  function renderToolsTab(el, pageId){
+    var page = TOOL_PAGES[pageId] || TOOL_PAGES.editing;
+    var h = document.createElement("h3"); h.textContent = page.title; el.appendChild(h);
     var grid = document.createElement("div"); grid.className = "catalogGrid";
-    var defs = [["move","🕹","Move"],["bolt","🔩","Bolt"],["sprungbolt","🌀","Sprung bolt"],["motorbolt","⚙","Motor bolt"],["wobblebolt","↔","Wobble bolt"],
-                ["piston","🔩","Piston"],["rope","➰","Rope"],
-                ["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["camera","🎥","Camera"],["mover","➡","Mover"],["changer","🌗","World changer"],["eye","🧿","Creature eye"],
-                ["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]];
-    defs.forEach(function(d){
-      var chip = document.createElement("div"); chip.className = "chip" + (currentTool===d[0] ? " active" : "");
-      chip.innerHTML = '<div class="swatch tool">'+d[1]+'</div><label>'+d[2]+'</label>';
-      chip.addEventListener("click", function(){ currentTool = d[0]; canvas.dataset.tool = d[0]; closePersonalMenu(); });
+    page.defs.forEach(function(d){
+      var chip = document.createElement("div"); chip.className = "chip tool" + (currentTool===d[0] ? " active" : "");
+      var key = quickKeyFor(d[0]);
+      chip.innerHTML = '<div class="swatch tool">'+d[1]+'</div><label>'+d[2]+'</label>' + (key ? '<span class="keyTag">' + key + '</span>' : '');
+      if (key) chip.title = "Press " + key;
+      chip.addEventListener("click", function(){ currentTool = d[0]; canvas.dataset.tool = d[0] === "vacuum" ? "erase" : d[0]; if (d[0] !== "move") clearSelection(); renderPersonalMenu(); if (pageId !== "editing" || d[0] === "move") closePersonalMenu(); });
       grid.appendChild(chip);
     });
     el.appendChild(grid);
+    if (pageId === "editing" && (currentTool === "erase" || currentTool === "vacuum")) renderEraserSettings(el, currentTool === "vacuum");
     var note = document.createElement("div"); note.className = "sub";
-    note.textContent = "Bolts go through: point at something on your layer that has something behind it (or in front), and click. Right-click a bolt to set it up. Hold Tab anywhere to glue two objects into one.";
+    note.textContent = page.note;
     el.appendChild(note);
+  }
+  /* The eraser and the vacuum have one setting: their size. */
+  function renderEraserSettings(el, isVac){
+    var brushHead = document.createElement("h3"); brushHead.textContent = isVac ? "Vacuum" : "Eraser"; el.appendChild(brushHead);
+    el.appendChild(sliderRow(isVac ? "Vacuum size" : "Eraser size", paintScale, PAINT_SCALE_MIN, PAINT_SCALE_MAX, 0.05,
+      function(v){ paintScale = v; persistPaintBrush(); }, function(v){ return Math.round(v*BRUSH_R*2) + "px"; }));
+    var tip = document.createElement("div"); tip.className = "noteText";
+    tip.textContent = isVac
+      ? "Drag over water to suck it up. It takes water and only water — nothing you built is touched, on any layer."
+      : "The dashed outline on your cursor shows exactly what the eraser will take out, on the layer you are on — water too, on the Mid layer. It cuts the shape rather than removing whole chunks, so you can shave an edge as finely as you like.";
+    el.appendChild(tip);
+    var doneBtn = document.createElement("button"); doneBtn.className = "btn small"; doneBtn.textContent = isVac ? "Start vacuuming" : "Start erasing";
+    doneBtn.addEventListener("click", closePersonalMenu);
+    el.appendChild(doneBtn);
   }
   function renderMyObjectsTab(el){
     var h = document.createElement("h3"); h.textContent = "My Objects"; el.appendChild(h);
@@ -8810,7 +8840,10 @@
       { id:"myobjects", label:"My Objects", render:renderMyObjectsTab }
     ]},
     { id:"toolsbag", icon:"🧰", label:"Tools", pages:[
-      { id:"functions", label:"Functions", render:renderToolsTab }
+      { id:"editing", label:"Editing", render:function(el){ renderToolsTab(el, "editing"); } },
+      { id:"connectors", label:"Connectors", render:function(el){ renderToolsTab(el, "connectors"); } },
+      { id:"logic", label:"Logic", render:function(el){ renderToolsTab(el, "logic"); } },
+      { id:"gameplay", label:"Gameplay", render:function(el){ renderToolsTab(el, "gameplay"); } }
     ]},
     { id:"world", icon:"🌍", label:"World", pages:[
       { id:"world", label:"World Settings", render:renderWorldSettingsTab }

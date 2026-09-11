@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` | Playwright suites, 565 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` | Playwright suites, 581 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 565 checks + checkgeom, in order
+npm test                   # all 581 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -50,12 +50,12 @@ Or one suite at a time:
 
 ```
 node regress.js            # 35 — geometry, save/load, play mode, loop and save safety, map edges
-node tsel.js               # 39 — selection, marquee, group transforms, resize, detach
+node tsel.js               # 42 — selection, marquee, group transforms, resize, detach, the number row
 node tlayer.js             # 12 — layer accuracy, ranked picking, the hover label
 node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
-node tmenu.js              # 19 — the personal menu's sections, pages and gradient
+node tmenu.js              # 32 — the personal menu's sections, the Tools bag's four pages, the number keys, the gradient
 node tbolt.js              # 56 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, typed rpm, painting onto a bolted wall, save/load
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
 node tlink.js              # 59 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
@@ -932,13 +932,25 @@ whole structure:
   level, not something you read, so picking it selects the move tool and
   closes the menu.
 - **Build** — what you make the world from. Materials, My Objects.
-- **Tools** — what you make behaviour from. Functions today; the roadmap's
-  gadget family, music and backgrounds land here.
+- **Tools** — four pages, LBP2's own groupings (`TOOL_PAGES`): **Editing**
+  (Move & Select, Erase, Vacuum — with the eraser's size when one is in
+  hand), **Connectors** (the bolts, piston, rope), **Logic** (the sensors,
+  button, lever, world changer), **Gameplay** (camera, mover, creature
+  eye, start, checkpoint, bubble, goal). Carson wanted the editing tools
+  in a different spot from the bolts and pistons. Erase and Vacuum came
+  off the Materials page, which is materials only now. Picking a tool on
+  a page other than Editing closes the menu, as Select does.
 - **World** — the level itself.
 - **Character** — Appearance, and Menu Colour.
 
 Adding a page is one line in that table. A section with a single page hides
 the page row, since the icon already said what it is.
+
+**The number row is the tools.** `QUICK_TOOLS`, 1 to 9: Move & Select,
+Erase, Vacuum, Bolt, Motor bolt, Piston, Rope, Camera, Checkpoint. Every
+chip in the Tools bag wears its number (`.keyTag`, `quickKeyFor`). The
+materials used to sit on 5–9; they came off to make room, at Carson's
+ask. In Play 1–4 are still emotes.
 
 **The gradient is a personal setting, not a level one.** Two colours and an
 angle, written onto `#personalMenu` as `--pop-a`, `--pop-b` and `--pop-ang`,
