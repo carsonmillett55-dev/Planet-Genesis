@@ -1497,7 +1497,7 @@
   // reads naturally instead of dumping raw material stats.
   var MATERIAL_INFO = {
     wood:       "Sturdy, reliable, and grippy — a great default building block. Medium weight, high friction, barely bounces.",
-    sponge:     "Extra grippy, and the only material you can grab — hold Shift or the right mouse button while touching it. Light and very high friction.",
+    sponge:     "Extra grippy, and the only material you can grab — hold the right mouse button (or Q) while touching it. Light and very high friction.",
     rubber:     "Springy — objects rebound hard off it. Low friction so things slide around, but they'll bounce while they do it.",
     metal:      "By far the heaviest material. Makes a great stable anchor or wrecking weight, but it's slippery and barely bounces.",
     ice:        "Nearly frictionless — anything touching it slides freely. Good for slippery slopes and skating puzzles.",
@@ -1739,7 +1739,8 @@
     { id:"down",      label:"Fly down",         def:["ArrowDown","KeyS"] },
     { id:"jump",      label:"Jump / fly toggle",def:["Space"] },
     { id:"interact",  label:"Use a lever",      def:["KeyF"] },
-    { id:"grab",      label:"Grab (hold)",      def:["ShiftLeft","ShiftRight"] },
+    { id:"grab",      label:"Grab (hold) — right-click also grabs in Play", def:["KeyQ"] },
+    { id:"sprint",    label:"Sprint (hold)",    def:["ShiftLeft","ShiftRight"] },
     { id:"menu",      label:"Personal menu",    def:["KeyE"] },
     { id:"pauseMenu", label:"Pause menu",       def:["Escape"] },
     { id:"pause",     label:"Pause / resume",   def:["KeyP"] },
@@ -3851,6 +3852,7 @@
      slightly-larger-than-the-player rectangle, never in the world, used
      only to ask "is grabbable material within reach". */
   var grabConstraint = null, grabHeld = false, grabMouse = false, grabProbe = null;
+  var WALK_SPEED = 4.2;
   var GRAB_REACH = 16;
   var flying = false;
   var mouseWorld = { x: 0, y: 0 };
@@ -4295,7 +4297,7 @@
   /* ============================================================
      4. Input
      ============================================================ */
-  var input = { left:false, right:false, up:false, down:false, jumpQueued:false };
+  var input = { left:false, right:false, up:false, down:false, jumpQueued:false, sprint:false };
   var lastSpaceTime = 0;
   var DOUBLE_TAP_MS = 320;
   var glueMode = false;
@@ -4381,6 +4383,7 @@
     }
     if (isAction("interact", e.code) && !e.repeat && runner.enabled){ if (useLever()) e.preventDefault(); }
     if (isAction("grab", e.code)){ e.preventDefault(); setGrabHeld(true); }
+    if (isAction("sprint", e.code)){ input.sprint = true; }
     if (isAction("pauseMenu", e.code) && !e.repeat){
       e.preventDefault();
       // Esc backs out of whatever is half done before it means "menu".
@@ -4454,6 +4457,7 @@
     if (isAction("glue", e.code)){ exitGlueMode(); }
     if (isAction("interact", e.code)) releaseLevers();
     if (isAction("grab", e.code) && !grabMouse) setGrabHeld(false);
+    if (isAction("sprint", e.code)) input.sprint = false;
   });
   window.addEventListener("blur", function(){ exitGlueMode(); });
 
@@ -4473,7 +4477,9 @@
   onStep("beforeUpdate", function(){
     if (!player || !runner.enabled) return;
     if (grabHeld && !grabConstraint) tryGrab();
-    var speed = flying ? FLY_SPEED : 4.2;
+    // Sprint is a bit quicker, not a dash — LBP has no sprint at all, so
+    // this stays modest enough that levels built at walking pace still work.
+    var speed = flying ? FLY_SPEED : (input.sprint ? WALK_SPEED * 1.45 : WALK_SPEED);
     var vx = 0;
     if (input.left) vx -= speed;
     if (input.right) vx += speed;
@@ -4563,7 +4569,7 @@
     lastFreeMoveT = now;
     if (!player || runner.enabled){ pausedVy = 0; return; }
     var k = dt/16.666;
-    var speed = (flying ? FLY_SPEED : 4.2) * k;
+    var speed = (flying ? FLY_SPEED : (input.sprint ? WALK_SPEED * 1.45 : WALK_SPEED)) * k;
     var dx = 0, dy = 0;
     if (input.left) dx -= speed;
     if (input.right) dx += speed;

@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` | Playwright suites, 331 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` | Playwright suites, 333 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 331 checks + checkgeom, in order
+npm test                   # all 333 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -59,7 +59,7 @@ node tmenu.js              # 19 — the personal menu's sections, pages and grad
 node tbolt.js              # 50 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, save/load
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
 node tlink.js              # 49 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load
-node tgrab.js              # 17 — grabbing: by key or mouse, sponge only, swinging, dragging, letting go
+node tgrab.js              # 19 — grabbing: by key or mouse, sponge only, swinging, dragging, letting go; sprint
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -514,9 +514,15 @@ LBP's grab, not a grapple. **Hold grab while touching grabbable material
 and your hands close on it where they are; let go and they open.** Hanging
 sponge — on a rope, a bolt, a piston — you swing with; loose sponge on the
 ground you drag. Grab in mid-air to catch a swinging one. Grab is a held
-key, as LBP's R1 is: **Shift** (rebindable, `grab`), or the **right mouse
-button in Play** (`grabMouse`). No aiming: the mouse position means nothing
-to it. Space while holding lets go and jumps.
+key, as LBP's R1 is: the **right mouse button in Play** (`grabMouse`) is
+the default, with **Q** on the keyboard (rebindable, `grab`) for Build or
+preference. No aiming: the mouse position means nothing to it. Space while
+holding lets go and jumps.
+
+**Sprint** is Shift (rebindable, `sprint`): `WALK_SPEED * 1.45`, a bit
+quicker rather than a dash — LBP has no sprint at all, so it stays modest
+enough that levels built at walking pace still work. Applies to the paused
+walk too.
 
 The grip is `grabConstraint`, a short stiff constraint from the player's
 centre to the hold point, the length it was at the moment of the grab so
@@ -711,7 +717,8 @@ biggest jump in what a level can actually do.
 
 Also still wanted from the earlier list: custom drawn materials (the save
 schema already reserves `u:<id>` keys — needs a drawing surface, property
-sliders, naming, and embedding into levels), layer peek, and sprint on shift.
+sliders, naming, and embedding into levels) and layer peek. Sprint on Shift
+is done.
 
 The floppy swingable rope is **superseded, and the grab is built**: hold
 Shift or the right mouse button while touching sponge. Ropes as level

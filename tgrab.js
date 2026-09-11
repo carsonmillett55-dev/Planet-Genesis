@@ -42,14 +42,14 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await play();
   await standAt(X-22, Y+60);                               // right beside the sponge, touching
   ok('nothing is held before the key', !(await grabbing()));
-  await p.keyboard.down('ShiftLeft'); await p.waitForTimeout(250);
-  ok('holding Shift beside sponge grabs it', await grabbing());
-  await p.keyboard.up('ShiftLeft'); await p.waitForTimeout(200);
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
+  ok('holding Q beside sponge grabs it', await grabbing());
+  await p.keyboard.up('KeyQ'); await p.waitForTimeout(200);
   ok('letting go lets go', !(await grabbing()));
   await standAt(X-300, Y+60);                              // nowhere near it
-  await p.keyboard.down('ShiftLeft'); await p.waitForTimeout(250);
-  ok('holding Shift with nothing grabbable in reach grabs nothing', !(await grabbing()));
-  await p.keyboard.up('ShiftLeft');
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
+  ok('holding Q with nothing grabbable in reach grabs nothing', !(await grabbing()));
+  await p.keyboard.up('KeyQ');
 
   console.log('');
   console.log('== only grabbable material ==');
@@ -59,9 +59,9 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await lockAll();
   await play();
   await standAt(X-22, Y+60);
-  await p.keyboard.down('ShiftLeft'); await p.waitForTimeout(250);
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
   ok('wood cannot be grabbed', !(await grabbing()));
-  await p.keyboard.up('ShiftLeft');
+  await p.keyboard.up('KeyQ');
 
   console.log('');
   console.log('== the right mouse button grabs too ==');
@@ -92,7 +92,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const sp = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0];
   ok('the sponge hangs from the rope', !!sp && sp.pos.y > Y-80 && sp.pos.y < Y+260, sp && sp.pos);
   // drop the player in beside it, grabbing on the way past
-  await p.keyboard.down('ShiftLeft');
+  await p.keyboard.down('KeyQ');
   await p.evaluate(([x,y]) => window.__pg.playerTo(x,y), [sp.pos.x - 34, sp.pos.y - 60]);
   await p.waitForTimeout(500);
   ok('grabbing in mid-air catches it', await grabbing());
@@ -109,7 +109,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const jumped = await pos();
   await p.waitForTimeout(150);
   ok('and jumps you off it', (await pos()).y < jumped.y + 40, { before: jumped.y, after: (await pos()).y });
-  await p.keyboard.up('ShiftLeft');
+  await p.keyboard.up('KeyQ');
 
   console.log('');
   console.log('== dragging a loose sponge ==');
@@ -121,10 +121,10 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await standAt(X-24, Y+60);
   await p.waitForTimeout(400);
   const bx0 = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0].pos.x;
-  await p.keyboard.down('ShiftLeft'); await p.waitForTimeout(250);
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
   ok('grabbed the loose sponge', await grabbing());
   await p.keyboard.down('KeyA'); await p.waitForTimeout(900); await p.keyboard.up('KeyA');
-  await p.keyboard.up('ShiftLeft'); await p.waitForTimeout(200);
+  await p.keyboard.up('KeyQ'); await p.waitForTimeout(200);
   const bx1 = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0].pos.x;
   ok('walking away drags it along', bx1 < bx0 - 20, { from: bx0, to: bx1 });
 
@@ -136,12 +136,32 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await lockAll();
   await p.evaluate(() => { window.__pg.paused(false); });
   await standAt(X-22, Y+60);
-  await p.keyboard.down('ShiftLeft'); await p.waitForTimeout(250);
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
   ok('grabbed it in Build with the world running', await grabbing());
   await p.evaluate(() => { window.__pg.setTool('move'); const o = window.__pg.objects().find(q => q.pieces[0].m === 'sponge'); window.__pg.select(o); window.__pg.flip(); });
   await p.waitForTimeout(300);
   ok('flipping the sponge under your hands keeps the grip', await grabbing());
-  await p.keyboard.up('ShiftLeft');
+  await p.keyboard.up('KeyQ');
+
+  console.log('');
+  console.log('== sprint on Shift ==');
+  await fresh();
+  await rect('wood', 1, X-400, Y+100, X+600, Y+140);
+  await lockAll();
+  await play();
+  await standAt(X-300, Y+60); await p.waitForTimeout(300);
+  const w0 = await pos();
+  await p.keyboard.down('KeyD'); await p.waitForTimeout(800); await p.keyboard.up('KeyD');
+  await p.waitForTimeout(150);
+  const walked = (await pos()).x - w0.x;
+  await standAt(X-300, Y+60); await p.waitForTimeout(300);
+  const s0 = await pos();
+  await p.keyboard.down('ShiftLeft'); await p.keyboard.down('KeyD'); await p.waitForTimeout(800); await p.keyboard.up('KeyD'); await p.keyboard.up('ShiftLeft');
+  await p.waitForTimeout(150);
+  const sprinted = (await pos()).x - s0.x;
+  console.log('   walked', walked.toFixed(0) + 'px, sprinted', sprinted.toFixed(0) + 'px in the same time');
+  ok('holding Shift is quicker', sprinted > walked * 1.25, { walked, sprinted });
+  ok('but only a bit — not a dash', sprinted < walked * 1.8, { walked, sprinted });
 
   console.log('');
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');

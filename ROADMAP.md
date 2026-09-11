@@ -91,11 +91,11 @@ Carried over from the earlier near-term list in `CLAUDE.md`, still wanted:
 
 - **Layer peek** — related to, but not the same as, temporarily hiding an
   object in a layer.
-- **Sprint on shift.**
+- **Sprint on shift.** DONE — a bit quicker, not a dash.
 
 ### The grab (supersedes the floppy rope) — DONE
 
-Built 2026-09-10: hold Shift or the right mouse button while touching
+Built 2026-09-10: hold the right mouse button (or Q) while touching
 sponge and your hands close on it. Swing from a hanging one, drag a loose
 one, catch one mid-air, Space to let go and jump. Sponge within reach glows
 while the key is held. Covered by `tgrab.js`.
