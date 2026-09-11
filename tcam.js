@@ -99,8 +99,8 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [MX+360, MY-40]);
   const camG = await theCamera();
   ok('a camera can be placed from the Tools', !!camG, camG);
-  ok('with LBP2\'s settings: zoom, tracking, speed, a zone', camG && camG.zoom === 1 && camG.tracking === 0.5 && camG.speed === 0.5 && camG.radius === 320, camG);
-  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 0.5, tracking: 0, speed: 1, radius: 220 }), camG.id);
+  ok('with LBP2\'s settings: zoom, tracking, speed, a zone box, a view', camG && camG.zoom === 1 && camG.tracking === 0.5 && camG.speed === 0.5 && camG.zone && camG.zone.w === 640 && camG.zone.h === 400 && camG.view && camG.view.dx === 0, camG);
+  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 0.5, tracking: 0, speed: 1, zone: { dx: 0, dy: 0, w: 440, h: 440 } }), camG.id);
   await play();
   await standAt(MX-200, MY+60); await p.waitForTimeout(300);   // far from the camera
   ok('outside the zone the camera is not in charge', (await p.evaluate(() => window.__pg.playCam())).active === null);
@@ -126,10 +126,10 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await build(); await camMid();
   const sv2 = await p.evaluate(() => window.__pg.serialize('cam2'));
   const gs = sv2.gadgets.filter(g => g.kind === 'camera')[0];
-  ok('the save carries the camera and its settings', gs && gs.zoom === 0.5 && gs.tracking === 1 && gs.speed === 1 && gs.radius === 220, gs);
+  ok('the save carries the camera and its settings', gs && gs.zoom === 0.5 && gs.tracking === 1 && gs.speed === 1 && gs.zone && gs.zone.w === 440, gs);
   await p.evaluate(sv => window.__pg.load(sv), sv2); await p.waitForTimeout(300);
   const back = (await p.evaluate(() => window.__pg.gadgets())).filter(g => g.kind === 'camera')[0];
-  ok('and a load brings it back', back && back.zoom === 0.5 && back.tracking === 1 && back.speed === 1 && back.radius === 220, back);
+  ok('and a load brings it back', back && back.zoom === 0.5 && back.tracking === 1 && back.speed === 1 && back.zone && back.zone.w === 440 && back.zone.h === 440, back);
 
   console.log('');
   console.log('== a wired camera answers to the switch, not the zone ==');
@@ -140,7 +140,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await lockAll();
   await p.evaluate(() => { window.__pg.setLayer(0); window.__pg.setTool('camera'); });
   await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [MX+360, MY-40]);
-  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 0.5, tracking: 0, speed: 1, radius: 220 }), (await theCamera()).id);
+  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 0.5, tracking: 0, speed: 1, zone: { dx: 0, dy: 0, w: 440, h: 440 } }), (await theCamera()).id);
   await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('lever'); });
   await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [MX-200, MY+100]);
   ok('a lever can be wired to a camera', await p.evaluate(([a,b]) => window.__pg.wire(a,b), [(await theLever()).id, (await theCamera()).id]));
@@ -164,7 +164,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(() => { window.__pg.setLayer(0); window.__pg.setTool('camera'); });
   await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [MX+360, MY-40]);
   // hold for a second after the player leaves
-  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 0.5, tracking: 0, speed: 1, radius: 220, hold: 1 }), (await theCamera()).id);
+  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 0.5, tracking: 0, speed: 1, zone: { dx: 0, dy: 0, w: 440, h: 440 }, hold: 1 }), (await theCamera()).id);
   await play();
   const hId = (await theCamera()).id;
   await standAt(MX+360, MY+60); await p.waitForTimeout(500);
@@ -218,6 +218,99 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.keyboard.down('KeyD'); await p.waitForTimeout(500); await p.keyboard.up('KeyD');
   ok('and outside the zone you walk as usual', (await pos()).x > gx0 + 80, { from: gx0, to: (await pos()).x });
   await build();
+
+  console.log('');
+  console.log('== the zone is a box you can move and resize; the view is a frame you can move and zoom ==');
+  await fresh(); await camMid(); await p.waitForTimeout(150);
+  await rect('wood', 1, MX-380, MY+100, MX+600, MY+140);
+  await rect('wood', 0, MX+300, MY-100, MX+420, MY+20);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.setLayer(0); window.__pg.setTool('camera'); });
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [MX+360, MY-40]);
+  // a wide, flat zone off to the left of the camera, and the view looking somewhere else again
+  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 1.5, tracking: 0, speed: 1, zone: { dx: -400, dy: 100, w: 600, h: 120 }, view: { dx: 150, dy: 60 } }), (await theCamera()).id);
+  await play();
+  await standAt(MX+360, MY+60); await p.waitForTimeout(400);          // under the camera: outside the zone box, which sits to the left
+  ok('standing under the camera, outside its box, it stays out of it', (await p.evaluate(() => window.__pg.playCam())).active === null);
+  await standAt(MX+360-400+250, MY+60); await p.waitForTimeout(600);  // far along the flat box, still inside it
+  ok('inside the box — even far from the camera — it takes over', (await p.evaluate(() => window.__pg.playCam())).active !== null);
+  const cv = await centre();
+  ok('and looks where the view frame was put, not at the camera', Math.abs(cv.x - (MX+360+150)) < 8 && Math.abs(cv.y - (MY-40+60)) < 8, { centre: cv, wanted: [MX+510, MY+20] });
+  await build(); await camMid();
+  // now by hand: select it and drag the corners and edges on the level
+  const cid = (await theCamera()).id;
+  await p.evaluate(id => window.__pg.selectGadget(id), cid); await p.evaluate(() => { window.__pg.setTool('move'); });
+  await p.waitForTimeout(150);
+  const g0 = await theCamera();
+  const drag = async (x0, y0, x1, y1) => {
+    const a = await w2p(x0, y0), c = await w2p(x1, y1);
+    for (const q of [a, c]) if (q.x < 2 || q.y < 2 || q.x > 1278 || q.y > 758) throw new Error('drag point off the screen: ' + JSON.stringify(q) + ' — a drag from off-screen breaks every later drag');
+    await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(c.x, c.y, { steps: 8 }); await p.mouse.up(); await p.waitForTimeout(150);
+  };
+  const ax = MX+360, ay = MY-40;                                    // the camera's own spot
+  // the zone's bottom-right corner: pull it 100 right and 40 down
+  const zr = { x: ax + g0.zone.dx - g0.zone.w/2, y: ay + g0.zone.dy - g0.zone.h/2, w: g0.zone.w, h: g0.zone.h };
+  await drag(zr.x + zr.w, zr.y + zr.h, zr.x + zr.w + 100, zr.y + zr.h + 40);
+  let g1 = await theCamera();
+  ok('dragging a zone corner resizes the zone', Math.abs(g1.zone.w - (g0.zone.w + 100)) < 3 && Math.abs(g1.zone.h - (g0.zone.h + 40)) < 3, g1.zone);
+  ok('about the opposite corner, which stays put', Math.abs((ax + g1.zone.dx - g1.zone.w/2) - zr.x) < 3 && Math.abs((ay + g1.zone.dy - g1.zone.h/2) - zr.y) < 3, g1.zone);
+  // the zone's top edge, in the middle: slide the whole box up 60
+  const zr1 = { x: ax + g1.zone.dx - g1.zone.w/2, y: ay + g1.zone.dy - g1.zone.h/2, w: g1.zone.w, h: g1.zone.h };
+  await drag(zr1.x + zr1.w/2 + 30, zr1.y, zr1.x + zr1.w/2 + 30, zr1.y - 60);
+  let g2 = await theCamera();
+  ok('dragging the zone\'s edge moves the whole zone', Math.abs(g2.zone.dy - (g1.zone.dy - 60)) < 3 && Math.abs(g2.zone.w - g1.zone.w) < 1, g2.zone);
+  // the view frame's left edge: slide the shot 80 to the right
+  const fw = (await view()).w * (await view()).zoom / g2.zoom, fh = (await view()).h * (await view()).zoom / g2.zoom;   // the frame at the camera's zoom, in world px
+  const fr = { x: ax + g2.view.dx - fw/2, y: ay + g2.view.dy - fh/2, w: fw, h: fh };
+  await drag(fr.x, fr.y + fr.h/2 + 40, fr.x + 80, fr.y + fr.h/2 + 40);
+  let g3 = await theCamera();
+  ok('dragging the frame\'s edge moves where it looks', Math.abs(g3.view.dx - (g2.view.dx + 80)) < 3 && Math.abs(g3.view.dy - g2.view.dy) < 3, g3.view);
+  // the frame's bottom-right corner, pulled in: a tighter shot
+  const fr3 = { x: ax + g3.view.dx - fw/2, y: ay + g3.view.dy - fh/2, w: fw, h: fh };
+  await drag(fr3.x + fr3.w, fr3.y + fr3.h, fr3.x + fr3.w * 0.6, fr3.y + fr3.h * 0.6);
+  let g4 = await theCamera();
+  ok('dragging a frame corner inward zooms the shot in', g4.zoom > g3.zoom * 1.4, { before: g3.zoom, after: g4.zoom });
+  ok('and the opposite corner of the frame stays put', Math.abs((ax + g4.view.dx - fw * g3.zoom / g4.zoom / 2) - fr3.x) < 4, { left: ax + g4.view.dx - fw * g3.zoom / g4.zoom / 2, was: fr3.x });
+  const svZ = await p.evaluate(() => window.__pg.serialize('zone'));
+  const gz = svZ.gadgets.filter(g => g.kind === 'camera')[0];
+  ok('the save carries the zone box and the view', gz && gz.zone && Math.abs(gz.zone.w - g4.zone.w) < 0.01 && gz.view && Math.abs(gz.view.dx - g4.view.dx) < 0.01, gz && { zone: gz.zone, view: gz.view });
+  await p.evaluate(sv => window.__pg.load(sv), svZ); await p.waitForTimeout(300);
+  const gzB = await theCamera();
+  ok('and a load brings them back', gzB && Math.abs(gzB.zone.w - g4.zone.w) < 0.01 && Math.abs(gzB.zone.dy - g4.zone.dy) < 0.01 && Math.abs(gzB.view.dx - g4.view.dx) < 0.01, gzB && { zone: gzB.zone, view: gzB.view });
+
+  console.log('');
+  console.log('== in Build, walking into a zone shows the shot; flying brings the editor back ==');
+  await fresh(); await camMid(); await p.waitForTimeout(150);
+  await rect('wood', 1, MX-380, MY+100, MX+600, MY+140);
+  await rect('wood', 0, MX+300, MY-100, MX+420, MY+20);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.setLayer(0); window.__pg.setTool('camera'); });
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [MX+360, MY-40]);
+  await p.evaluate(id => window.__pg.gadgetSet(id, { zoom: 0.5, tracking: 0, speed: 1, zone: { dx: 0, dy: 0, w: 440, h: 440 } }), (await theCamera()).id);
+  await p.evaluate(() => { window.__pg.deselect(); window.__pg.setTool('move'); });
+  // the editor camera on the character, flying, inside the zone: nothing happens
+  await p.evaluate(() => { window.__pg.setFlying(true); const h = document.getElementById('camHome'); if (h) h.click(); });
+  await standAt(MX+360, MY+60); await p.waitForTimeout(500);
+  const bz0 = (await view()).zoom;
+  ok('flying through the zone, the editor view is untouched', Math.abs(bz0 - 1) < 0.01 && (await p.evaluate(() => window.__pg.playCam())).active === null, { zoom: bz0 });
+  // land: the shot shows
+  await p.evaluate(() => window.__pg.setFlying(false));
+  await p.waitForTimeout(700);
+  ok('landed inside the zone, the camera shows its shot', (await p.evaluate(() => window.__pg.playCam())).active !== null && Math.abs((await view()).zoom - 0.5) < 0.03, { zoom: (await view()).zoom, pc: await p.evaluate(() => window.__pg.playCam()) });
+  const bc = await centre();
+  ok('looking where the camera looks', Math.abs(bc.x - (MX+360)) < 8 && Math.abs(bc.y - (MY-40)) < 8, { centre: bc });
+  // fly again: straight back to the editor's zoom, on the character
+  await p.evaluate(() => window.__pg.setFlying(true));
+  await p.waitForTimeout(200);
+  ok('flying again puts the editor view back at once', Math.abs((await view()).zoom - 1) < 0.01 && (await p.evaluate(() => window.__pg.playCam())).active === null && (await p.evaluate(() => window.__pg.camFollowing())), { zoom: (await view()).zoom });
+  ok('and the editor zoom was never overwritten by the preview', (await p.evaluate(() => window.__pg.edCam())) === null);
+  // walk out of the zone on foot: it hands back by itself
+  await p.evaluate(() => window.__pg.setFlying(false));
+  await standAt(MX+360, MY+60); await p.waitForTimeout(600);
+  ok('walking, the shot is on again', (await p.evaluate(() => window.__pg.playCam())).active !== null);
+  await standAt(MX-300, MY+60); await p.waitForTimeout(900);
+  ok('walking out of the zone hands the editor view back', Math.abs((await view()).zoom - 1) < 0.02 && (await p.evaluate(() => window.__pg.playCam())).active === null, { zoom: (await view()).zoom });
+  await p.evaluate(() => window.__pg.setFlying(true));
 
   console.log('');
   console.log('== the level sets the walking and sprinting pace ==');

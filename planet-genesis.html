@@ -2679,8 +2679,15 @@
     if (kind === "camera"){
       /* LBP2's Game Camera: a zone, a view, how much it tracks the player
          and how fast it moves. The view is centred on the camera itself. */
-      g.radius = extra.radius != null ? +extra.radius : 320;
       g.zoom = extra.zoom != null ? Math.max(CAM_ZOOM_MIN, Math.min(CAM_ZOOM_MAX, +extra.zoom)) : 1;
+      /* The zone is a box and the view is a frame, and both are offsets
+         from the camera in world axes — LBP2 lets you put the trigger area
+         and the shot wherever you like, independent of where the camera
+         object sits. Old saves had a radius: it becomes a square zone. */
+      var zr = extra.radius != null ? +extra.radius * 2 : null;
+      g.zone = extra.zone && isFinite(+extra.zone.w) ? { dx:+extra.zone.dx||0, dy:+extra.zone.dy||0, w:Math.max(40, Math.min(6000, +extra.zone.w)), h:Math.max(40, Math.min(6000, +extra.zone.h||40)) }
+                                                    : { dx:0, dy:0, w: zr || 640, h: zr || 400 };
+      g.view = extra.view && isFinite(+extra.view.dx) ? { dx:+extra.view.dx, dy:+extra.view.dy||0 } : { dx:0, dy:0 };
       g.tracking = extra.tracking != null ? Math.max(0, Math.min(1, +extra.tracking)) : 0.5;
       g.speed = extra.speed != null ? Math.max(0, Math.min(1, +extra.speed)) : 0.5;
       g.visible = extra.visible != null ? !!extra.visible : false;   // a camera is scenery only to its maker
@@ -4360,6 +4367,10 @@
       player.collisionFilter = playerFilter();
       if (flying){ Body.setVelocity(player, {x:0,y:0}); releaseRope(); }
     }
+    // flying: the editor's own view comes straight back; landing: any camera
+    // shot starts fresh
+    resetPlayCamera();
+    if (flying) endBuildPreview();
     showToast(flying ? "🕊 Flying on — fly straight through objects. Double-tap Space again to land" : "Flying off");
   }
 
@@ -4969,7 +4980,8 @@
       return { kind:g.kind, o:objIndex[g.obj.id], x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
                zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdForever:g.holdForever, shake:g.shake, freeze:g.freeze,
-               sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null };
+               sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
+               zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -5148,7 +5160,7 @@
     }
     camZoom = Math.max(floorZ, Math.min(CAM_ZOOM_MAX, camZoom));
     camScale = baseScale * camZoom;
-    if (typeof mode === "undefined" || mode !== "play"){ buildZoom = camZoom; localStorage.setItem("pg_zoom", String(camZoom)); }
+    if (typeof mode === "undefined" || (mode !== "play" && !edCam)){ buildZoom = camZoom; localStorage.setItem("pg_zoom", String(camZoom)); }
     if (zoomValEl) zoomValEl.textContent = Math.round(camZoom*100) + "%";
   }
   /* Sized and measured from the CANVAS, not its wrapper. The wrapper has a
@@ -5189,19 +5201,25 @@
      speed; with no camera ever involved the view sits exactly on the
      character, as it always did, so nothing built on that changes. */
   var playCam = { cx:0, cy:0, zoom:1, ever:false, easing:false, lastSpeed:0.5, active:null };
+  function cameraView(g){ var gp = gadgetWorld(g); return { x: gp.x + (g.view ? g.view.dx : 0), y: gp.y + (g.view ? g.view.dy : 0) }; }
+  function cameraZoneRect(g){ var gp = gadgetWorld(g), z = g.zone; return { x: gp.x + z.dx - z.w/2, y: gp.y + z.dy - z.h/2, w: z.w, h: z.h }; }
+  function cameraFrameRect(g, zoom, c){ var fw = viewRectW / (baseScale * zoom), fh = viewRectH / (baseScale * zoom); return { x: c.x - fw/2, y: c.y - fh/2, w: fw, h: fh }; }
+  function cameraSweepEnd(g){ var gp = gadgetWorld(g); return g.sweep ? { x: gp.x + g.sweep.dx, y: gp.y + g.sweep.dy } : cameraView(g); }
   function activeCamera(){
     if (!player) return null;
-    var best = null, bestD = Infinity;
+    var best = null, bestD = Infinity, px = player.position.x, py = player.position.y;
     for (var i = 0; i < gadgets.length; i++){
       var g = gadgets[i];
-      if (g.kind !== "camera") continue;
-      var gp = gadgetWorld(g), d = dist(gp, player.position);
-      var on = g.input != null ? g.input > 0 : d < g.radius;
-      if (on && d < bestD){ bestD = d; best = g; }
+      if (g.kind !== "camera" || !g.zone) continue;
+      var zr = cameraZoneRect(g);
+      var inside = px >= zr.x && px <= zr.x + zr.w && py >= zr.y && py <= zr.y + zr.h;
+      var on = g.input != null ? g.input > 0 : inside;
+      if (!on) continue;
+      var d = Math.hypot(zr.x + zr.w/2 - px, zr.y + zr.h/2 - py);
+      if (d < bestD){ bestD = d; best = g; }
     }
     return best;
   }
-  function cameraSweepEnd(g){ var gp = gadgetWorld(g); return g.sweep ? { x: gp.x + g.sweep.dx, y: gp.y + g.sweep.dy } : gp; }
   function resetPlayCamera(){ playCam.ever = false; playCam.easing = false; playCam.active = null; playCam.holdUntil = -1; playCam.t0 = 0; }
   function updatePlayCamera(){
     var now = performance.now();
@@ -5216,15 +5234,16 @@
       cg = now < playCam.holdUntil ? playCam.active : null;
     }
     playCam.active = cg;
-    var wantZoom = cg ? cg.zoom : worldNum("playZoom");
+    var wantZoom = cg ? cg.zoom : (mode === "play" ? worldNum("playZoom") : (edCam ? edCam.zoom : buildZoom));
     var wx = player.position.x, wy = player.position.y;
     if (cg){
-      var gp = gadgetWorld(cg), t = cg.tracking;
+      var gp = cameraView(cg), t = cg.tracking;
       if (cg.sweep){
-        // the glide from its first spot to its second, eased, then it stays there
+        // the glide from its view to its second spot, eased, then it stays there
         var u = Math.max(0, Math.min(1, (now - playCam.t0) / (cg.sweep.secs * 1000)));
         u = u * u * (3 - 2 * u);
-        gp = { x: gp.x + cg.sweep.dx * u, y: gp.y + cg.sweep.dy * u };
+        var se = cameraSweepEnd(cg);
+        gp = { x: gp.x + (se.x - gp.x) * u, y: gp.y + (se.y - gp.y) * u };
         wantZoom = cg.zoom + (cg.sweep.zoom - cg.zoom) * u;
       }
       wx = gp.x + (wx - gp.x) * t; wy = gp.y + (wy - gp.y) * t;
@@ -5243,14 +5262,37 @@
     camY = clampCam(playCam.cy + sy - visH/2, WORLD_H, visH);
   }
   function cameraFreezesPlayer(){ return mode === "play" && !!(playCam.active && playCam.active.freeze); }
+  /* In Build, walking (not flying) into a camera's zone shows the shot,
+     as LBP's create mode does — the whole camera, glide and hold included.
+     `edCam` remembers the editor's zoom while a preview is on; flying
+     again, or the shot ending, puts it back. Only while the camera is on
+     the character: wheel or pan lets go of them, and the preview with it. */
+  var edCam = null;
+  function buildPreviewWanted(){
+    return mode === "build" && !flying && camFollow && !!player && (!!playCam.active || playCam.easing || !!activeCamera());
+  }
+  function endBuildPreview(){
+    if (!edCam) return;
+    camZoom = edCam.zoom; edCam = null; applyCamScale();
+  }
   function updateCamera(){
     var visW = viewRectW / camScale, visH = viewRectH / camScale;
     if (camFollow && player && mode === "play"){
       updatePlayCamera();
+    } else if (buildPreviewWanted()){
+      if (!edCam){
+        edCam = { zoom: buildZoom };
+        // ease in from the view as it is, rather than jumping
+        playCam.ever = true; playCam.cx = camX + visW/2; playCam.cy = camY + visH/2; playCam.zoom = camZoom;
+      }
+      updatePlayCamera();
+      if (!playCam.active && !playCam.easing) endBuildPreview();
     } else if (camFollow && player){
+      if (edCam){ resetPlayCamera(); endBuildPreview(); }
       camX = clampCam(player.position.x - visW/2, WORLD_W, visW);
       camY = clampCam(player.position.y - visH/2, WORLD_H, visH);
     } else {
+      if (edCam){ resetPlayCamera(); endBuildPreview(); }   // panned away mid-preview: the editor's view is yours again
       clampCamNow();
     }
   }
@@ -5259,6 +5301,7 @@
   // the level's own and the wheel does nothing.
   function zoomAround(worldPt, factor){
     if (mode === "play") return;
+    if (edCam){ edCam = null; resetPlayCamera(); }   // the wheel takes over from a preview, from the zoom it is showing
     var before = camZoom;
     camZoom *= factor;
     applyCamScale();
@@ -5978,26 +6021,43 @@
       }
       if (mode === "build" && g.kind === "camera" && (g === selectedGadget || isGadgetTool())){
         // the zone that wakes it, and the frame it will show — as LBP
-        // draws a camera's view while you set it up
+        // draws a camera's view while you set it up. Both in world axes:
+        // undo the host's turn, and work from the camera's own spot.
         ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
-        ctx.beginPath(); ctx.arc(0, 0, g.radius, 0, Math.PI*2);
-        ctx.fillStyle = "rgba(242,183,5,0.10)"; ctx.fill();
-        ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#B3870A"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
-        var fw = viewRectW / (baseScale * g.zoom), fh = viewRectH / (baseScale * g.zoom);
-        ctx.beginPath(); ctx.rect(-fw/2, -fh/2, fw, fh);
+        var sel = g === selectedGadget, hs = 5/camScale;
+        var zr = cameraZoneRect(g), zx = zr.x - p.x, zy = zr.y - p.y;
+        ctx.beginPath(); ctx.rect(zx, zy, zr.w, zr.h);
+        ctx.fillStyle = "rgba(127,212,217,0.10)"; ctx.fill();
+        ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#2A7B8C"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+        var vc = cameraView(g), fr = cameraFrameRect(g, g.zoom, vc), fx = fr.x - p.x, fy = fr.y - p.y;
+        if (g.view && (g.view.dx || g.view.dy)){   // a thread from the camera to where it looks
+          ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(vc.x - p.x, vc.y - p.y);
+          ctx.lineWidth = 1/camScale; ctx.strokeStyle = "rgba(179,135,10,0.7)"; ctx.setLineDash([3/camScale, 4/camScale]); ctx.stroke(); ctx.setLineDash([]);
+        }
+        ctx.beginPath(); ctx.rect(fx, fy, fr.w, fr.h);
         ctx.lineWidth = 2.5/camScale; ctx.strokeStyle = "#F2B705"; ctx.stroke();
         ctx.lineWidth = 1/camScale; ctx.strokeStyle = "rgba(43,27,18,0.6)"; ctx.stroke();
         if (g.sweep){
           // the second spot: a line out to it, its own frame, and the knob you drag
-          var ex = g.sweep.dx, ey = g.sweep.dy;
-          ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(ex, ey);
+          var se = cameraSweepEnd(g), ex = se.x - p.x, ey = se.y - p.y;
+          ctx.beginPath(); ctx.moveTo(vc.x - p.x, vc.y - p.y); ctx.lineTo(ex, ey);
           ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#B3870A"; ctx.setLineDash([8/camScale, 6/camScale]); ctx.stroke(); ctx.setLineDash([]);
-          var fw2 = viewRectW / (baseScale * g.sweep.zoom), fh2 = viewRectH / (baseScale * g.sweep.zoom);
-          ctx.beginPath(); ctx.rect(ex - fw2/2, ey - fh2/2, fw2, fh2);
+          var fr2 = cameraFrameRect(g, g.sweep.zoom, se);
+          ctx.beginPath(); ctx.rect(fr2.x - p.x, fr2.y - p.y, fr2.w, fr2.h);
           ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#B3870A"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
           ctx.beginPath(); ctx.arc(ex, ey, 9/camScale, 0, Math.PI*2);
           ctx.fillStyle = "#F2B705"; ctx.fill(); ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
           ctx.beginPath(); ctx.arc(ex, ey, 3/camScale, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
+        }
+        if (sel){
+          // corner handles: drag a zone corner to resize the zone, a frame
+          // corner to change the zoom; drag either outline to move it
+          var corners = [[zx, zy, "#2A7B8C"], [zx + zr.w, zy, "#2A7B8C"], [zx, zy + zr.h, "#2A7B8C"], [zx + zr.w, zy + zr.h, "#2A7B8C"],
+                         [fx, fy, "#F2B705"], [fx + fr.w, fy, "#F2B705"], [fx, fy + fr.h, "#F2B705"], [fx + fr.w, fy + fr.h, "#F2B705"]];
+          for (var ci = 0; ci < corners.length; ci++){
+            ctx.beginPath(); ctx.rect(corners[ci][0] - hs, corners[ci][1] - hs, hs*2, hs*2);
+            ctx.fillStyle = corners[ci][2]; ctx.fill(); ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+          }
         }
         ctx.restore();
       }
@@ -9112,14 +9172,23 @@
       var cz = opSection(null);
       opBtn(cz, "Use the zoom I have now (" + Math.round(camZoom*100) + "%)", "Set the camera's zoom to what the editor is showing right now",
         function(){ pushUndo("changing a camera"); g.zoom = Math.max(CAM_ZOOM_MIN, Math.min(CAM_ZOOM_MAX, camZoom)); renderSelBar(); sfx("tick"); }, "wide");
+      if (g.view && (g.view.dx || g.view.dy)) opBtn(cz, "⌖ Look at the camera itself", "Put the view back on the camera's own spot",
+        function(){ pushUndo("changing a camera"); g.view = { dx:0, dy:0 }; renderSelBar(); sfx("tick"); }, "wide");
+      var vn = document.createElement("div"); vn.className = "noteText";
+      vn.textContent = "The gold frame on the level is the shot. Drag its edge to look somewhere else, its corners to zoom.";
+      vn.style.flexBasis = "100%"; cz.appendChild(vn);
       slider(opSection("Tracking"), "Follows the player", g.tracking, 0, 1, 0.05, function(v){ g.tracking = v; },
         function(v){ return v <= 0.001 ? "not at all — fixed" : (v >= 0.999 ? "fully" : pct(v)); }, "changing a camera");
       slider(opSection("Speed"), "Moves to its view", g.speed, 0, 1, 0.05, function(v){ g.speed = v; },
         function(v){ return v <= 0.001 ? "slowly" : (v >= 0.999 ? "instantly" : pct(v)); }, "changing a camera");
-      slider(opSection("Zone"), "Radius", g.radius, 60, 1500, 10, function(v){ g.radius = v; }, function(v){ return Math.round(v) + "px"; }, "changing a camera");
+      var zs = opSection("Zone");
+      slider(zs, "Width", g.zone.w, 40, 4000, 10, function(v){ g.zone.w = v; }, function(v){ return Math.round(v) + "px"; }, "changing a camera");
+      slider(zs, "Height", g.zone.h, 40, 4000, 10, function(v){ g.zone.h = v; }, function(v){ return Math.round(v) + "px"; }, "changing a camera");
+      if (g.zone.dx || g.zone.dy) opBtn(zs, "⌖ Centre the zone on the camera", "", function(){ pushUndo("changing a camera"); g.zone.dx = 0; g.zone.dy = 0; renderSelBar(); sfx("tick"); }, "wide");
       var zn = document.createElement("div"); zn.className = "noteText";
-      zn.textContent = g.input != null ? "Wired: it takes over while its signal is on, wherever the player is." : "It takes over while the player is inside the zone. Wire it to a switch and the switch decides instead.";
-      zn.style.flexBasis = "100%"; opSection(null).appendChild(zn);
+      zn.textContent = (g.input != null ? "Wired: it takes over while its signal is on, wherever the player is. " : "It takes over while the player is inside the blue box. Wire it to a switch and the switch decides instead. ") +
+        "Drag the box's edge to move it, its corners to resize it.";
+      zn.style.flexBasis = "100%"; zs.appendChild(zn);
       var hd = opSection("Hold");
       opBtn(hd, g.holdForever ? "∞ Holds until another camera takes over" : "⏱ Holds for a while, then hands back", "",
         function(){ pushUndo("changing a camera"); g.holdForever = !g.holdForever; renderSelBar(); sfx("tick"); }, "wide" + (g.holdForever ? " on" : ""));
@@ -9531,6 +9600,41 @@
   function beginAttachDrag(kind, ref, pt, end){
     attachDrag = { kind: kind, ref: ref, end: end || null, x0: pt.x, y0: pt.y, moved: false, pt: { x:pt.x, y:pt.y } };
     if (kind === "gadget") attachDrag.orig = { obj: ref.obj, pos: { x: ref.pos.x, y: ref.pos.y }, local: { x: ref.local.x, y: ref.local.y }, layer: ref.layer };
+    if (kind === "camZone" || kind === "camFrame" || kind === "camEnd"){
+      var src = kind === "camZone" ? ref.zone : (kind === "camFrame" ? ref.view : ref.sweep);
+      attachDrag.start = { dx: src.dx, dy: src.dy };
+    }
+    if (kind === "camZoneCorner" || kind === "camFrameCorner"){
+      // the opposite corner stays put, as when resizing an object
+      var r = kind === "camZoneCorner" ? cameraZoneRect(ref) : cameraFrameRect(ref, ref.zoom, cameraView(ref));
+      var sx = end.indexOf("e") >= 0 ? 1 : -1, sy = end.indexOf("s") >= 0 ? 1 : -1;
+      attachDrag.fixed = { x: sx > 0 ? r.x : r.x + r.w, y: sy > 0 ? r.y : r.y + r.h };
+      attachDrag.sx = sx; attachDrag.sy = sy;
+    }
+  }
+  /* What part of a selected camera the point is on: a corner of its zone
+     or frame (`nw` … `se`), the knob of its second spot, or either outline. */
+  function cameraHandleAt(g, pt){
+    var tol = 9/camScale, band = 7/camScale;
+    var zr = cameraZoneRect(g), fr = cameraFrameRect(g, g.zoom, cameraView(g));
+    var cornerOf = function(r){
+      var cs = [["nw", r.x, r.y], ["ne", r.x + r.w, r.y], ["sw", r.x, r.y + r.h], ["se", r.x + r.w, r.y + r.h]];
+      for (var i = 0; i < cs.length; i++) if (Math.abs(pt.x - cs[i][1]) <= tol && Math.abs(pt.y - cs[i][2]) <= tol) return cs[i][0];
+      return null;
+    };
+    var onOutline = function(r){
+      var inX = pt.x >= r.x - band && pt.x <= r.x + r.w + band, inY = pt.y >= r.y - band && pt.y <= r.y + r.h + band;
+      if (!inX || !inY) return false;
+      var nearV = Math.abs(pt.x - r.x) <= band || Math.abs(pt.x - (r.x + r.w)) <= band;
+      var nearH = Math.abs(pt.y - r.y) <= band || Math.abs(pt.y - (r.y + r.h)) <= band;
+      return nearV || nearH;
+    };
+    var c = cornerOf(fr); if (c) return { kind: "camFrameCorner", corner: c };
+    c = cornerOf(zr); if (c) return { kind: "camZoneCorner", corner: c };
+    if (g.sweep && dist(cameraSweepEnd(g), pt) < 14/camScale + 4) return { kind: "camEnd" };
+    if (onOutline(fr)) return { kind: "camFrame" };
+    if (onOutline(zr)) return { kind: "camZone" };
+    return null;
   }
   function updateAttachDrag(pt){
     if (!attachDrag) return;
@@ -9542,9 +9646,26 @@
       g.pos = { x: pt.x, y: pt.y };
       if (g.obj && g.obj.body) g.local = toBodyLocal(g.obj.body, g.pos);
     }
-    if (attachDrag.kind === "camEnd" && attachDrag.ref.sweep){
-      var gp = gadgetWorld(attachDrag.ref);
-      attachDrag.ref.sweep.dx = pt.x - gp.x; attachDrag.ref.sweep.dy = pt.y - gp.y;
+    var ck = attachDrag.kind;
+    if (attachDrag.moved && (ck === "camEnd" || ck === "camZone" || ck === "camFrame" || ck === "camZoneCorner" || ck === "camFrameCorner")){
+      var g2 = attachDrag.ref;
+      // one undo step for the whole drag, taken before the first change
+      if (!attachDrag.pushed){ attachDrag.pushed = true; pushUndo("changing a camera"); }
+      var mx = pt.x - attachDrag.x0, my = pt.y - attachDrag.y0, gp = gadgetWorld(g2);
+      if (ck === "camEnd" && g2.sweep){ g2.sweep.dx = pt.x - gp.x; g2.sweep.dy = pt.y - gp.y; }
+      else if (ck === "camZone"){ g2.zone.dx = attachDrag.start.dx + mx; g2.zone.dy = attachDrag.start.dy + my; }
+      else if (ck === "camFrame"){ g2.view.dx = attachDrag.start.dx + mx; g2.view.dy = attachDrag.start.dy + my; }
+      else if (ck === "camZoneCorner"){
+        var f = attachDrag.fixed, w = Math.max(40, Math.min(6000, Math.abs(pt.x - f.x))), h = Math.max(40, Math.min(6000, Math.abs(pt.y - f.y)));
+        g2.zone.w = w; g2.zone.h = h;
+        g2.zone.dx = f.x + attachDrag.sx * w/2 - gp.x; g2.zone.dy = f.y + attachDrag.sy * h/2 - gp.y;
+      } else if (ck === "camFrameCorner"){
+        // the frame keeps the screen's shape: its width sets the zoom, and it grows from the fixed corner
+        var f2 = attachDrag.fixed, w2 = Math.max(20, Math.abs(pt.x - f2.x));
+        g2.zoom = Math.max(CAM_ZOOM_MIN, Math.min(CAM_ZOOM_MAX, viewRectW / (baseScale * w2)));
+        var fr = cameraFrameRect(g2, g2.zoom, { x:0, y:0 });
+        g2.view.dx = f2.x + attachDrag.sx * fr.w/2 - gp.x; g2.view.dy = f2.y + attachDrag.sy * fr.h/2 - gp.y;
+      }
     }
   }
   function moveGadgetTo(g, pt){
@@ -9607,7 +9728,7 @@
   function endAttachDrag(){
     if (!attachDrag) return;
     var d = attachDrag; attachDrag = null;
-    if (d.kind === "camEnd"){ renderSelBar(); return; }   // already where the cursor left it
+    if (d.kind.indexOf("cam") === 0){ if (d.moved) renderSelBar(); return; }   // already where the cursor left it
     if (!d.moved) return;
     var pt = d.pt, done = false;
     if (d.kind === "gadget"){
@@ -9896,10 +10017,10 @@
       var handle = resizeHandleAt(pt);
       if (handle){ dragging = null; beginResize(pt, handle); return; }
       if (wiring){ dragging = null; finishWire(pt); return; }
-      // a selected camera's second spot: the knob is dragged straight, no host needed
-      if (selectedGadget && selectedGadget.kind === "camera" && selectedGadget.sweep && dist(cameraSweepEnd(selectedGadget), pt) < 14/camScale + 4){
-        dragging = null; pushUndo("moving a camera's second spot"); beginAttachDrag("camEnd", selectedGadget, pt); return;
-      }
+      // a selected camera's zone, frame, corners and second spot are dragged
+      // straight — none of them needs a host, a view can point at sky
+      var camH = selectedGadget && selectedGadget.kind === "camera" ? cameraHandleAt(selectedGadget, pt) : null;
+      if (camH){ dragging = null; beginAttachDrag(camH.kind, selectedGadget, pt, camH.corner); return; }
       var gh = gadgetAt(pt.x, pt.y);
       if (gh){ dragging = null; selectGadget(gh); renderSelBar(); beginAttachDrag("gadget", gh, pt); return; }
       var bh = boltAt(pt.x, pt.y);
@@ -10527,7 +10648,8 @@
     // Play never wants a detached camera — you'd be steering a character
     // you can't see.
     camFollow = true;
-    if (m === "play"){ resetPlayCamera(); camZoom = worldNum("playZoom"); applyCamScale(); }
+    edCam = null; resetPlayCamera();
+    if (m === "play"){ camZoom = worldNum("playZoom"); applyCamScale(); }
     else { camZoom = buildZoom; applyCamScale(); }
     updateViewHud();
     particles.length = 0;
@@ -10630,7 +10752,8 @@
       return { kind:g.kind, o:objIndex[g.obj.id], x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
                zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdForever:g.holdForever, shake:g.shake, freeze:g.freeze,
-               sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null };
+               sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
+               zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);

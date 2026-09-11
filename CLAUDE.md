@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` | Playwright suites, 447 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` | Playwright suites, 465 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 447 checks + checkgeom, in order
+npm test                   # all 465 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -61,7 +61,7 @@ node tgadget.js            # 49 — player sensor, button, lever, wires, what th
 node tlink.js              # 59 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
 node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint; the weight slider
 node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
-node tcam.js               # 45 — Play's own zoom, zooming on the cursor, Camera gadgets (zone, wired, hold, glide, shake, freeze), walking and sprinting pace, grab reach
+node tcam.js               # 63 — Play's own zoom, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, wired, hold, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -818,14 +818,44 @@ and swapped back for `buildZoom` on leaving. The wheel does nothing in Play
 and zoom), tracking ("how much it moves toward the player, or ignores
 them"), and speed. Here: `kind:"camera"` in `gadgets[]`, placed on an
 object like any gadget, hidden in Play by default. Settings in its box:
-`zoom` (0.3–3), `tracking` (0 fixed on the camera … 1 follows the player),
-`speed` (0 slow … 1 instant), `radius` (the zone). In Build a selected
-camera, or any with the tool in hand, draws its zone and the frame it will
-show at its zoom. It takes an input (`canReceive`): **wired, the signal
-decides and the zone is ignored** — my call, since a camera a switch
-turns on for a far-off door is the useful case and a huge radius covers the
-other; LBP2's own rule here was not findable. Unwired, the zone decides.
-Several active at once: the nearest wins (`activeCamera`).
+`zoom` (0.3–3), `tracking` (0 fixed on the view … 1 follows the player),
+`speed` (0 slow … 1 instant). It takes an input (`canReceive`): **wired,
+the signal decides and the zone is ignored** — my call, since a camera a
+switch turns on for a far-off door is the useful case and a huge zone
+covers the other; LBP2's own rule here was not findable. Unwired, the
+zone decides. Several active at once: the one whose zone centre is
+nearest wins (`activeCamera`).
+
+**The zone is a box and the view is a frame, and both live where you put
+them**, as LBP2's do — neither has to sit on the camera. `zone` is
+`{dx, dy, w, h}` and `view` is `{dx, dy}`, offsets from the camera's own
+spot in *world axes* (they ride with the host but do not turn with it);
+`cameraZoneRect`, `cameraView`, `cameraFrameRect`. A radius in an older
+save becomes a square zone. In Build a selected camera draws the blue zone
+box and the gold frame at its zoom, each with corner handles, plus a
+thread from the camera to where it looks and the glide's line, end frame
+and knob. All of it drags straight, no host needed — a view can point at
+sky: `cameraHandleAt` (frame corners, zone corners, the knob, then either
+outline within a 7px band) feeds `attachDrag` kinds `camFrameCorner`,
+`camZoneCorner`, `camEnd`, `camFrame`, `camZone`. A corner drag keeps the
+opposite corner fixed, as object resize does; a frame corner sets the
+zoom from the frame's width (the frame keeps the screen's shape) and
+moves the view so the fixed corner stays. One undo step per drag, pushed
+on the first real move, so a click that moves nothing leaves nothing. The
+box has Width/Height sliders for the zone and "centre it on the camera"
+buttons for both, and the Zoom slider is the frame's other handle.
+
+**Build previews the shot.** Walking (not flying) into a zone in Build
+shows what the camera will do — glide, hold, tracking, everything — as
+LBP's create mode does. `buildPreviewWanted()`: Build, not flying, the
+editor camera on the character (`camFollow`), and a camera active, easing
+back, or triggered. `edCam` holds the editor's zoom for the duration and
+`applyCamScale` does not persist while it is set, so the preview never
+becomes the build zoom; `endBuildPreview` puts it back. Flying again
+ends it at once (`setFlying`); landing resets the shot so it starts fresh;
+walking out of the zone eases back to the editor view and then ends it;
+the wheel takes over from a preview at the zoom it is showing, and a pan
+ends it. Play and mode switches clear `edCam`.
 
 `updatePlayCamera` runs from `updateCamera` in Play: target zoom is the
 active camera's or `playZoom`; the target centre is the camera's spot
