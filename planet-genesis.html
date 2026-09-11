@@ -1207,6 +1207,16 @@
     display:flex; align-items:center; gap:.3rem; flex-wrap:wrap; max-width:70%;
   }
   #viewHud[hidden]{ display:none !important; }
+  /* which layer the thing under the Select cursor is on — a whisper under
+     the layer pill, only while hovering something */
+  #hoverLayer{
+    position:absolute; top:2.75rem; left:1.1rem; z-index:16; pointer-events:none;
+    font-family:'Patrick Hand',cursive; font-size:.74rem; color:var(--stitch);
+    background:rgba(43,27,18,.55); border-radius:999px; padding:.1rem .5rem;
+    opacity:.9;
+  }
+  #hoverLayer[hidden]{ display:none !important; }
+  #hoverLayer b{ color:var(--yellow); font-weight:normal; }
   .hudPill{
     display:flex; align-items:center; gap:.25rem;
     background:rgba(43,27,18,.62); border:2px solid var(--stitch); border-radius:999px;
@@ -1261,6 +1271,7 @@
       <canvas id="game"></canvas>
       <div id="toast"></div>
 
+      <div id="hoverLayer" hidden></div>
       <div id="viewHud">
         <div class="hudPill" id="layerHud"></div>
         <div class="hudPill" id="zoomHud">
@@ -6389,6 +6400,17 @@
     updatePersonalMenuPos();
     updateSelBarPos();
     pruneObjCtxMenu();
+    updateHoverLayer();
+  }
+  var hoverLayerEl = document.getElementById("hoverLayer"), hoverLayerShown = "";
+  function updateHoverLayer(){
+    var o = (mode === "build" && currentTool === "move" && mouseOnCanvas && !camPan && !dragging && hoverObj && objects.indexOf(hoverObj) >= 0) ? hoverObj : null;
+    var want = o ? LAYER_NAMES[o.layer] : "";
+    if (want === hoverLayerShown) return;
+    hoverLayerShown = want;
+    if (!want){ hoverLayerEl.hidden = true; return; }
+    hoverLayerEl.innerHTML = "on <b>" + escapeHtml(want) + "</b>";
+    hoverLayerEl.hidden = false;
   }
   /* One bad frame used to kill the game permanently: requestAnimationFrame
      was the last statement inside the frame body, so anything that threw

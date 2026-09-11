@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` | Playwright suites, 311 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` | Playwright suites, 314 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 311 checks + checkgeom, in order
+npm test                   # all 314 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -51,7 +51,7 @@ Or one suite at a time:
 ```
 node regress.js            # 35 — geometry, save/load, play mode, loop and save safety, map edges
 node tsel.js               # 39 — selection, marquee, group transforms, resize, detach
-node tlayer.js             # 9  — layer accuracy and ranked picking
+node tlayer.js             # 12 — layer accuracy, ranked picking, the hover label
 node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
@@ -595,6 +595,13 @@ tutorial mode instead. `MATERIAL_INFO` is its content and is kept for that.
 **No LittleBigPlanet vocabulary in the interface.** The structure is modelled
 on LBP2's, but the words are ordinary ones — Select, Build, Tools, World,
 Character. Keep it that way in anything user-facing.
+
+## The hover label
+
+`#hoverLayer`, a whisper under the layer pill: "on **Back**" / **Mid** /
+**Front** for whatever the Select cursor is over, gone when it is over
+nothing. Refreshed from `hoverObj` every frame in `updateHoverLayer`, which
+only touches the DOM when the text actually changes.
 
 ## Selection, and what Del means
 

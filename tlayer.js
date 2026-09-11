@@ -71,6 +71,21 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const picked3 = await p.evaluate(([x,y]) => { const h = window.__pg.objectAt(x,y,0); return h ? h.materialId : null; }, [X+200, Y+110]);
   ok('switch to Front and the same click picks the Front piece', picked3 === 'ice', picked3);
 
+  console.log('');
+  console.log('== the layer of what is under Select ==');
+  // Still the ice backdrop on Front over the rubber on Mid, from above.
+  const label = () => p.evaluate(() => { const e = document.getElementById('hoverLayer'); return e.hidden ? null : e.textContent; });
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('move'); window.__pg.deselect(); });
+  const over = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+200, Y+110]);
+  await p.mouse.move(over.x, over.y); await p.waitForTimeout(250);
+  ok('building on Mid, hovering there says Mid', /Mid/.test((await label()) || ''), await label());
+  await p.evaluate(() => window.__pg.setLayer(2));
+  await p.mouse.move(over.x + 1, over.y); await p.waitForTimeout(250);
+  ok('building on Front, the same spot says Front', /Front/.test((await label()) || ''), await label());
+  const nowhere = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+200, Y-400]);
+  await p.mouse.move(nowhere.x, nowhere.y); await p.waitForTimeout(250);
+  ok('and over nothing it goes away', (await label()) === null, await label());
+
   await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('move'); });
   await p.mouse.move(1180, 700);
   await p.waitForTimeout(400);
