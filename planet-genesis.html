@@ -2500,6 +2500,7 @@
     dropBitmap(obj);
     bolts.slice().forEach(function(b){ if (b.objA===obj || b.objB===obj) removeBolt(b); });
     gadgets.slice().forEach(function(g){ if (g.obj === obj) removeGadget(g); });
+    if (carried === obj) carried = null;
     links.slice().forEach(function(l){ if (l.objA === obj || l.objB === obj) removeLink(l); });
     if (obj.body) World.remove(world, obj.body);
     objects.splice(idx,1);
@@ -3853,6 +3854,14 @@
      only to ask "is grabbable material within reach". */
   var grabConstraint = null, grabHeld = false, grabMouse = false, grabProbe = null;
   var WALK_SPEED = 4.2;
+  /* Carrying. A grabbed object that is LIGHT ENOUGH — up to about one and a
+     half of the player's own weight — is not pinned to; it is picked up.
+     While held it floats to wherever the cursor is, within arm's reach of
+     the player, so you can lift it, carry it while walking, set it down,
+     or let go on the move and throw it. Heavier things are dragged on a
+     pin, as before. `carried` is the object; there is no constraint. */
+  var carried = null;
+  var CARRY_REACH = 120, CARRY_MASS_RATIO = 1.5;
   var GRAB_REACH = 16;
   var flying = false;
   var mouseWorld = { x: 0, y: 0 };
@@ -4087,8 +4096,29 @@
 
   function releaseRope(){
     if (grabConstraint){ World.remove(world, grabConstraint); grabConstraint = null; sfx("unrope"); }
+    if (carried){ carried = null; sfx("unrope"); }
   }
-  function isGrabbing(){ return !!grabConstraint; }
+  function isGrabbing(){ return !!grabConstraint || !!carried; }
+  /* Light enough, and LOOSE. A sponge on a rope, a bolt or a piston is
+     something you swing from, however light it is; only a free object is
+     picked up. */
+  function isAttached(obj){
+    for (var i = 0; i < bolts.length; i++) if (bolts[i].objA === obj || bolts[i].objB === obj) return true;
+    for (var j = 0; j < links.length; j++) if (links[j].objA === obj || links[j].objB === obj) return true;
+    return false;
+  }
+  function canCarry(obj){
+    return !!obj && !!obj.body && !obj.body.isStatic && !!player &&
+           obj.body.mass <= player.mass * CARRY_MASS_RATIO && !isAttached(obj);
+  }
+  /* Where the hands are on a carried object: its edge, on the side facing
+     the player. */
+  function carryHoldPoint(){
+    if (!carried || !carried.body || !player) return null;
+    var b = carried.body, dx = b.position.x - player.position.x, dy = b.position.y - player.position.y;
+    var d = Math.hypot(dx, dy) || 1, r = Math.min(b.bounds.max.x - b.bounds.min.x, b.bounds.max.y - b.bounds.min.y) / 2;
+    return { x: b.position.x - dx / d * r, y: b.position.y - dy / d * r };
+  }
   /* Every grabbable part near the player, for the reach test and the
      highlight: parts whose material grabs, on objects whose bounds come
      within GRAB_REACH of the player's. */
@@ -4101,7 +4131,10 @@
       if (ob.max.x < pb.min.x - GRAB_REACH || ob.min.x > pb.max.x + GRAB_REACH || ob.max.y < pb.min.y - GRAB_REACH || ob.min.y > pb.max.y + GRAB_REACH) continue;
       for (var k = 0; k < o.parts.length; k++){
         var m = o.parts[k].plugin && matOf(o.parts[k].plugin.materialId);
-        if (m && m.grabbable) out.push({ part: o.parts[k], obj: o });
+        // an object can be made grabbable whatever it is made of, or not,
+        // whatever it is made of — o.grabbable overrides the material
+        var can = o.grabbable === true || (o.grabbable !== false && m && m.grabbable);
+        if (can) out.push({ part: o.parts[k], obj: o });
       }
     }
     return out;
@@ -4127,10 +4160,16 @@
     return best;
   }
   function tryGrab(){
-    if (!player || grabConstraint || flying) return false;
+    if (!player || grabConstraint || carried || flying) return false;
     var t = grabTarget();
     if (!t) return false;
     var body = t.obj.body;
+    if (canCarry(t.obj)){
+      carried = t.obj;
+      sfx("rope");
+      puff(t.hold.x, t.hold.y, 5, { color:"#D9DD6B", speed:1.4, g:0.05 });
+      return true;
+    }
     grabConstraint = Constraint.create({
       bodyA: player, bodyB: body,
       // Matter keeps this offset rotated to the body's current angle itself
@@ -4162,6 +4201,7 @@
     return { x: body.position.x + local.x*cs - local.y*sn, y: body.position.y + local.x*sn + local.y*cs };
   }
   function ropeAnchorWorld(){
+    if (carried) return carryHoldPoint();
     if (!grabConstraint) return null;
     var b = grabConstraint.bodyB, pt = grabConstraint.pointB || {x:0,y:0};
     return { x: b.position.x + pt.x, y: b.position.y + pt.y };   // already rotated, see bolts
@@ -4485,6 +4525,24 @@
     if (input.right) vx += speed;
     if (vx !== 0) facing = vx > 0 ? 1 : -1;
 
+    if (carried){
+      if (objects.indexOf(carried) < 0 || !carried.body || carried.body.isStatic){ carried = null; }
+      else {
+        var cb = carried.body;
+        var tx = mouseWorld.x - player.position.x, ty = mouseWorld.y - player.position.y;
+        var td = Math.hypot(tx, ty);
+        if (td > CARRY_REACH){ tx *= CARRY_REACH / td; ty *= CARRY_REACH / td; }
+        var gx = player.position.x + tx, gy = player.position.y + ty;
+        // float toward the spot: a fraction of the gap per step, capped, so
+        // it follows briskly but cannot punch through a wall
+        var vx2 = (gx - cb.position.x) * 0.28, vy2 = (gy - cb.position.y) * 0.28;
+        var vm = Math.hypot(vx2, vy2), vmax = 16;
+        if (vm > vmax){ vx2 *= vmax / vm; vy2 *= vmax / vm; }
+        Body.setVelocity(cb, { x: vx2, y: vy2 });
+        Body.setAngularVelocity(cb, cb.angularVelocity * 0.8);
+      }
+      // and the player walks, jumps and everything as usual, carrying it
+    }
     if (grabConstraint){
       // hanging on: left/right pump the swing, Space lets go and jumps
       if (vx !== 0) Body.applyForce(player, player.position, { x: vx * player.mass * 0.0009, y: 0 });
@@ -4632,6 +4690,7 @@
     if (o.glow != null && o.glow !== 1) d.glow = o.glow;
     if (o.lightSolid) d.lightSolid = 1;
     if (o.lightFalls) d.lightFalls = 1;
+    if (o.grabbable === true) d.grab = 1; else if (o.grabbable === false) d.grab = 0;
     return d;
   }
   /* Corners left in this load's budget. A level file is untrusted input
@@ -4657,6 +4716,7 @@
     var made = spawnObjectFromPieces(pieces, os.layer,
       { a: +os.a || 0, x: +os.x || 0, y: +os.y || 0 }, !!os.forcedStatic);
     if (made && os.glow != null) made.glow = clampGlow(os.glow);
+    if (made && os.grab != null) made.grabbable = !!os.grab;
     if (made){
       made.lightSolid = !!os.lightSolid;
       made.lightFalls = !!os.lightFalls;
@@ -8831,6 +8891,17 @@
     opBtn(ac, o.forcedStatic ? "🔒 Locked" : "🔓 Unlocked",
       o.forcedStatic ? "Locked in place — click to let it move" : "Free to move — click to lock it in place",
       function(){ anchorSelected(); }, o.forcedStatic ? "on" : "");
+    if (many === 1){
+      var matGrab = o.pieces.some(function(pc){ var m = matOf(pc.m); return m && m.grabbable; });
+      var isGrab = o.grabbable === true || (o.grabbable !== false && matGrab);
+      opBtn(ac, isGrab ? "🤚 Grabbable" : "✋ Not grabbable",
+        isGrab ? "Can be grabbed, carried if light, swung from if hanging — click to make it not" : "Click to let the player grab this, whatever it is made of",
+        function(){
+          pushUndo(isGrab ? "making it not grabbable" : "making it grabbable");
+          o.grabbable = !isGrab;
+          renderSelBar(); sfx("tick");
+        }, isGrab ? "on" : "");
+    }
     if (many === 1) opBtn(ac, "💾 Save", "Save to My Objects", function(){ saveObjectToMyObjects(o); });
     opBtn(ac, "🗑 Delete", many > 1 ? "Delete all " + many : "Delete the whole object — or double-click it, then Del",
       function(){ deleteSelected(); }, "red" + (many > 1 ? " wide" : ""));

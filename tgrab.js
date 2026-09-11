@@ -164,6 +164,74 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('but only a bit — not a dash', sprinted < walked * 1.8, { walked, sprinted });
 
   console.log('');
+  console.log('== a light sponge is picked up and follows the cursor ==');
+  await fresh();
+  await rect('wood', 1, X-300, Y+100, X+400, Y+140);
+  await lockAll();
+  await rect('sponge', 1, X, Y+60, X+40, Y+100);            // a little 40x40 piece
+  await play();
+  await standAt(X-22, Y+60); await p.waitForTimeout(300);
+  const lil = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0];
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
+  ok('it is carried, not pinned', (await p.evaluate(() => window.__pg.carrying())) === lil.id, await p.evaluate(() => window.__pg.carrying()));
+  const up = await w2p(X+40, Y-60);                          // cursor up and to the right of the player
+  await p.mouse.move(up.x, up.y); await p.waitForTimeout(700);
+  const lifted = (await stats()).filter(o => o.id === lil.id)[0];
+  const pl = await pos();
+  console.log('   sponge at', Math.round(lifted.pos.x), Math.round(lifted.pos.y), ' player at', Math.round(pl.x), Math.round(pl.y));
+  ok('it rises toward the cursor', lifted.pos.y < pl.y - 30, { sponge: lifted.pos.y, player: pl.y });
+  ok('and stays within reach', Math.hypot(lifted.pos.x - pl.x, lifted.pos.y - pl.y) < 140, Math.hypot(lifted.pos.x - pl.x, lifted.pos.y - pl.y));
+  const far = await w2p(X+900, Y-700);                        // cursor far away
+  await p.mouse.move(far.x, far.y); await p.waitForTimeout(600);
+  const held = (await stats()).filter(o => o.id === lil.id)[0];
+  const pl2 = await pos();
+  ok('pointing far away, it stops at arm length', Math.hypot(held.pos.x - pl2.x, held.pos.y - pl2.y) < 140 && Math.hypot(held.pos.x - pl2.x, held.pos.y - pl2.y) > 80, Math.hypot(held.pos.x - pl2.x, held.pos.y - pl2.y));
+  await p.keyboard.down('KeyD'); await p.waitForTimeout(700); await p.keyboard.up('KeyD'); await p.waitForTimeout(200);
+  const walkedWith = (await stats()).filter(o => o.id === lil.id)[0];
+  const pl3 = await pos();
+  ok('you can walk while carrying and it comes along', pl3.x > pl2.x + 60 && Math.abs(walkedWith.pos.x - pl3.x) < 160, { player: pl3.x, sponge: walkedWith.pos.x });
+  await p.keyboard.up('KeyQ'); await p.waitForTimeout(700);
+  const dropped = (await stats()).filter(o => o.id === lil.id)[0];
+  ok('let go and it falls', !(await grabbing()) && dropped.pos.y > held.pos.y + 40, { was: held.pos.y, now: dropped.pos.y });
+
+  console.log('');
+  console.log('== a heavy sponge is dragged, not carried ==');
+  await fresh();
+  await rect('wood', 1, X-300, Y+100, X+400, Y+140);
+  await lockAll();
+  await rect('sponge', 1, X, Y-20, X+90, Y+100);            // a big one
+  await play();
+  await standAt(X-22, Y+60); await p.waitForTimeout(300);
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
+  ok('grabbed', await grabbing());
+  ok('but too heavy to lift', !(await p.evaluate(() => window.__pg.carrying())));
+  await p.keyboard.up('KeyQ');
+
+  console.log('');
+  console.log('== anything can be made grabbable ==');
+  await fresh();
+  await rect('wood', 1, X-300, Y+100, X+400, Y+140);
+  await lockAll();
+  await rect('wood', 1, X, Y+60, X+40, Y+100);              // a little wooden crate
+  const crate = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0];
+  await play();
+  await standAt(X-22, Y+60); await p.waitForTimeout(300);
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
+  ok('wood is not grabbable by itself', !(await grabbing()));
+  await p.keyboard.up('KeyQ');
+  // the toggle is set in Build, as it would be from the box, then played
+  await p.evaluate(() => window.__pg.setMode('build')); await p.waitForTimeout(300);
+  const crate2 = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0];
+  await p.evaluate(id => window.__pg.setGrabbable(id, true), crate2.id);
+  const sv = await p.evaluate(() => window.__pg.serialize('g'));
+  ok('the save remembers it', sv.objects.some(o => o.grab === 1), sv.objects.map(o => o.grab));
+  await play();
+  await standAt(X-22, Y+60); await p.waitForTimeout(300);
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
+  ok('made grabbable, the crate can be picked up', !!(await p.evaluate(() => window.__pg.carrying())));
+  await p.keyboard.up('KeyQ');
+
+  console.log('');
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();
