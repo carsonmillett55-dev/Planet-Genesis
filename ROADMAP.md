@@ -224,7 +224,7 @@ implement it, including connected systems, rather than approximating.
 | **Emitters** | Research the LBP emitter system specifically — it is deeper than it looks. |
 | **World changer** | DONE 2026-09-11. Wired to any activator; moves the world's light and/or water level to its values over a time, back when the signal stops, or stays changed. |
 | **Mover** | DONE 2026-09-11, to the spec below. |
-| **Creature eye** | See below. |
+| **Creature eye** | DONE 2026-09-11, to the spec below. |
 | **Camera** | DONE 2026-09-11. LBP2's Game Camera: zone, zoom, tracking, speed; wired, the switch decides. Plus the Movie Camera's hold time (or hold for good), shake, controls off, and a glide to a second spot and zoom — Carson's "easier than keyframing". Play has its own fixed zoom, set in World. **Still to do: tilt** (a camera roll; a rendering change — the frame transform, its inverse for the mouse, the light buffer and overlays all have to agree). |
 
 ### Mover — DONE
@@ -243,7 +243,11 @@ follows that line and stops at the end.
 - Adjustable speed.
 - Can be activated by a player sensor or other tools.
 
-### Creature eye
+### Creature eye — DONE
+
+Built 2026-09-11: the eye follows you; the creature chases you left and
+right, or floating anywhere; speed and sight are settings; it dies when you
+land on the eye, unless told not to. `tcreature.js`.
 
 Drop it onto an object you built and the object becomes a creature.
 

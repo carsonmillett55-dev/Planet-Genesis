@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` | Playwright suites, 533 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` | Playwright suites, 550 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 533 checks + checkgeom, in order
+npm test                   # all 550 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -63,6 +63,7 @@ node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its 
 node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
 node tmover.js             # 22 — the Mover: two-click placing, once and bounce, riding it, a loose host held, wired, the knob, save/load
 node tworld.js             # 18 — the Water sensor, and the World changer's light and water, wired, latched, saved
+node tcreature.js          # 17 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, save/load
 node tcam.js               # 91 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -418,6 +419,7 @@ Each gadget has an **output**, 0 or 1:
 | **mover** | drives its host along a line — see The Mover | line, speed, bounce |
 | **watersensor** | the sensor itself is under water (`waterAt(pos) > 0.5`), the world's or painted — LBP's | — |
 | **changer** | while wired on (unwired: always; `latch`: for good once it has been), the world's light and/or water level move to its values over `secs` — see The live world | setLight, light, setWater, water, secs, latch |
+| **eye** | its host is a creature — see Creatures | range, speed, fly, deadly |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
 
@@ -724,6 +726,31 @@ in `collisionActive`), and `groundVel()` is its velocity at the feet —
 platform dropping away takes you down with it rather than leaving you
 floating (`vy` follows the ground's when it is faster downward). A jump
 keeps the carried sideways speed, as it should.
+
+## Creatures
+
+Carson's Creature eye, built to his spec with the liberty he granted on
+the details. Drop it on an object and the object is a creature: the eye
+(the glyph's pupil, `g.look`, refreshed even while paused so it watches
+you walk about in Build) follows the player; once they are within
+`range` the creature chases them at `speed` — left and right on the
+ground by default, or in every direction floating with `fly` — and
+stops just short of them (`stopX`: its half-width plus the player's plus
+8) rather than shoving in. `creatureStep` each `beforeUpdate`: a real
+physics body still — it falls, pushes, rides a platform — with its
+sideways velocity set toward the player (vertical too, ignoring gravity,
+for a flier; a flier out of sight hangs where it is) and its angle held
+at what it was when first driven, so a walking thing never tumbles. A
+locked host only watches. Chasing the player through a wall is not
+attempted: it walks into it and stops.
+
+**The eye is the weak spot** (`deadly`, on by default): landing on it —
+`groundBody` is the host, the feet within the eye's width of it and just
+above — pops the creature (`creatureStompCheck`: particles, the delete
+sound, a small bounce, `removeObject`). **Play only**: in Build a stomp
+would take the object with it for real, and Play's snapshot brings it
+back. It does not hurt the player by itself: the box says to paint the
+rest of it in a hazard if it should.
 
 ## The live world
 

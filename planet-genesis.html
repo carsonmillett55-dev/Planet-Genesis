@@ -2687,9 +2687,9 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer"];
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer" };
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye"];
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   var gadgets = [], gadgetCounter = 1;
   var wires = [];                 // { from: gadget id, to: bolt or gadget id }
@@ -2716,6 +2716,19 @@
               sticky: !!extra.sticky, springs: !!extra.springs,
               scale: extra.scale != null ? +extra.scale : 1,
               visible: extra.visible != null ? !!extra.visible : true };
+    if (kind === "eye"){
+      /* Carson's Creature eye: drop it on an object and the object is a
+         creature. The eye follows the player; the creature follows the
+         player left and right (or in every direction, floating, with
+         `fly`) at `speed`, once they are within `range`; and it dies when
+         the player lands on the eye, if `deadly`. LBP's brain, roughly:
+         the eye is the weak spot. */
+      g.range = extra.range != null ? Math.max(60, Math.min(4000, +extra.range)) : 700;
+      g.speed = extra.speed != null ? Math.max(5, Math.min(1500, +extra.speed)) : 90;
+      g.fly = !!extra.fly;
+      g.deadly = extra.deadly != null ? !!extra.deadly : true;
+      g.homeAngle = null; g.look = { x: 1, y: 0 };
+    }
     if (kind === "changer"){
       /* The World changer — LBP2's global tweakers, as one gadget: while
          its signal is on (or for good, once it has been, with `latch`) the
@@ -2930,7 +2943,10 @@
   onStep("beforeUpdate", function(){
     var i, g;
     for (i = 0; i < gadgets.length; i++){ g = gadgets[i]; g.pos = gadgetWorld(g); }
-    if (!runner.enabled) return;
+    if (!runner.enabled){
+      for (i = 0; i < gadgets.length; i++){ g = gadgets[i]; if (g.kind === "eye" && player){ var ex = player.position.x - g.pos.x, ey = player.position.y - g.pos.y, el = Math.hypot(ex, ey) || 1; g.look = { x: ex / el, y: ey / el }; } }
+      return;
+    }
     for (i = 0; i < gadgets.length; i++){
       g = gadgets[i];
       if (g.kind === "sensor"){
@@ -2957,6 +2973,63 @@
     }
     updateWorldLive(stepSeconds());
   });
+  /* ---- Creatures --------------------------------------------------
+     A creature is a normal physics object that walks: each step, with the
+     player in range, its sideways velocity is set toward them (and its
+     vertical too, ignoring gravity, if it flies) while its angle is held
+     upright — a walking thing does not tumble. It stops short rather than
+     shoving into the player. It is a real body still: it falls, it pushes,
+     it can be carried on a platform. */
+  function eyeSees(g){
+    if (!player) return false;
+    return dist(g.pos, player.position) <= g.range;
+  }
+  function creatureStep(g){
+    var o = g.obj, b = o && o.body;
+    if (!b) return;
+    var sees = eyeSees(g);
+    if (sees){ var lx = player.position.x - g.pos.x, ly = player.position.y - g.pos.y, ll = Math.hypot(lx, ly) || 1; g.look = { x: lx / ll, y: ly / ll }; }
+    if (b.isStatic) return;                       // a locked creature only watches
+    if (g.homeAngle == null) g.homeAngle = b.angle;
+    var v = g.speed / STEPS_PER_SEC;              // px per step
+    var dx = player ? player.position.x - b.position.x : 0, dy = player ? player.position.y - b.position.y : 0;
+    var vx = b.velocity.x, vy = b.velocity.y;
+    if (sees){
+      var stopX = (b.bounds.max.x - b.bounds.min.x) / 2 + PW / 2 + 8;   // stop short of the player
+      vx = Math.abs(dx) > stopX ? (dx > 0 ? v : -v) : 0;
+      if (g.fly){ var stopY = (b.bounds.max.y - b.bounds.min.y) / 2 + PH / 2 + 8; vy = Math.abs(dy) > stopY ? (dy > 0 ? v : -v) : 0; }
+    } else {
+      vx = 0;
+      if (g.fly) vy = 0;                          // a flier hangs where it is
+    }
+    Body.setVelocity(b, { x: vx, y: vy });
+    if (Math.abs(b.angle - g.homeAngle) > 1e-6) Body.setAngle(b, g.homeAngle);
+    Body.setAngularVelocity(b, 0);
+  }
+  /* Stood on the eye: the creature dies. Only in Play — in Build a
+     mistake would take the object with it for real. */
+  function creatureStompCheck(g){
+    if (mode !== "play" || !g.deadly || !player || !grounded || !groundBody || !g.obj || !g.obj.body) return;
+    if (groundBody !== g.obj.body) return;
+    var feetY = player.position.y + PH / 2;
+    if (Math.abs(player.position.x - g.pos.x) > 26 * (g.scale || 1) + PW / 2 || feetY > g.pos.y + 12 || feetY < g.pos.y - 40) return;
+    var o = g.obj;
+    puff(g.pos.x, g.pos.y, 14, { color:"#F6ECD9", speed:2.4, g:0.08, spread:Math.PI*2, life:26, r:3 });
+    puff(g.pos.x, g.pos.y, 10, { color:"#E4574B", speed:1.8, g:0.1, spread:Math.PI*2, life:22, r:2.4 });
+    sfx("delete");
+    Body.setVelocity(player, { x: player.velocity.x, y: -9 });   // a little bounce off it
+    removeObject(o);
+  }
+  onStep("beforeUpdate", function(){
+    if (!runner.enabled) return;
+    for (var i = gadgets.length - 1; i >= 0; i--){
+      var g = gadgets[i];
+      if (g.kind !== "eye") continue;
+      creatureStep(g);
+      creatureStompCheck(g);
+    }
+  });
+
   /* ---- The live world -------------------------------------------
      What the world's light and water level ARE right now, as opposed to
      what the level's settings say: a World changer pulls them toward its
@@ -5186,7 +5259,8 @@
                sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
                zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null,
                line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce,
-               setLight: g.setLight, light: g.light, setWater: g.setWater, water: g.water, secs: g.secs, latch: g.latch };
+               setLight: g.setLight, light: g.light, setWater: g.setWater, water: g.water, secs: g.secs, latch: g.latch,
+               range: g.range, fly: g.fly, deadly: g.deadly };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -6246,6 +6320,14 @@
       ctx.fillStyle = "#5C3A26"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.beginPath(); ctx.rect(-w/2, -3 - h, w, h);
       ctx.fillStyle = on ? "#B3261E" : "#E4574B"; ctx.fill(); ctx.stroke();
+    } else if (g.kind === "eye"){
+      // an eyeball; the pupil looks toward the player
+      var lk = g.look || { x: 1, y: 0 };
+      ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI*2);
+      ctx.fillStyle = "#F6ECD9"; ctx.fill(); ctx.lineWidth = 2.2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(lk.x * 5, lk.y * 5, 6, 0, Math.PI*2); ctx.fillStyle = on ? "#5F9E5A" : "#2A7B8C"; ctx.fill();
+      ctx.beginPath(); ctx.arc(lk.x * 6, lk.y * 6, 3, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
+      ctx.beginPath(); ctx.arc(lk.x * 4 - 2, lk.y * 4 - 2.5, 1.3, 0, Math.PI*2); ctx.fillStyle = "#fff"; ctx.fill();
     } else if (g.kind === "watersensor"){
       // a drop on a round base
       ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2);
@@ -6298,6 +6380,13 @@
       ctx.translate(p.x, p.y);
       if (g.obj && g.obj.body) ctx.rotate(g.obj.body.angle);
       var gsc = g.scale || 1;
+      if (mode === "build" && g.kind === "eye" && (g === selectedGadget || isGadgetTool())){
+        ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
+        ctx.beginPath(); ctx.arc(0, 0, g.range, 0, Math.PI*2);
+        ctx.fillStyle = "rgba(95,158,90,0.08)"; ctx.fill();
+        ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#5F9E5A"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.restore();
+      }
       if (mode === "build" && g.kind === "sensor" && (g === selectedGadget || isGadgetTool())){
         ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
         ctx.beginPath(); ctx.arc(0, 0, g.radius, 0, Math.PI*2);
@@ -7853,7 +7942,7 @@
     var grid = document.createElement("div"); grid.className = "catalogGrid";
     var defs = [["move","🕹","Move"],["bolt","🔩","Bolt"],["sprungbolt","🌀","Sprung bolt"],["motorbolt","⚙","Motor bolt"],["wobblebolt","↔","Wobble bolt"],
                 ["piston","🔩","Piston"],["rope","➰","Rope"],
-                ["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["camera","🎥","Camera"],["mover","➡","Mover"],["changer","🌗","World changer"],
+                ["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["camera","🎥","Camera"],["mover","➡","Mover"],["changer","🌗","World changer"],["eye","🧿","Creature eye"],
                 ["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]];
     defs.forEach(function(d){
       var chip = document.createElement("div"); chip.className = "chip" + (currentTool===d[0] ? " active" : "");
@@ -9501,6 +9590,20 @@
       opBtn(bs, g.sticky ? "📌 Stays on once pressed" : "↕ On while pressed", "",
         function(){ pushUndo("changing a button"); g.sticky = !g.sticky; g.on = false; renderSelBar(); sfx("tick"); }, g.sticky ? "on" : "");
       slider(opSection("Size"), "Width", g.size, 24, 200, 4, function(v){ g.size = v; }, function(v){ return Math.round(v) + "px"; }, "changing a button");
+    }
+    if (g.kind === "eye"){
+      var em = opSection("Moves");
+      opBtn(em, "↔ Left and right, on the ground", "", function(){ pushUndo("changing a creature"); g.fly = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.fly ? " on" : ""));
+      opBtn(em, "✦ Any direction, floating", "", function(){ pushUndo("changing a creature"); g.fly = true; renderSelBar(); sfx("tick"); }, "wide" + (g.fly ? " on" : ""));
+      slider(opSection("Speed"), "Speed", g.speed, 5, 800, 5, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing a creature");
+      slider(opSection("Sight"), "Notices the player within", g.range, 60, 4000, 20, function(v){ g.range = v; }, function(v){ return Math.round(v) + "px"; }, "changing a creature");
+      var ed = opSection("Weak spot");
+      opBtn(ed, g.deadly ? "💥 Dies when the player lands on the eye" : "🛡 Cannot be squashed", "",
+        function(){ pushUndo("changing a creature"); g.deadly = !g.deadly; renderSelBar(); sfx("tick"); }, "wide" + (g.deadly ? " on" : ""));
+      var en = document.createElement("div"); en.className = "noteText";
+      en.textContent = (g.obj && g.obj.body && g.obj.body.isStatic ? "This object is locked, so the creature only watches — unlock it to let it chase. " : "") +
+        "It chases the player once they are in sight and stops just short of them. Paint the rest of it in a hazard if it should hurt.";
+      en.style.flexBasis = "100%"; opSection(null).appendChild(en);
     }
     if (g.kind === "watersensor"){
       var wn = document.createElement("div"); wn.className = "noteText";
@@ -11153,7 +11256,8 @@
                sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
                zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null,
                line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce,
-               setLight: g.setLight, light: g.light, setWater: g.setWater, water: g.water, secs: g.secs, latch: g.latch };
+               setLight: g.setLight, light: g.light, setWater: g.setWater, water: g.water, secs: g.secs, latch: g.latch,
+               range: g.range, fly: g.fly, deadly: g.deadly };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
