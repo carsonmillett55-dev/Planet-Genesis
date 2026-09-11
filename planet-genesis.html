@@ -1015,6 +1015,11 @@
   .settingRow{ display:flex; flex-direction:column; gap:.25rem; font-size:.78rem; }
   .settingRow input[type="range"]{ width:100%; }
   .settingRow .val{ font-family:'Patrick Hand',cursive; font-size:.85rem; }
+  /* the value is a field: click it and type the number you want */
+  .settingRow input.val{ width:6.5em; text-align:right; background:transparent; color:inherit;
+    border:1px solid transparent; border-radius:5px; padding:0 .25em; cursor:text; }
+  .settingRow input.val:hover{ border-color:rgba(43,27,18,.25); }
+  .settingRow input.val:focus{ background:#fff; border-color:var(--yellow-dark); outline:none; }
   .kbdList{ font-size:.72rem; line-height:1.6; }
   .kbdList b{ display:inline-block; min-width:7.2rem; color:var(--ink); }
   .infoSubTabs{ display:flex; gap:.3rem; }
@@ -7010,16 +7015,90 @@
     page.render(pmBodyEl);
   }
 
+  /* Every slider in the game comes from here, so every slider gets the
+     same three ways in: drag it; click it and nudge it with the arrow keys
+     or A/D, a tenth of a notch at a time (a whole notch with Shift); or
+     click the number and type one. Typed numbers are in the units shown —
+     "45" on a percent slider means 45%, "20" on a motor means 20 rpm —
+     which `sliderInverse` turns back into the raw value the slider holds. */
   function sliderRow(label, val, min, max, step, onChange, fmt){
     var row = document.createElement("div"); row.className = "settingRow";
-    var top = document.createElement("div"); top.style.display="flex"; top.style.justifyContent="space-between";
+    var top = document.createElement("div"); top.style.display="flex"; top.style.justifyContent="space-between"; top.style.alignItems="center";
     var lbl = document.createElement("label"); lbl.textContent = label;
-    var valSpan = document.createElement("span"); valSpan.className="val"; valSpan.textContent = fmt(val);
-    top.appendChild(lbl); top.appendChild(valSpan);
+    var valInp = document.createElement("input"); valInp.type = "text"; valInp.className = "val"; valInp.value = fmt(val);
+    valInp.title = "Click and type a number";
+    valInp.setAttribute("inputmode", "decimal"); valInp.spellcheck = false;
+    top.appendChild(lbl); top.appendChild(valInp);
     var inp = document.createElement("input"); inp.type="range"; inp.min=min; inp.max=max; inp.step=step; inp.value=val;
-    inp.addEventListener("input", function(){ var v=parseFloat(inp.value); onChange(v); valSpan.textContent=fmt(v); });
+    var cur = val;
+    function apply(v){
+      v = Math.max(min, Math.min(max, v));
+      cur = v; inp.value = v;            // the thumb snaps to its notch; the value itself does not
+      onChange(v); valInp.value = fmt(v);
+    }
+    inp.addEventListener("input", function(){ cur = parseFloat(inp.value); onChange(cur); valInp.value = fmt(cur); });
+    inp.addEventListener("keydown", function(e){
+      var dir = (e.code === "ArrowRight" || e.code === "KeyD" || e.code === "ArrowUp") ? 1 :
+                ((e.code === "ArrowLeft" || e.code === "KeyA" || e.code === "ArrowDown") ? -1 : 0);
+      if (!dir) return;
+      e.preventDefault(); e.stopPropagation();
+      var fine = e.shiftKey ? step : step / 10;
+      apply(+(cur + dir * fine).toFixed(6));
+    });
+    valInp.addEventListener("focus", function(){ setTimeout(function(){ valInp.select(); }, 0); });   // after the click that focused it, or the click undoes the select
+    valInp.addEventListener("keydown", function(e){
+      e.stopPropagation();
+      if (e.key === "Enter"){ valInp.blur(); }
+      else if (e.key === "Escape"){ valInp.value = fmt(cur); valInp.blur(); }
+    });
+    valInp.addEventListener("blur", function(){
+      var m = /-?\d*\.?\d+/.exec(valInp.value.replace(/,/g, "."));
+      if (!m){ valInp.value = fmt(cur); return; }
+      var v = sliderInverse(fmt, min, max, step, parseFloat(m[0]));
+      if (v == null || Math.abs(v - cur) < 1e-9){ valInp.value = fmt(cur); return; }
+      apply(v);
+    });
     row.appendChild(top); row.appendChild(inp);
     return row;
+  }
+  /* The raw value whose display reads the typed number, or the nearest
+     one the slider can show. The display is monotonic in the value for
+     every slider here, so: sample it a notch at a time for the closest
+     reading, then bisect between the neighbouring notches to land exactly
+     (typing 123 on a rope with 10px notches gives 123, not 120). Ends of
+     a range that show words instead of numbers — "loose", "night" — are
+     simply skipped. */
+  function sliderInverse(fmt, min, max, step, T){
+    var num = function(v){ var m = /-?\d*\.?\d+/.exec(fmt(v)); return m ? parseFloat(m[0]) : NaN; };
+    var n = Math.max(1, Math.min(3000, Math.round((max - min) / step))), best = null, bestD = Infinity;
+    for (var i = 0; i <= n; i++){
+      var v = min + (max - min) * i / n, d = Math.abs(num(v) - T);
+      if (d < bestD){ bestD = d; best = v; }
+    }
+    if (best == null) return null;
+    if (bestD > 0){
+      var h = (max - min) / n, lo = Math.max(min, best - h), hi = Math.min(max, best + h);
+      var nlo = num(lo), nhi = num(hi);
+      if (!isNaN(nlo) && !isNaN(nhi) && nlo !== nhi){
+        var inc = nhi > nlo;
+        for (var k = 0; k < 40; k++){
+          var mid = (lo + hi) / 2, nm = num(mid);
+          if (isNaN(nm)) break;
+          if (nm === T){ lo = hi = mid; break; }
+          if ((nm < T) === inc) lo = mid; else hi = mid;
+        }
+        var v2 = (lo + hi) / 2;
+        if (Math.abs(num(v2) - T) <= bestD){ best = v2; bestD = Math.abs(num(v2) - T); }
+      }
+    }
+    // then the roundest number that still reads the same — 123, not 122.5;
+    // 0.45 for 45%, not 0.4497
+    var want = num(best);
+    for (var dp = 0; dp <= 6; dp++){
+      var r = +best.toFixed(dp);
+      if (r >= min && r <= max && num(r) === want){ best = r; break; }
+    }
+    return +best.toFixed(6);
   }
 
   // A little swatch showing exactly what one dab of the current brush
@@ -8851,8 +8930,10 @@
     opTitleEl.textContent = LINK_LABEL[l.kind];
     var info = document.createElement("div"); info.className = "opInfo";
     var an = matOf(l.objA.pieces[0] ? l.objA.pieces[0].m : "wood"), bn = matOf(l.objB.pieces[0] ? l.objB.pieces[0].m : "wood");
-    info.innerHTML = "<b>" + escapeHtml((an ? an.label : "?") + " ↔ " + (bn ? bn.label : "?")) + "</b>" +
-      (l.kind === "piston" ? " · " + Math.round(l.len) + "px now" : " · " + Math.round(l.length) + "px");
+    info.innerHTML = "<b>" + escapeHtml((an ? an.label : "?") + " ↔ " + (bn ? bn.label : "?")) + "</b>";
+    var infoNum = document.createElement("span");
+    infoNum.textContent = l.kind === "piston" ? " · " + Math.round(l.len) + "px now" : " · " + Math.round(l.length) + "px";
+    info.appendChild(infoNum);
     opBodyEl.appendChild(info);
     function slider(sec, label, val, min, max, step, set, fmt, undoLabel){
       var pushed = false;
@@ -8878,7 +8959,7 @@
         opBtn(fl, pair[1], "", function(){ pushUndo("changing a piston"); l.flipper = pair[0]; renderSelBar(); sfx("tick"); }, l.flipper === pair[0] ? "on" : "");
       });
     } else {
-      slider(opSection("Rope"), "Length", l.length, 20, 3000, 10, function(v){ setRopeLength(l, v); renderSelBar(); }, px, "changing a rope");
+      slider(opSection("Rope"), "Length", l.length, 20, 3000, 10, function(v){ setRopeLength(l, v); infoNum.textContent = " · " + Math.round(v) + "px"; }, px, "changing a rope");
     }
     var vis = opSection("In play");
     opBtn(vis, l.visible === false ? "🙈 Hidden in Play" : "👁 Visible in Play",

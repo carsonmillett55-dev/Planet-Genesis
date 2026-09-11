@@ -206,6 +206,14 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   });
   await p.waitForTimeout(150);
   ok('the speed slider sets this bolt\'s own speed', Math.abs((await boltsNow())[0].speed - 0.1) < 0.001, (await boltsNow())[0].speed);
+  // typing into the value field speaks the units on show: rpm here
+  await p.evaluate(() => { const rows = Array.from(document.querySelectorAll('#opBody .settingRow')); rows.find(r => /Speed/.test(r.querySelector('label').textContent)).querySelector('input.val').focus(); });
+  await p.waitForTimeout(50);
+  await p.keyboard.press('Control+a'); await p.keyboard.type('20'); await p.keyboard.press('Enter');
+  await p.waitForTimeout(200);
+  const rpmNow = await p.evaluate(() => { const rows = Array.from(document.querySelectorAll('#opBody .settingRow')); return rows.find(r => /Speed/.test(r.querySelector('label').textContent)).querySelector('input.val').value; });
+  ok('typing 20 into the speed field means 20 rpm', /^20 rpm$/.test(rpmNow), rpmNow);
+  ok('and the bolt really turns at that', Math.abs((await boltsNow())[0].speed * 60 * 60 / (Math.PI*2) - 20) < 0.5, (await boltsNow())[0].speed);
   await p.evaluate(() => { Array.from(document.querySelectorAll('#opBody button')).find(x => /Wobble bolt/.test(x.textContent)).click(); });
   await p.waitForTimeout(200);
   ok('switching to Wobble shows swing and timing', await p.evaluate(() => /swing/i.test(document.getElementById('opBody').innerText) && /timing/i.test(document.getElementById('opBody').innerText)));

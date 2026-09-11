@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` | Playwright suites, 374 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` | Playwright suites, 386 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 374 checks + checkgeom, in order
+npm test                   # all 386 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -56,9 +56,9 @@ node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 19 — the personal menu's sections, pages and gradient
-node tbolt.js              # 50 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, save/load
+node tbolt.js              # 52 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, typed rpm, save/load
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
-node tlink.js              # 49 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load
+node tlink.js              # 59 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
 node tgrab.js              # 50 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint
 node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
 node checkgeom.js          # geom.js vs the inlined copy
@@ -730,6 +730,35 @@ tutorial mode instead. `MATERIAL_INFO` is its content and is kept for that.
 **No LittleBigPlanet vocabulary in the interface.** The structure is modelled
 on LBP2's, but the words are ordinary ones — Select, Build, Tools, World,
 Character. Keep it that way in anything user-facing.
+
+## Sliders
+
+Every slider in the game is built by `sliderRow`, so every one gets the
+same three ways in: **drag** it; **click it and nudge** with the arrow
+keys or A/D, a tenth of a notch at a time (a whole notch with Shift); or
+**click the number and type** one. Enter or clicking away applies, Escape
+puts it back, nonsense is ignored, out of range lands on the end.
+
+Typed numbers are in the units on show — "45" on a percent slider is
+45%, "20" on a motor is 20 rpm — and `sliderInverse` turns that back into
+the raw value: every display here is monotonic in the value, so it
+samples a notch at a time for the closest reading, bisects between the
+neighbouring notches to land exactly, then takes the roundest number that
+still reads the same (123 not 122.5, 0.45 not 0.4497). Ends that show
+words — "loose", "night", "empty" — are skipped. Nothing about a
+caller changed: `fmt` is still the only thing a slider knows about its
+units.
+
+The typed or nudged value is held in the row (`cur`), not read back from
+the range input, which snaps whatever it is given to its notches; the
+thumb sits on the nearest notch, the value is exact.
+
+**A slider's `onChange` must not re-render the box it lives in.** The
+rope length slider called `renderSelBar()` to refresh the "· 320px" line,
+which replaced the slider under the cursor mid-drag and under the keys
+mid-nudge; it updates that span in place now. The global key handlers
+already ignore any focused `INPUT`, so A/D on a slider never walk the
+player.
 
 ## The hover label
 

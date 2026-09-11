@@ -158,6 +158,56 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('it is drawn through its own segments', pts && pts.length >= 12, pts && pts.length);
 
   console.log('');
+  console.log('== a slider takes a typed number, and nudges by the keys ==');
+  await p.evaluate(() => window.__pg.paused(true));
+  await p.evaluate(id => window.__pg.selectLink(id), rp.id);
+  await p.waitForTimeout(200);
+  const lenField = () => p.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#opBody .settingRow'));
+    const row = rows.find(r => /Length/.test(r.querySelector('label').textContent));
+    return row ? { text: row.querySelector('input.val').value, range: +row.querySelector('input[type=range]').value } : null;
+  });
+  ok('the rope box shows the length as a number', /^320px$/.test((await lenField()).text), await lenField());
+  // type a number that is not on a notch
+  await p.evaluate(() => { const rows = Array.from(document.querySelectorAll('#opBody .settingRow')); rows.find(r => /Length/.test(r.querySelector('label').textContent)).querySelector('input.val').focus(); });
+  await p.waitForTimeout(50);
+  await p.keyboard.press('Control+a'); await p.keyboard.type('123'); await p.keyboard.press('Enter');
+  await p.waitForTimeout(250);
+  ok('typing 123 and Enter makes the rope 123px, notches or not', (await linksNow())[0].length === 123, (await linksNow())[0].length);
+  ok('and the field reads it back', /^123px$/.test((await lenField()).text), await lenField());
+  // too big is clamped to the end of the slider
+  await p.evaluate(() => { const rows = Array.from(document.querySelectorAll('#opBody .settingRow')); rows.find(r => /Length/.test(r.querySelector('label').textContent)).querySelector('input.val').focus(); });
+  await p.waitForTimeout(50);
+  await p.keyboard.press('Control+a'); await p.keyboard.type('99999'); await p.keyboard.press('Enter');
+  await p.waitForTimeout(250);
+  ok('a number past the end lands on the end', (await linksNow())[0].length === 3000, (await linksNow())[0].length);
+  // nonsense leaves it alone
+  await p.evaluate(() => { const rows = Array.from(document.querySelectorAll('#opBody .settingRow')); rows.find(r => /Length/.test(r.querySelector('label').textContent)).querySelector('input.val').focus(); });
+  await p.waitForTimeout(50);
+  await p.keyboard.press('Control+a'); await p.keyboard.type('hello'); await p.keyboard.press('Enter');
+  await p.waitForTimeout(250);
+  ok('nonsense changes nothing', (await linksNow())[0].length === 3000 && /^3000px$/.test((await lenField()).text), await lenField());
+  // back to something sensible, then the keys on the slider itself
+  await p.evaluate(() => { const rows = Array.from(document.querySelectorAll('#opBody .settingRow')); rows.find(r => /Length/.test(r.querySelector('label').textContent)).querySelector('input.val').focus(); });
+  await p.waitForTimeout(50);
+  await p.keyboard.press('Control+a'); await p.keyboard.type('200'); await p.keyboard.press('Enter');
+  await p.waitForTimeout(250);
+  await p.evaluate(() => { const rows = Array.from(document.querySelectorAll('#opBody .settingRow')); rows.find(r => /Length/.test(r.querySelector('label').textContent)).querySelector('input[type=range]').focus(); });
+  await p.keyboard.press('ArrowRight'); await p.waitForTimeout(120);
+  ok('an arrow key on the slider moves a tenth of a notch: 200 -> 201', (await linksNow())[0].length === 201, (await linksNow())[0].length);
+  await p.keyboard.press('KeyD'); await p.keyboard.press('KeyD'); await p.waitForTimeout(120);
+  ok('D does the same: 201 -> 203', (await linksNow())[0].length === 203, (await linksNow())[0].length);
+  await p.keyboard.press('KeyA'); await p.keyboard.press('ArrowLeft'); await p.waitForTimeout(120);
+  ok('A and the left arrow go back: 203 -> 201', (await linksNow())[0].length === 201, (await linksNow())[0].length);
+  await p.keyboard.press('Shift+ArrowRight'); await p.waitForTimeout(120);
+  ok('with Shift it is a whole notch: 201 -> 211', (await linksNow())[0].length === 211, (await linksNow())[0].length);
+  const pp0 = await p.evaluate(() => window.__pg.playerPos());
+  await p.evaluate(() => window.__pg.paused(false)); await p.waitForTimeout(300);
+  const pp1 = await p.evaluate(() => window.__pg.playerPos());
+  ok('and none of those key presses walked the player', Math.abs(pp1.x - pp0.x) < 2, { before: pp0.x, after: pp1.x });
+  await p.evaluate(() => window.__pg.paused(true));
+
+  console.log('');
   console.log('== it rides, saves, and undoes ==');
   await twoBlocks();
   const pr = await place('piston', X+40, Y+40, X+240, Y+40);
