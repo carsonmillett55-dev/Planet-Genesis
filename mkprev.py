@@ -91,6 +91,9 @@ HOOK = """
     grabbing: function(){ return !!grabConstraint || !!carried; }, carrying: function(){ return carried ? carried.id : null; }, grab: function(v){ setGrabHeld(!!v); return !!grabConstraint || !!carried; },
     setGrabbable: function(id, v){ var o = objects.filter(function(q){ return q.id===id; })[0]; if (o) o.grabbable = v; return !!o; },
     grabTarget: function(){ var t = grabTarget(); return t ? { obj: t.obj.id, hold: t.hold } : null; },
+    holdOverlap: function(){ var o = carried || (grabConstraint && grabConstraint.bodyB.plugin && grabConstraint.bodyB.plugin.obj); if (!o || !player || !o.body) return null;
+      var cs = Query.collides(player, [o.body]), d = 0; cs.forEach(function(c){ if (c.depth > d) d = c.depth; }); return +d.toFixed(1); },
+    playerVel: function(){ return player ? { x:+player.velocity.x.toFixed(2), y:+player.velocity.y.toFixed(2) } : null; },
     nudge: nudgeBrush, tool: function(){ return currentTool; },
     touching: function(poly,layer,reach){ return objectsTouching(poly,layer,reach); },
     waterInfo: function(){ return { count: waterCount, minRow: wMinRow, maxRow: wMaxRow }; },

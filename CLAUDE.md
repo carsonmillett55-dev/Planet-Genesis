@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` | Playwright suites, 351 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` | Playwright suites, 364 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 351 checks + checkgeom, in order
+npm test                   # all 364 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -59,7 +59,7 @@ node tmenu.js              # 19 — the personal menu's sections, pages and grad
 node tbolt.js              # 50 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, save/load
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
 node tlink.js              # 49 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load
-node tgrab.js              # 37 — grabbing: by key or mouse, swinging, dragging, carrying, loads, no riding; sprint
+node tgrab.js              # 50 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -523,12 +523,39 @@ nothing while hanging — only letting go of the grab lets go.
 pinned to — it is picked up. `canCarry`: dynamic, mass at most
 `CARRY_MASS_RATIO` (3) times the player's, and `!isAttached` — nothing on
 a bolt, rope or piston is carried, however light, because that is
-something you swing from. While `carried` is set the object is driven each
-step toward the cursor, clamped to `CARRY_REACH` (120px) of the player:
-velocity is a fraction of the gap, capped, so it follows briskly but cannot
-punch through a wall. The player keeps walking, jumping and everything else
-while carrying; letting go on the move throws it. There is no constraint.
-`carryHoldPoint` puts the drawn hands on the object's near edge.
+something you swing from. The player keeps walking, jumping and everything
+else while carrying; letting go on the move throws it. There is no
+constraint. `carryHoldPoint` puts the drawn hands on the object's near edge.
+
+**It is carried on a ring, and it goes around you.** The cursor chooses
+only the *direction*; the distance is `carryR`, fixed at pick-up — the
+distance it was at, clamped to at least the player's half-diagonal plus
+the object's plus 6px (so it can never overlap you) and at most
+`CARRY_REACH` (120px). The direction `carryDir` turns toward the cursor at
+most `CARRY_TURN` (0.11 rad) a step, the short way round, or over the top
+when the cursor is straight across (under the feet there is usually a
+floor). Before this the object was driven straight at the cursor, clamped
+to reach, so pointing across yourself flew it *through* you — and being
+driven by `setVelocity` it shoved you 200px across the room on the way.
+The object is driven at 0.34 of the gap per step, capped at 16, so it
+follows briskly but cannot punch through a wall.
+
+**And it does not collide with the player at all.** `CARRY_GROUP` (-9) is
+the player's collision group always (`playerFilter`) and the carried
+object's while carried, re-applied every step since a rebuild hands the
+object a fresh body, and cleared in `dropCarried` — the one place `carried`
+is nulled. Matter treats a shared negative group as never-touch. That is
+what makes riding what you hold impossible (there is nothing to stand on)
+and it is why nothing you hold can push on you. The cost: when its spot is
+unreachable — under your feet, with the floor in the way — nothing would
+stop it settling inside you. `carryKeepOut` is the one-sided version of a
+collision done by hand: `Query.collides` (which ignores filters) between
+the player and the object, and the OBJECT is translated out along the
+collision normal by the depth, with the inward part of its velocity
+removed — never the player. It runs before the step, with the velocity
+about to be set, and again in an `afterUpdate` step so the drawn frame is
+clean. Measured with the cursor swept across the player and held under the
+feet: 0px of overlap, 0px of player movement.
 
 **A load makes for a poorer jump**: `carryJumpScale` is `1 - load * 0.22`
 (floor 0.2) where load is the carried mass over the player's — about 150px
@@ -536,17 +563,12 @@ of jump with your own weight in hand, about 30 with three times it.
 
 **You cannot ride what you are holding.** Carson found the obvious exploit:
 point the cursor under your feet, the object floats there, stand on it,
-jump, repeat to the top of the map. Three things close it, and all three
-were needed. In `collisionActive`, the carried object never counts as
-ground, and if the player's feet are at its top edge and overlapping it
-sideways (`stoodOnCarried` — *not* "player centre above object centre",
-which is true for anything shorter than you standing beside it) the object
-is dropped. `grabLatch` then refuses to pick anything up until the grab is
-released and pressed afresh — otherwise the held key re-grabs it the next
-frame and the ratchet lifts you anyway. And `dropNoFoot` keeps the dropped
-object from counting as ground for 700ms, or you got one free jump off it
-as it fell away under you. Measured: one lift, a landing, and then nothing
-but ordinary jumps off a block on the floor.
+jump, repeat to the top of the map. The first fix was a pile of heuristics
+in `collisionActive` — detect feet-on-top, drop it, latch the grab, refuse
+it as footing for 700ms. All gone: with `CARRY_GROUP` there is no contact
+to stand on, and the ring keeps it out from under you anyway. The test
+still jumps a dozen times with the cursor under the feet and ends on the
+floor, sponge still in hand.
 
 **Any object can be made grabbable, or not,** from its box: `o.grabbable`
 (`true`/`false`, undefined = follow the material), saved as `grab`. So a
@@ -559,7 +581,12 @@ walk too.
 
 The grip is `grabConstraint`, a short stiff constraint from the player's
 centre to the hold point, the length it was at the moment of the grab so
-nothing snaps. `grabTarget` finds it: `grabbablePartsNear` narrows by
+nothing snaps — and then grown, 1.5px a step, to at least `grabMinLen()`,
+the player's own corner reach (chamfer-aware, about 31px for medium). A
+grip shorter than that pulled the body onto the thing it held: grabbed by
+the side at 20px, then swung under it, the top of the head was 28px above
+the centre and 8px inside the sponge, with the collision pushing out and
+the grip pulling in every step. `grabTarget` finds it: `grabbablePartsNear` narrows by
 bounds to parts whose material is `grabbable` (the flag was `ropeable`),
 then `Query.collides` between `grabProbe` — a rectangle `GRAB_REACH` px
 bigger than the player on each side, never added to the world — and each
@@ -571,7 +598,12 @@ Bolts), and the old grapple had that wrong.
 The walk code sets the player's sideways velocity outright every step; on a
 grip that would kill the swing's momentum the instant the key was released.
 So the movement step returns early while grabbing, after applying a small
-sideways force from left/right.
+sideways force from left/right: `vx * mass * 0.00028`, a third of what it
+was, and the player's speed on a grip is capped at `SWING_MAX_SPEED` (10
+px/step). Unbounded, the pump built up past 20 px/step, which is faster
+than Matter resolves a contact, and the player went straight through the
+sponge — Carson's "clip into grabbable objects just by moving too fast".
+Measured pumping flat out for six seconds: 10.4 top speed, 0.6px overlap.
 
 Grabbable material within reach glows while grab is held and nothing is
 held yet; hands are drawn closed on the hold while it is. The rig's arm

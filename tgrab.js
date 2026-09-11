@@ -183,7 +183,15 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.mouse.move(far.x, far.y); await p.waitForTimeout(600);
   const held = (await stats()).filter(o => o.id === lil.id)[0];
   const pl2 = await pos();
-  ok('pointing far away, it stops at arm length', Math.hypot(held.pos.x - pl2.x, held.pos.y - pl2.y) < 140 && Math.hypot(held.pos.x - pl2.x, held.pos.y - pl2.y) > 80, Math.hypot(held.pos.x - pl2.x, held.pos.y - pl2.y));
+  const dFar = Math.hypot(held.pos.x - pl2.x, held.pos.y - pl2.y), dLift = Math.hypot(lifted.pos.x - pl.x, lifted.pos.y - pl.y);
+  ok('pointing far away, it stops at arm length', dFar < 140 && dFar > 50, dFar);
+  ok('and no further out than before — the cursor picks the direction, not the distance', Math.abs(dFar - dLift) < 8, { far: dFar, lifted: dLift });
+  const onMe = await w2p(pl2.x, pl2.y);                       // cursor right on yourself
+  await p.mouse.move(onMe.x + 2, onMe.y - 30); await p.waitForTimeout(600);
+  const near = (await stats()).filter(o => o.id === lil.id)[0];
+  const pl2b = await pos();
+  const dNear = Math.hypot(near.pos.x - pl2b.x, near.pos.y - pl2b.y);
+  ok('pointing at yourself does not pull it in either', Math.abs(dNear - dLift) < 8, { near: dNear, lifted: dLift });
   await p.keyboard.down('KeyD'); await p.waitForTimeout(700); await p.keyboard.up('KeyD'); await p.waitForTimeout(200);
   const walkedWith = (await stats()).filter(o => o.id === lil.id)[0];
   const pl3 = await pos();
@@ -252,9 +260,72 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   }
   await p.waitForTimeout(1300);                               // let the last jump land
   const y1 = (await pos()).y;
-  ok('it gets dropped rather than becoming a lift', !(await p.evaluate(() => window.__pg.carrying())));
-  ok('and you end up no higher than a block on the floor', y1 > y0 - 60, { before: y0, after: y1 });
+  ok('it is still in hand — it just is not something you can stand on', !!(await p.evaluate(() => window.__pg.carrying())));
+  ok('and you end up back on the floor, not on it', y1 > y0 - 12, { before: y0, after: y1 });
   ok('never having got more than a jump off the ground', lowest > y0 - 320, { lowest, start: y0 });
+  await p.keyboard.up('KeyQ');
+
+  console.log('');
+  console.log('== what you hold goes around you, never through you ==');
+  await fresh();
+  await rect('wood', 1, X-300, Y+100, X+400, Y+140);
+  await lockAll();
+  await rect('sponge', 1, X, Y+60, X+40, Y+100);
+  await play();
+  await standAt(X-22, Y+60); await p.waitForTimeout(300);
+  await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
+  ok('holding the little sponge', !!(await p.evaluate(() => window.__pg.carrying())));
+  const c0 = await pos();
+  let deepest = 0, wentOver = false;
+  const sampleOverlap = async (ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms){
+    const d = await p.evaluate(() => window.__pg.holdOverlap()); if (d != null && d > deepest) deepest = d;
+    const sp2 = await p.evaluate(() => window.__pg.playerPos()); const ob = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0];
+    if (ob && ob.pos.y < sp2.y - 40) wentOver = true;
+    await p.waitForTimeout(30); } };
+  for (let i = 0; i < 4; i++){                               // sweep the cursor straight across yourself, both ways
+    const l = await w2p(c0.x - 150, c0.y - 20), r = await w2p(c0.x + 150, c0.y - 20);
+    await p.mouse.move(l.x, l.y); await sampleOverlap(400);
+    await p.mouse.move(r.x, r.y); await sampleOverlap(400);
+  }
+  const c1 = await pos();
+  ok('sweeping it from side to side never moves you', Math.abs(c1.x - c0.x) < 4 && Math.abs(c1.y - c0.y) < 4, { from: c0, to: c1 });
+  ok('it passes over your head to get to the other side', wentOver);
+  ok('and never ends up inside you', deepest < 3, deepest);
+  const under = await w2p(c0.x, c0.y + 150); await p.mouse.move(under.x, under.y);
+  deepest = 0; await sampleOverlap(700);
+  const c2 = await pos();
+  ok('pointing under your own feet, it sits beside them rather than inside you', deepest < 3, deepest);
+  ok('and still does not move you', Math.abs(c2.x - c0.x) < 4 && Math.abs(c2.y - c0.y) < 4, { from: c0, to: c2 });
+  await p.keyboard.up('KeyQ');
+
+  console.log('');
+  console.log('== a swing has a top speed ==');
+  await fresh();
+  await rect('wood', 1, X-400, Y+300, X+400, Y+340);
+  await rect('wood', 1, X, Y-140, X+80, Y-60);
+  await lockAll();
+  await rect('sponge', 1, X+20, Y+80, X+60, Y+140);
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('rope'); });
+  await p.evaluate(([x,y]) => window.__pg.linkAt(x,y), [X+40, Y-100]);
+  await p.evaluate(([x,y]) => window.__pg.linkAt(x,y), [X+40, Y+110]);
+  await play();
+  await p.waitForTimeout(600);
+  const sw = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0];
+  await p.keyboard.down('KeyQ');
+  await p.evaluate(([x,y]) => window.__pg.playerTo(x,y), [sw.pos.x - 34, sw.pos.y - 60]);
+  await p.waitForTimeout(500);
+  ok('hanging from it', await grabbing());
+  let topSpeed = 0, deepestSwing = 0;
+  const pump = async (key, ms) => { await p.keyboard.down(key); const t0 = Date.now(); while (Date.now() - t0 < ms){
+    const v = await p.evaluate(() => window.__pg.playerVel()); if (v) topSpeed = Math.max(topSpeed, Math.hypot(v.x, v.y));
+    const d = await p.evaluate(() => window.__pg.holdOverlap()); if (d != null) deepestSwing = Math.max(deepestSwing, d);
+    await p.waitForTimeout(30); } await p.keyboard.up(key); };
+  for (let i = 0; i < 4; i++){ await pump('KeyD', 700); await pump('KeyA', 700); }   // pump as hard as you like
+  console.log('   top speed', topSpeed.toFixed(1), 'deepest overlap', deepestSwing);
+  ok('you do swing', topSpeed > 4, topSpeed);
+  ok('but never faster than the cap', topSpeed < 11.5, topSpeed);
+  ok('and you do not get pulled into what you hold', deepestSwing < 4, deepestSwing);
+  ok('still holding on', await grabbing());
   await p.keyboard.up('KeyQ');
 
   console.log('');

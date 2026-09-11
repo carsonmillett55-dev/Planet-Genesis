@@ -2500,7 +2500,7 @@
     dropBitmap(obj);
     bolts.slice().forEach(function(b){ if (b.objA===obj || b.objB===obj) removeBolt(b); });
     gadgets.slice().forEach(function(g){ if (g.obj === obj) removeGadget(g); });
-    if (carried === obj) carried = null;
+    if (carried === obj) dropCarried();
     links.slice().forEach(function(l){ if (l.objA === obj || l.objB === obj) removeLink(l); });
     if (obj.body) World.remove(world, obj.body);
     objects.splice(idx,1);
@@ -3861,7 +3861,24 @@
      or let go on the move and throw it. Heavier things are dragged on a
      pin, as before. `carried` is the object; there is no constraint. */
   var carried = null;
-  var CARRY_REACH = 120, CARRY_MASS_RATIO = 3;
+  var CARRY_REACH = 120, CARRY_MASS_RATIO = 3, SWING_MAX_SPEED = 10;
+  /* Carrying is at a FIXED distance: the cursor only chooses the direction,
+     and the object rides a circle around the player at `carryR`. So it can
+     never be pulled into you or pushed away from you — and never overlap
+     you, because the radius is at least your reach plus its own size.
+     That is what stops an object being used to shove yourself about, and
+     it is most of what stopped the clipping. */
+  var carryR = 90, carryDir = { x: 1, y: 0 };
+  /* And it goes AROUND you, never through you: the direction turns toward
+     the cursor at most this much a step, so pointing at the other side of
+     yourself swings the object over your head rather than flying it
+     through your chest — which is what used to shove you across the room. */
+  var CARRY_TURN = 0.11;
+  /* While carried, the object and the player do not collide at all. They
+     share this negative group, which Matter takes as "never touch". That is
+     what makes riding what you hold impossible, and it is the other half
+     of the clipping fix: nothing you hold can push on you. */
+  var CARRY_GROUP = -9;
   /* How much of a jump is left with the load in hand: nothing off it for
      something feather-light, a hop for something three times your weight. */
   function carryJumpScale(){
@@ -3869,14 +3886,41 @@
     var load = carried.body.mass / Math.max(0.001, player.mass);
     return Math.max(0.2, 1 - load * 0.22);   // height goes with the square, so this is steeper than it looks
   }
-  var stoodOnCarried = false;
-  /* Once something is dropped for being stood on, it is not picked up
-     again until the grab is released and pressed afresh — otherwise the
-     held key re-grabs it the next frame and the ratchet lifts you anyway. */
-  var grabLatch = false;
-  /* And for a moment after the drop it is not footing either, or you get
-     one free jump off it as it falls away under you. */
-  var dropNoFoot = null;   // { obj, until }
+  function dropCarried(){
+    if (!carried) return;
+    if (carried.body && carried.body.collisionFilter && carried.body.collisionFilter.group === CARRY_GROUP) carried.body.collisionFilter.group = 0;
+    carried = null;
+  }
+  /* The carried object does not collide with the player (CARRY_GROUP), so
+     when its spot is somewhere it cannot get to — under your feet, with the
+     floor in the way — nothing would stop it settling inside you. So the
+     one-sided version of a collision is done here by hand: find the
+     overlap, and move the OBJECT out by the shortest way, never the player.
+     That is what keeps it from ever pushing on you. Run before the step
+     with the velocity about to be set, and again after it so the frame
+     that gets drawn is clean. Returns the velocity with the inward part
+     removed. */
+  function carryKeepOut(cb, v){
+    var hits = Query.collides(player, [cb]);
+    for (var hi = 0; hi < hits.length; hi++){
+      var hc = hits[hi], nx = hc.normal.x, ny = hc.normal.y;
+      if (nx * (cb.position.x - player.position.x) + ny * (cb.position.y - player.position.y) < 0){ nx = -nx; ny = -ny; }
+      Body.translate(cb, { x: nx * hc.depth, y: ny * hc.depth });
+      var into = v.x * nx + v.y * ny;
+      if (into < 0){ v = { x: v.x - into * nx, y: v.y - into * ny }; }
+    }
+    return v;
+  }
+  onStep("afterUpdate", function(){
+    if (!carried || !carried.body || !player) return;
+    var cb = carried.body, v = carryKeepOut(cb, cb.velocity);
+    if (v !== cb.velocity) Body.setVelocity(cb, v);
+  });
+  /* A hanging grip is never shorter than the player's own corner reach, so
+     the body cannot be pulled onto the thing it holds — the hold point is
+     always outside the body. It starts at the true distance (no snap) and
+     grows to that over a few steps. */
+  function grabMinLen(){ var ch = 16; return Math.hypot(Math.max(0, PW/2 - ch), Math.max(0, PH/2 - ch)) + ch + 2; }
   var GRAB_REACH = 16;
   var flying = false;
   var mouseWorld = { x: 0, y: 0 };
@@ -4080,8 +4124,8 @@
   function getSpawnPos(){ return checkpoints[activeCheckpoint] || checkpoints[0]; }
 
   function playerFilter(){
-    if (flying) return { category: CAT_LAYER[MID_LAYER], mask: CAT_WALL, group: 0 }; // fly straight through objects, still bounded by the sealed world
-    return layerFilter(MID_LAYER);
+    if (flying) return { category: CAT_LAYER[MID_LAYER], mask: CAT_WALL, group: CARRY_GROUP }; // fly straight through objects, still bounded by the sealed world
+    var f = layerFilter(MID_LAYER); f.group = CARRY_GROUP; return f;   // see CARRY_GROUP: the only other member is what is being carried
   }
   function spawnPlayer(atPos){
     if (player) World.remove(world, player);
@@ -4111,8 +4155,7 @@
 
   function releaseRope(){
     if (grabConstraint){ World.remove(world, grabConstraint); grabConstraint = null; sfx("unrope"); }
-    if (carried){ carried = null; sfx("unrope"); }
-    stoodOnCarried = false;
+    if (carried){ dropCarried(); sfx("unrope"); }
   }
   function isGrabbing(){ return !!grabConstraint || !!carried; }
   /* Light enough, and LOOSE. A sponge on a rope, a bolt or a piston is
@@ -4176,12 +4219,16 @@
     return best;
   }
   function tryGrab(){
-    if (!player || grabConstraint || carried || flying || grabLatch) return false;
+    if (!player || grabConstraint || carried || flying) return false;
     var t = grabTarget();
     if (!t) return false;
     var body = t.obj.body;
     if (canCarry(t.obj)){
-      carried = t.obj; stoodOnCarried = false;
+      carried = t.obj;
+      var ob = t.obj.body.bounds, objR = Math.hypot(ob.max.x - ob.min.x, ob.max.y - ob.min.y) / 2;
+      carryR = Math.max(Math.hypot(PW, PH) / 2 + objR + 6, Math.min(CARRY_REACH, dist(t.obj.body.position, player.position)));
+      var d0x = t.obj.body.position.x - player.position.x, d0y = t.obj.body.position.y - player.position.y, d0 = Math.hypot(d0x, d0y) || 1;
+      carryDir = { x: d0x / d0, y: d0y / d0 };
       sfx("rope");
       puff(t.hold.x, t.hold.y, 5, { color:"#D9DD6B", speed:1.4, g:0.05 });
       return true;
@@ -4201,7 +4248,7 @@
     v = !!v;
     if (v === grabHeld) return;
     grabHeld = v;
-    if (!v){ releaseRope(); grabLatch = false; }
+    if (!v) releaseRope();
   }
   // Matter stores a constraint's attachment point in the body's own
   // rotating frame, so converting in either direction has to undo /
@@ -4253,23 +4300,8 @@
       // Sensors overlap without holding anything up — a rope, a Back-layer
       // decoration, a walk-through light. Only a solid counts as ground.
       if (p.bodyA.isSensor || p.bodyB.isSensor) return;
-      var other = p.bodyA === player ? p.bodyB : p.bodyA, owner = (other.parent || other).plugin && (other.parent || other).plugin.obj;
-      /* The thing you are carrying is not ground. Standing on it would let
-         you jump, it would float back up under you, and you could ride it
-         to the top of the map — which is exactly what Carson found. It is
-         dropped instead, and never counts as footing. */
-      if (dropNoFoot && owner === dropNoFoot.obj){
-        if (performance.now() < dropNoFoot.until) return;
-        dropNoFoot = null;
-      }
-      if (carried && owner === carried){
-        // standing on it: feet at its top edge, and overlapping it sideways
-        var cb = carried.body.bounds, pb = player.bounds;
-        var feet = pb.max.y, onTop = feet >= cb.min.y - 10 && feet <= cb.min.y + 12;
-        var overlapX = Math.min(pb.max.x, cb.max.x) - Math.max(pb.min.x, cb.min.x);
-        if (onTop && overlapX > 6) stoodOnCarried = true;
-        return;
-      }
+      // (What you are carrying never gets here: it shares CARRY_GROUP with
+      // the player and does not collide with it, so it cannot be footing.)
       groundedNext = true;
     });
   });
@@ -4561,34 +4593,46 @@
     if (vx !== 0) facing = vx > 0 ? 1 : -1;
 
     if (carried){
-      if (objects.indexOf(carried) < 0 || !carried.body || carried.body.isStatic){ carried = null; }
-      else if (stoodOnCarried){
-        stoodOnCarried = false;
-        dropNoFoot = { obj: carried, until: performance.now() + 700 };
-        releaseRope(); grabLatch = true;
-        showToast("You can't stand on what you're holding.");
-      } else {
+      if (objects.indexOf(carried) < 0 || !carried.body || carried.body.isStatic){ dropCarried(); }
+      else {
         var cb = carried.body;
+        if (cb.collisionFilter.group !== CARRY_GROUP) cb.collisionFilter.group = CARRY_GROUP;   // re-applied every step: a rebuild hands the object a fresh body
         var tx = mouseWorld.x - player.position.x, ty = mouseWorld.y - player.position.y;
         var td = Math.hypot(tx, ty);
-        if (td > CARRY_REACH){ tx *= CARRY_REACH / td; ty *= CARRY_REACH / td; }
-        var gx = player.position.x + tx, gy = player.position.y + ty;
+        if (td > 8){
+          // the cursor sets only the direction, and the direction turns
+          // toward it at a limited rate — the short way round, or over the
+          // top when the cursor is straight across, since under the feet
+          // there is usually a floor in the way
+          var want = Math.atan2(ty, tx), have = Math.atan2(carryDir.y, carryDir.x);
+          var diff = want - have; while (diff > Math.PI) diff -= 2*Math.PI; while (diff < -Math.PI) diff += 2*Math.PI;
+          if (Math.abs(diff) > Math.PI - 0.25) diff = Math.abs(diff) * (carryDir.x > 0 ? -1 : 1);
+          var step = Math.max(-CARRY_TURN, Math.min(CARRY_TURN, diff));
+          var na = have + step; carryDir = { x: Math.cos(na), y: Math.sin(na) };
+        }
+        var gx = player.position.x + carryDir.x * carryR, gy = player.position.y + carryDir.y * carryR;
         // float toward the spot: a fraction of the gap per step, capped, so
         // it follows briskly but cannot punch through a wall
-        var vx2 = (gx - cb.position.x) * 0.28, vy2 = (gy - cb.position.y) * 0.28;
+        var vx2 = (gx - cb.position.x) * 0.34, vy2 = (gy - cb.position.y) * 0.34;
         var vm = Math.hypot(vx2, vy2), vmax = 16;
         if (vm > vmax){ vx2 *= vmax / vm; vy2 *= vmax / vm; }
-        Body.setVelocity(cb, { x: vx2, y: vy2 });
+        var v2 = carryKeepOut(cb, { x: vx2, y: vy2 });
+        Body.setVelocity(cb, v2);
         Body.setAngularVelocity(cb, cb.angularVelocity * 0.8);
       }
       // and the player walks, jumps and everything as usual, carrying it
     }
     if (grabConstraint){
-      // hanging on: left/right pump the swing. Jump does nothing here —
-      // only letting go of the grab lets go. (Carson: jumping should not
-      // break the grab.) The queued jump is dropped so it does not fire the
-      // instant you release.
-      if (vx !== 0) Body.applyForce(player, player.position, { x: vx * player.mass * 0.0009, y: 0 });
+      // hanging on: left/right pump the swing, gently, and the swing is
+      // capped — unbounded it built up to a speed that clipped the player
+      // straight through what it was holding. Jump does nothing here; only
+      // letting go of the grab lets go. The queued jump is dropped so it
+      // does not fire the instant you release.
+      if (vx !== 0) Body.applyForce(player, player.position, { x: vx * player.mass * 0.00028, y: 0 });
+      var gml = grabMinLen();
+      if (grabConstraint.length < gml) grabConstraint.length = Math.min(gml, grabConstraint.length + 1.5);
+      var sv = player.velocity, sm = Math.hypot(sv.x, sv.y);
+      if (sm > SWING_MAX_SPEED) Body.setVelocity(player, { x: sv.x * SWING_MAX_SPEED / sm, y: sv.y * SWING_MAX_SPEED / sm });
       input.jumpQueued = false;
       return;
     }
