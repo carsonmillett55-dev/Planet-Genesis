@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` `tversus.js` `ttopdown.js` | Playwright suites, 1311 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` `tversus.js` `ttopdown.js` `tcoaster.js` | Playwright suites, 1345 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1311 checks + checkgeom, in order
+npm test                   # all 1345 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -77,6 +77,7 @@ node tui.js                # 158 — Play from here, the minimap (a click looks,
 node tplayers.js           # 43 — local players: a second pad joins on Start, each pad drives its own character, the keyboard the first; a sensor sees any of them; the camera on the first and a bubble for one left behind, or one who dies; back to Build together; a pad gone and its player leaving; a second player on the keyboard (U joins, I J K L walk)
 node tversus.js            # 32 — Versus: players collide (one on the other's head), the camera frames everyone, a launcher's shot is a knockout credited to the shooter, the HUD chips, the winner named and a new round, lives putting a player out, a hazard for nobody's credit, an adventure's shot only splatting
 node ttopdown.js           # 26 — Top-down: no gravity, a disc of a body, the arrows every way and no jump, looking at the cursor, a shove that slides and stops, water a still pool, a creature chasing down the screen, gravity back in an adventure, saved
+node tcoaster.js           # 34 — the rollercoaster: the track tool draws a line (no object), the coaster waits at the start, F rides, it runs to the end and stops, Space hops off, it glides back; four seats coupled along the rail and the pace; a drawn seat, the box, the level file, Del and undo; two riders in two seats
 node tgame.js              # 85 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -2404,6 +2405,63 @@ on each other, as LBP's do, and a launcher's shot reaches an opponent.
 A pair between two players is handed to **both** (`groundContacts`,
 the hazard touch), and `groundPair` / `touchPair` tell "mine" by the
 bound body (`ownPart`), not by `isPlayerPart`, which is any player's.
+
+## The rollercoaster
+
+Carson's spec from the roadmap, built as written: a track **drawn like
+material** — the Coaster track tool on the Gameplay page, a fixed
+width, grey, "creates track wherever you draw the line", through
+anything; the coaster "stops at the end of the line you drew"; one
+seat by default, up to twelve; a seat of your own drawing duplicated
+down the train. Spacing and coupling "must actually work" — so
+**nothing is simulated**:
+
+- **A track is a polyline, not a body.** `tracks[]`; `addTrack(rawPts,
+  layer)` smooths the hand's wobble (a 1-2-1 pass) and resamples every
+  `TRACK_STEP` (10px) — `pts`, with `cum` the arc length at each point
+  (`trackBuild`). `trackPointAt(t, s)` bisects `cum` for the point and
+  tangent at an arc length. No physics body, so geometry never stops
+  it. Drawn by `drawTracks(layer)` with its layer, before the player:
+  ties, a dark rail with a grey (gold when selected) top, end stops.
+- **The train is one number.** `t.s` is the front seat's arc length;
+  seat i is at `s - i × SEAT_GAP` (46px) along the **same** rail, lifted
+  `SEAT_LIFT` off it toward the world's up (`seatPos`). That is the
+  coupling: a chain of bodies would stretch on a curve and pile up on a
+  stop; arc length cannot. The train waits with the whole of it on the
+  rail — the front seat `trainStart(t)` (a train's length, or half the
+  track) in.
+- **The run** (a `beforeUpdate` step): `wait` — someone aboard for
+  `COASTER_WAIT_MS` sets it off; `run` — `v = clamp(v × 0.9985 + ty ×
+  COASTER_G, pace, COASTER_MAX)`, so it gathers speed downhill (the
+  tangent's y is down) and the **pace is the slowest it goes** — the
+  chain lift up a climb; at the end of the line it stops (`end`); once
+  everyone has hopped off it glides `back` at `COASTER_BACK` a step to
+  the start and waits. Boarded at the far end, it takes them back.
+- **Riding.** F in reach of a free seat of a waiting coaster
+  (`coasterSeatNear`, from `useLever` when there is no lever;
+  `boardCoaster`): `me.riding = t`, `me.seat = i`, the body is placed at
+  the seat every step with the motion as its velocity (a hop keeps it),
+  colliding with the walls only (`playerFilter`, as flying does — the
+  coaster goes through things, so must you); `moveStep` returns early,
+  Space or F hops off (`leaveCoaster`), the crush check stands down.
+  The use prompt says "ride" over the seat. Every rider is their own
+  seat — two players, two seats.
+- **The box** (`renderTrackBox`, on a right-click or a Move-tool
+  click on the rail or a seat, `trackAt`): Seats (1–12), Pace (0.5–8
+  px/step, shown as px/s), Draw the seat (`openSeatStudio`: a `seat`
+  skin kind, one state, aspect 1.4, `finishSeatDraft` keeps it as
+  `t.look` and every seat draws it — `drawSeat`, over the same two
+  wheels), Plain car, Remove (Del too). `clearAllObjects` takes the
+  tracks; leaving Play `resetTracks` and unseats everyone.
+- **Saved** in the level file and every snapshot as `tracks`
+  (`packTrack`: `pts` rounded to a tenth, `layer`, `seats`, `pace`,
+  `look`; `unpackTrack`), moved by `migrateWorldSize` like everything
+  else. Hooks: `tracks`, `addTrack`, `trackSet`, `selectTrack`,
+  `riding`, `board`, `hopOff`. `tcoaster.js`.
+
+Not yet: moving a track once drawn (redraw it), a loop-the-loop that
+keeps the seats "up" through the loop (up is the world's), a coaster
+sent by a wire, loose objects riding.
 
 ## Top-down (2.5D)
 

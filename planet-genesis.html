@@ -1775,6 +1775,7 @@
     "tool:gun":        ["Launcher", "A pickup: walk into it in Play and the cursor becomes a gun. Click to fire. Its box picks what it shoots — a bullet, a ray, a projectile you drew, or something you saved."],
     "tool:fan":        ["Fan", "Blows upward and lifts the player. Its size and strength are in its box, and a wire switches it on and off."],
     "tool:door":       ["Level door", "A way into another level. Put it down, pick which level it leads to in its box — or make a new one for it — and in Play, walk up and press F to go in. Finishing that level brings you back here. Put doors in My World to keep everything you make in one place."],
+    "tool:track":      ["Coaster track", "Draw a line and it is a rollercoaster track — through anything, a fixed width, grey. A coaster waits at the start; walk up and press F to sit in it, and it runs the line to the end and stops. Right-click the track for more seats, the pace, and a seat of your own drawing."],
     "tool:rocket":     ["Rocket", "Stick it to something loose and it pushes that thing the way it points — a car, a lift, a flying machine. Strength and direction are in its box; wire a switch to it to fire it on demand. Off the middle of a thing, it spins it."],
     "tool:spot":       ["Spotlight", "Put it on something and it shines a cone of light the way it points — turn the thing to aim it, or set the direction, width and reach in its box. Wire a switch to it to turn it on and off. Best with World Light turned down."],
     "tool:speech":     ["Speech bubble", "Put it on something and type what it says. It speaks while the player is within reach — or, wired, while the signal is on. A sign, a talking creature, a hint."],
@@ -3282,6 +3283,7 @@
     anim:     [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"action", label:"Action", emoji:"⚡" }],
     emitter:  [{ id:"particle", label:"Particle", emoji:"✨" }],
     sticker:  [{ id:"sticker", label:"Sticker", emoji:"🏷️" }],
+    seat:     [{ id:"seat", label:"Seat", emoji:"🎢" }],
     material: [{ id:"tile", label:"Tile", emoji:"🧱" }],
     projectile: [{ id:"idle", label:"Look", emoji:"🚀" }, { id:"impact", label:"Impact", emoji:"💥" }],
     background: [{ id:"scene", label:"Scene", emoji:"🏞️" }]
@@ -3297,7 +3299,7 @@
     eye: [], emitter: [], sticker: [], material: [],
     projectile: [{ id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" }]
   };
-  var SKIN_TITLE = { eye:"🐾 Creature", creature:"🐉 Custom creature", anim:"🎨 Custom object", emitter:"✨ Particle", sticker:"🏷️ Sticker", material:"🧱 Material", projectile:"🚀 Projectile", background:"🏞️ Background" };
+  var SKIN_TITLE = { eye:"🐾 Creature", creature:"🐉 Custom creature", anim:"🎨 Custom object", emitter:"✨ Particle", sticker:"🏷️ Sticker", seat:"🎢 Coaster seat", material:"🧱 Material", projectile:"🚀 Projectile", background:"🏞️ Background" };
   var DRAWN_DEFAULT_SIZE = 120;   // the box a fresh drawn thing starts in, world px
   function newSkin(kind){
     var st = {}, fps = {};
@@ -3910,7 +3912,11 @@
       var d = dist(gadgetWorld(g), player.position);
       if (d < bestD){ bestD = d; best = g; }
     });
-    if (!best) return false;
+    if (!best){
+      // no lever: a coaster seat in reach sits you in it, and F again hops off
+      if (me && me.riding) return leaveCoaster(false);
+      return boardCoaster();
+    }
     if (best.springs) best.held = true; else best.on = !best.on;
     sfx("click");
     return true;
@@ -4997,6 +5003,312 @@
     var t = L2 ? Math.max(0, Math.min(1, ((px-ax)*dx + (py-ay)*dy) / L2)) : 0;
     return Math.hypot(px - (ax + dx*t), py - (ay + dy*t));
   }
+  /* ---- The rollercoaster. Carson's spec: a track MATERIAL — a fixed
+     brush, grey, drawn as a line through anything; the coaster stops at
+     the end of the line; one seat by default, up to twelve, a seat of
+     your own drawing duplicated down the train. A track is a polyline
+     (`pts`, resampled every TRACK_STEP px, `cum` its arc lengths), no
+     body at all — geometry does not stop the coaster. The coaster is
+     `s`, how far along the front seat is, and `v`, its pace; seat i
+     sits SEAT_GAP further back along the SAME arc length, which is what
+     keeps a train coupled and spaced whatever the curve does — a chain
+     of bodies would stretch and pile up, so nothing here is simulated.
+     A rider's body is placed at the seat every step (velocity set to the
+     motion, so a hop off keeps it), colliding with the walls only. The
+     coaster waits at the start, runs once someone is aboard (gravity
+     along the rail: faster downhill, never slower than its pace — the
+     chain lift), stops at the end, and when everyone has hopped off
+     glides back to the start for the next run. ---- */
+  var tracks = [], trackCounter = 0, selectedTrack = null, trackDraft = null;
+  var TRACK_STEP = 10, SEAT_GAP = 64, SEAT_LIFT = 18, COASTER_MAX = 15, COASTER_G = 0.085, COASTER_BACK = 3.2, COASTER_WAIT_MS = 800, COASTER_LEAVE_MS = 1500;
+  var TRACK_SEATS_MAX = 12;
+  function trackResample(raw){
+    // smooth the hand's wobble, then a point every TRACK_STEP px along the line
+    var sm = [];
+    for (var i = 0; i < raw.length; i++){
+      var a = raw[Math.max(0, i - 1)], b = raw[i], c = raw[Math.min(raw.length - 1, i + 1)];
+      sm.push({ x: (a.x + 2 * b.x + c.x) / 4, y: (a.y + 2 * b.y + c.y) / 4 });
+    }
+    var out = [sm[0]], carry = 0;
+    for (var j = 1; j < sm.length; j++){
+      var p0 = out[out.length - 1], p1 = sm[j], d = dist(p0, p1);
+      while (d >= TRACK_STEP){ var k = TRACK_STEP / d; p0 = { x: p0.x + (p1.x - p0.x) * k, y: p0.y + (p1.y - p0.y) * k }; out.push(p0); d = dist(p0, p1); }
+    }
+    var last = sm[sm.length - 1];
+    if (dist(out[out.length - 1], last) > TRACK_STEP * 0.4) out.push({ x: last.x, y: last.y });
+    return out;
+  }
+  function trackBuild(t){
+    t.cum = [0];
+    for (var i = 1; i < t.pts.length; i++) t.cum.push(t.cum[i - 1] + dist(t.pts[i - 1], t.pts[i]));
+  }
+  function trackLen(t){ return t.cum[t.cum.length - 1] || 0; }
+  function trainStart(t){ return Math.min((t.seats - 1) * SEAT_GAP, trackLen(t) * 0.5); }   // the front seat, with the whole train on the rail behind it
+  function trackPointAt(t, sArc){
+    var L = trackLen(t), pts = t.pts;
+    if (pts.length < 2) return { x: pts[0].x, y: pts[0].y, tx: 1, ty: 0 };
+    sArc = Math.max(0, Math.min(L, sArc));
+    var lo = 0, hi = t.cum.length - 1;
+    while (hi - lo > 1){ var mid = (lo + hi) >> 1; if (t.cum[mid] <= sArc) lo = mid; else hi = mid; }
+    var a = pts[lo], b = pts[Math.min(pts.length - 1, lo + 1)], seg = t.cum[lo + 1] - t.cum[lo] || 1, u = (sArc - t.cum[lo]) / seg;
+    var tx = b.x - a.x, ty = b.y - a.y, tl = Math.hypot(tx, ty) || 1;
+    return { x: a.x + tx * u, y: a.y + ty * u, tx: tx / tl, ty: ty / tl };
+  }
+  // where seat i sits: SEAT_GAP back along the rail per seat, lifted off the rail toward the world's up
+  function seatPos(t, i){
+    var q = trackPointAt(t, t.s - i * SEAT_GAP);
+    var nx = q.ty, ny = -q.tx; if (ny > 0){ nx = -nx; ny = -ny; }
+    return { x: q.x + nx * SEAT_LIFT, y: q.y + ny * SEAT_LIFT, ang: Math.atan2(q.ty, q.tx), tx: q.tx, ty: q.ty };
+  }
+  function addTrack(rawPts, layer, extra){
+    extra = extra || {};
+    var pts = trackResample(rawPts);
+    if (pts.length < 3) return null;
+    var t = { id: "t" + (trackCounter++), pts: pts, cum: null, layer: layer == null ? buildLayer : layer,
+              seats: Math.max(1, Math.min(TRACK_SEATS_MAX, extra.seats != null ? extra.seats | 0 : 1)),
+              pace: extra.pace != null && isFinite(+extra.pace) ? Math.max(0.5, Math.min(8, +extra.pace)) : 2.5,
+              look: extra.look ? normalizeSkin(extra.look, "seat") : null,
+              s: 0, v: 0, state: "wait", riders: [], boardAt: 0, endAt: 0 };
+    trackBuild(t); t.s = trainStart(t);
+    tracks.push(t);
+    return t;
+  }
+  function removeTrack(t){
+    var i = tracks.indexOf(t); if (i < 0) return;
+    t.riders.slice().forEach(function(P){ withPlayer(P, function(){ leaveCoaster(false); }); });
+    tracks.splice(i, 1);
+    if (selectedTrack === t) selectedTrack = null;
+  }
+  function trackAt(x, y, maxD){
+    var best = null, bd = (maxD || 12) + 4;
+    for (var i = 0; i < tracks.length; i++){
+      var t = tracks[i], pts = t.pts;
+      for (var j = 1; j < pts.length; j++){
+        var d = distToSeg({ x: x, y: y }, pts[j - 1], pts[j]);
+        if (d < bd){ bd = d; best = t; }
+      }
+      // or a seat
+      for (var k = 0; k < t.seats; k++){ var sp = seatPos(t, k); var ds = dist({ x: x, y: y }, sp); if (ds < 26 && ds < bd){ bd = ds; best = t; } }
+    }
+    return best;
+  }
+  function distToSeg(p, a, b){
+    var vx = b.x - a.x, vy = b.y - a.y, wx = p.x - a.x, wy = p.y - a.y, L2 = vx * vx + vy * vy || 1;
+    var u = Math.max(0, Math.min(1, (wx * vx + wy * vy) / L2));
+    return Math.hypot(p.x - (a.x + vx * u), p.y - (a.y + vy * u));
+  }
+  function trackLayerDepth(t){ return layerDepth(t.layer); }
+  /* Boarding: the nearest waiting coaster with a free seat within reach
+     of the bound player. F (interact) sits them; jump or F again hops
+     off. */
+  function coasterSeatNear(){
+    if (!player || (me && (me.bubble || me.riding))) return null;
+    var best = null, bd = 70;
+    for (var i = 0; i < tracks.length; i++){
+      var t = tracks[i];
+      if (t.state !== "wait" && t.state !== "end") continue;
+      for (var k = 0; k < t.seats; k++){
+        if (t.riders.some(function(P){ return P.seat === k; })) continue;
+        var d = dist(seatPos(t, k), player.position);
+        if (d < bd){ bd = d; best = { t: t, seat: k }; }
+      }
+    }
+    return best;
+  }
+  function boardCoaster(){
+    var near = coasterSeatNear(); if (!near) return false;
+    var t = near.t;
+    releaseRope();
+    me.riding = t; me.seat = near.seat;
+    t.riders.push(me); t.boardAt = performance.now();
+    if (t.state === "end"){ t.state = "back"; }   // boarded at the far end: it takes them back
+    player.collisionFilter = playerFilter();
+    grounded = false; sliding = false; crouching = false;
+    var sp = seatPos(t, near.seat);
+    Body.setPosition(player, { x: sp.x, y: sp.y - PH * 0.32 });
+    Body.setVelocity(player, { x: 0, y: 0 });
+    sfx("bolt");
+    return true;
+  }
+  function leaveCoaster(hop){
+    var t = me && me.riding; if (!t) return false;
+    var ri = t.riders.indexOf(me); if (ri >= 0) t.riders.splice(ri, 1);
+    if (!t.riders.length && t.state === "end") t.endAt = performance.now();
+    me.riding = null; me.seat = 0;
+    if (player){
+      player.collisionFilter = playerFilter();
+      if (hop) Body.setVelocity(player, { x: player.velocity.x, y: -11 });
+    }
+    hazardSafeUntil = Math.max(hazardSafeUntil, performance.now() + 300);
+    return true;
+  }
+  onStep("beforeUpdate", function(){
+    if (!runner.enabled || !tracks.length) return;
+    var now = performance.now();
+    for (var i = 0; i < tracks.length; i++){
+      var t = tracks[i], L = trackLen(t);
+      // riders who are gone (a mode switch, a removal) let go of their seat
+      for (var r = t.riders.length - 1; r >= 0; r--) if (players.indexOf(t.riders[r]) < 0 || t.riders[r].riding !== t) t.riders.splice(r, 1);
+      if (t.state === "wait"){
+        t.s = trainStart(t); t.v = 0;
+        if (t.riders.length && now - t.boardAt > COASTER_WAIT_MS){ t.state = "run"; t.v = t.pace; sfx("mode"); }
+      } else if (t.state === "run"){
+        var q = trackPointAt(t, t.s);
+        t.v = Math.max(t.pace, Math.min(COASTER_MAX, t.v * 0.9985 + q.ty * COASTER_G));   // downhill (ty > 0) gathers speed; the lift never lets it under its pace
+        t.s += t.v;
+        if (t.s >= L){ t.s = L; t.v = 0; t.state = "end"; t.endAt = now; sfx("land"); }
+      } else if (t.state === "end"){
+        if (!t.riders.length && now - t.endAt > COASTER_LEAVE_MS) t.state = "back";
+      } else if (t.state === "back"){
+        t.s -= COASTER_BACK;
+        if (t.s <= trainStart(t)){ t.s = trainStart(t); t.state = "wait"; t.boardAt = now; }
+      }
+      // the riders sit where their seats are, moving with them
+      var vx = 0, vy = 0;
+      if (t.state === "run" || t.state === "back"){ var q2 = trackPointAt(t, t.s), sp2 = t.state === "run" ? t.v : -COASTER_BACK; vx = q2.tx * sp2; vy = q2.ty * sp2; }
+      for (var r2 = 0; r2 < t.riders.length; r2++){
+        var P = t.riders[r2];
+        withPlayer(P, function(){
+          if (!player) return;
+          var sp = seatPos(t, me.seat);
+          Body.setPosition(player, { x: sp.x, y: sp.y - PH * 0.32 });
+          Body.setVelocity(player, { x: vx, y: vy });
+          grounded = false;
+        });
+      }
+    }
+  });
+  function drawTrackRail(t, selected){
+    var pts = t.pts; if (pts.length < 2) return;
+    var d = trackLayerDepth(t);
+    ctx.save();
+    ctx.globalAlpha = d.a;
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    // ties, then the rail over them
+    ctx.strokeStyle = "#4E4A45"; ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (var sArc = 0, L = trackLen(t); sArc <= L; sArc += 22){
+      var q = trackPointAt(t, sArc), nx = q.ty * 9, ny = -q.tx * 9;
+      ctx.moveTo(q.x - nx, q.y - ny); ctx.lineTo(q.x + nx, q.y + ny);
+    }
+    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.strokeStyle = "#2B1B12"; ctx.lineWidth = 8; ctx.stroke();
+    ctx.strokeStyle = selected ? "#F2B705" : "#8A8F98"; ctx.lineWidth = 5; ctx.stroke();
+    // the end stops
+    [pts[0], pts[pts.length - 1]].forEach(function(e){ ctx.beginPath(); ctx.arc(e.x, e.y, 6, 0, Math.PI * 2); ctx.fillStyle = "#4E4A45"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke(); });
+    ctx.restore();
+  }
+  function drawSeat(t, i){
+    var sp = seatPos(t, i), d = trackLayerDepth(t);
+    ctx.save();
+    ctx.globalAlpha = d.a;
+    ctx.translate(sp.x, sp.y); ctx.rotate(sp.ang);
+    var fr = t.look ? skinFrame(t.look, "seat", 0, false) : null;
+    if (fr){
+      var cv = drawingCanvas(fr, 140, 100);
+      ctx.drawImage(cv, -35, -25 - 8, 70, 50);
+    } else {
+      // the plain car: a red tub with a rim, on two wheels
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-29, -18, 58, 32, 8) : ctx.rect(-29, -18, 58, 32);
+      ctx.fillStyle = i === 0 ? "#D9534F" : "#C8A24A"; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.fillRect(-24, -14, 48, 6);
+    }
+    [-17, 17].forEach(function(wx){ ctx.beginPath(); ctx.arc(wx, 16, 6.5, 0, Math.PI * 2); ctx.fillStyle = "#2B1B12"; ctx.fill(); ctx.beginPath(); ctx.arc(wx, 16, 2.5, 0, Math.PI * 2); ctx.fillStyle = "#8A8F98"; ctx.fill(); });
+    ctx.restore();
+  }
+  // the front of an occupied car, drawn over its rider so they sit IN it
+  function drawSeatFronts(){
+    for (var i = 0; i < tracks.length; i++){
+      var t = tracks[i];
+      for (var r = 0; r < t.riders.length; r++){
+        var sp = seatPos(t, t.riders[r].seat), d = trackLayerDepth(t);
+        ctx.save(); ctx.globalAlpha = d.a; ctx.translate(sp.x, sp.y); ctx.rotate(sp.ang);
+        var fr = t.look ? skinFrame(t.look, "seat", 0, false) : null;
+        if (fr){
+          // the lower half of the drawing is the tub in front
+          var cv = drawingCanvas(fr, 140, 100);
+          ctx.drawImage(cv, 0, 50, 140, 50, -35, -8, 70, 25);
+        } else {
+          ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-29, -6, 58, 20, 6) : ctx.rect(-29, -6, 58, 20);
+          ctx.fillStyle = t.riders[r].seat === 0 ? "#D9534F" : "#C8A24A"; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
+  }
+  function drawTracks(layer){
+    for (var i = 0; i < tracks.length; i++){
+      var t = tracks[i]; if (t.layer !== layer) continue;
+      if (mode === "play" && !onScreenRect(trackBounds(t))) continue;
+      drawTrackRail(t, selectedTrack === t && mode === "build");
+      for (var k = t.seats - 1; k >= 0; k--) drawSeat(t, k);
+    }
+    if (trackDraft && trackDraft.layer === layer && trackDraft.pts.length > 1){
+      ctx.save(); ctx.setLineDash([8 / camScale, 6 / camScale]); ctx.lineWidth = 5; ctx.strokeStyle = "rgba(138,143,152,0.9)"; ctx.lineJoin = "round";
+      ctx.beginPath(); ctx.moveTo(trackDraft.pts[0].x, trackDraft.pts[0].y);
+      for (var j = 1; j < trackDraft.pts.length; j++) ctx.lineTo(trackDraft.pts[j].x, trackDraft.pts[j].y);
+      ctx.stroke(); ctx.restore();
+    }
+  }
+  function trackBounds(t){
+    if (!t.bb){ var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; t.pts.forEach(function(q){ x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }); t.bb = { x0: x0 - 60, y0: y0 - 60, x1: x1 + 60, y1: y1 + 60 }; }
+    return t.bb;
+  }
+  function onScreenRect(bb){ var visW = viewRectW / camScale, visH = viewRectH / camScale; return !(bb.x1 < camX || bb.x0 > camX + visW || bb.y1 < camY || bb.y0 > camY + visH); }
+  function packTrack(t){ return { pts: t.pts.map(function(q){ return [Math.round(q.x * 10) / 10, Math.round(q.y * 10) / 10]; }), layer: t.layer, seats: t.seats, pace: t.pace, look: t.look ? packSkin(t.look) : null }; }
+  function unpackTrack(ts){
+    if (!ts || !Array.isArray(ts.pts) || ts.pts.length < 2) return null;
+    var pts = ts.pts.map(function(q){ return { x: +q[0] || 0, y: +q[1] || 0 }; });
+    var t = { id: "t" + (trackCounter++), pts: pts, cum: null, layer: ts.layer != null ? Math.max(0, Math.min(2, ts.layer | 0)) : MID_LAYER,
+              seats: Math.max(1, Math.min(TRACK_SEATS_MAX, ts.seats | 0 || 1)), pace: ts.pace != null && isFinite(+ts.pace) ? Math.max(0.5, Math.min(8, +ts.pace)) : 2.5,
+              look: ts.look ? normalizeSkin(ts.look, "seat") : null, s: 0, v: 0, state: "wait", riders: [], boardAt: 0, endAt: 0 };
+    trackBuild(t); t.s = trainStart(t);
+    tracks.push(t);
+    return t;
+  }
+  function resetTracks(){ tracks.forEach(function(t){ t.s = trainStart(t); t.v = 0; t.state = "wait"; t.riders = []; }); }
+  function openSeatStudio(t){
+    var g = { id: "seat", kind: "seat", obj: null, art: null, skin: t.look ? t.look : newSkin("seat"), track: t, layer: t.layer, pos: { x: 0, y: 0 } };
+    pmEditState = "seat"; pmEditFrame = 0;
+    ceOpenWith(ceSkinSubject(g));
+  }
+  function finishSeatDraft(g){
+    var t = g.track; if (!t) return;
+    t.look = skinHasArt(g.skin) ? g.skin : null;
+    showToast(t.look ? "The seat is drawn — every seat on the train wears it." : "Nothing drawn — the plain car it is.");
+    renderSelBar();
+  }
+  function selectTrack(t){ clearSelection(); selectedTrack = t; sfx("tick"); }
+  function deleteSelectedTrack(){
+    var t = selectedTrack; if (!t || tracks.indexOf(t) < 0) return;
+    pushUndo("removing a track");
+    removeTrack(t);
+    clearSelection(); sfx("delete");
+  }
+  function renderTrackBox(){
+    var t = selectedTrack;
+    opBodyEl.innerHTML = "";
+    opTitleEl.textContent = "Coaster track";
+    var info = document.createElement("div"); info.className = "opInfo";
+    info.innerHTML = "<b>" + t.seats + (t.seats === 1 ? " seat" : " seats") + "</b> · " + Math.round(trackLen(t)) + "px of track";
+    opBodyEl.appendChild(info);
+    var tr = opSection("The train");
+    var pushed = false;
+    var sl = sliderRow("Seats", t.seats, 1, TRACK_SEATS_MAX, 1, function(v){ if (!pushed){ pushUndo("changing a track"); pushed = true; } t.seats = Math.round(v); if (t.state === "wait") t.s = trainStart(t); info.innerHTML = "<b>" + t.seats + (t.seats === 1 ? " seat" : " seats") + "</b> · " + Math.round(trackLen(t)) + "px of track"; }, function(v){ return Math.round(v) + ""; });
+    sl.style.flexBasis = "100%"; tr.appendChild(sl);
+    var pushed2 = false;
+    var sp = sliderRow("Pace", t.pace, 0.5, 8, 0.1, function(v){ if (!pushed2){ pushUndo("changing a track"); pushed2 = true; } t.pace = v; }, function(v){ return v <= 0.6 ? "crawl" : (v >= 7.5 ? "flat out" : Math.round(v * STEPS_PER_SEC) + " px/s"); });
+    sp.style.flexBasis = "100%"; tr.appendChild(sp);
+    var pn = document.createElement("div"); pn.className = "noteText"; pn.textContent = "The pace is the slowest it goes — the lift up a climb. Downhill it gathers speed."; tr.appendChild(pn);
+    var lk = opSection("The seat");
+    opBtn(lk, t.look ? "🎨 Redraw the seat" : "🎨 Draw the seat", "A seat of your own, drawn — every seat on the train wears it", function(){ openSeatStudio(t); }, t.look ? "on" : "");
+    if (t.look) opBtn(lk, "Plain car", "Back to the plain car", function(){ pushUndo("changing a track"); t.look = null; renderSelBar(); sfx("tick"); });
+    var ac = opSection("Actions");
+    opBtn(ac, "🗑 Remove", "Take the track out (Del)", function(){ deleteSelectedTrack(); }, "red wide");
+    objPanelEl.hidden = false;
+  }
   function linkAt(x, y, maxD){
     maxD = maxD || 10;
     var best = null, bestD = maxD;
@@ -5396,6 +5708,8 @@
   function clearAllObjects(){
     // whatever was selected or hovered is about to stop existing
     clearSelection();
+    tracks.slice().forEach(removeTrack);
+    tracks = []; trackDraft = null;
     hoverObj = null;
     objects.slice().forEach(removeObject);
     objects = [];
@@ -6587,6 +6901,7 @@
   function getSpawnPos(){ return checkpoints[activeCheckpoint] || checkpoints[0]; }
 
   function playerFilter(){
+    if (me && me.riding) return { category: CAT_LAYER[MID_LAYER], mask: CAT_WALL, group: carryGroup() };   // on the coaster: through anything, as the coaster is
     if (flying) return { category: CAT_LAYER[MID_LAYER], mask: CAT_WALL, group: carryGroup() }; // fly straight through objects, still bounded by the sealed world
     var f = layerFilter(MID_LAYER); f.group = carryGroup(); return f;   // see CARRY_GROUP: the only other member is what is being carried
   }
@@ -7014,7 +7329,7 @@
   var CRUSH_FRAC = 0.42, CRUSH_STEPS = 10, crushSteps = 0, crushesSeen = 0;
   var TOPDOWN_DRAG = 0.94;   // a loose thing seen from above loses this much of its speed a step
   function crushCheck(){
-    if (!player || flying || (me && me.bubble) || !runner.enabled || grabConstraint || performance.now() < hazardSafeUntil){ crushSteps = 0; return; }
+    if (!player || flying || (me && (me.bubble || me.riding)) || !runner.enabled || grabConstraint || performance.now() < hazardSafeUntil){ crushSteps = 0; return; }
     var solids = [], pb = player.bounds;
     for (var i = 0; i < objects.length; i++){
       var o = objects[i]; if (!o.body || o.decorative || o.projectile) continue;
@@ -7461,6 +7776,9 @@
     if ((e.code === "Delete" || e.code === "Backspace") && selectedLink && mode === "build" && !e.repeat){
       e.preventDefault(); deleteSelectedLink(); return;
     }
+    if ((e.code === "Delete" || e.code === "Backspace") && selectedTrack && mode === "build" && !e.repeat){
+      e.preventDefault(); deleteSelectedTrack(); return;
+    }
     if ((e.code === "Delete" || e.code === "Backspace") && selectedGadget && mode === "build" && !e.repeat){
       e.preventDefault(); deleteSelectedGadget(); return;
     }
@@ -7629,6 +7947,12 @@
   }
   function moveStep(){
     if (!player || (me && me.bubble)) return;
+    if (me && me.riding){
+      // sitting in the coaster: it carries you; jump hops off
+      if (input.jumpQueued) leaveCoaster(true);
+      input.jumpQueued = false; input.jumpBufferUntil = 0;
+      return;
+    }
     if (grabHeld && !grabConstraint) tryGrab();
     // Sprint is a bit quicker, not a dash — LBP has no sprint at all, so
     // this stays modest enough that levels built at walking pace still work.
@@ -8018,6 +8342,7 @@
       goal: goalPoint ? { x:goalPoint.x, y:goalPoint.y } : null,
       bubbles: bubbles.map(function(b){ return { x:b.x, y:b.y }; }),
       activeCheckpoint: activeCheckpoint,
+      tracks: tracks.map(packTrack),
       world: packWorldSettings(),
       // A byte per cell, but only when there IS water — otherwise every
       // snapshot of every dry level would carry 45KB of zeroes for
@@ -8057,6 +8382,7 @@
     goalPoint = snap.goal ? { x:snap.goal.x, y:snap.goal.y } : null;
     bubbles = (snap.bubbles||[]).map(function(b){ return { x:b.x, y:b.y, collected:false }; });
     activeCheckpoint = snap.activeCheckpoint || 0;
+    (Array.isArray(snap.tracks) ? snap.tracks : []).forEach(unpackTrack);
     if (snap.world){
       worldSettings.gravity = snap.world.gravity; worldSettings.waterLevel = snap.world.waterLevel; worldSettings.ropeLength = snap.world.ropeLength;
       if (snap.world.motorSpeed != null) worldSettings.motorSpeed = snap.world.motorSpeed;
@@ -9774,12 +10100,16 @@
      now. Sized in screen pixels so it reads the same at any zoom. */
   function drawUsePrompt(){
     if (!runner.enabled || !player) return;
-    var g = leverNearPlayer();
-    if (!g) return;
-    var wp = gadgetWorld(g);
-    var key = keyLabel((keyBinds.interact && keyBinds.interact[0]) || "KeyF"), word = g.kind === "door" ? ("enter " + (g.targetName || "the level")) : "use";
+    var g = leverNearPlayer(), wp, word, lift;
+    if (g){ wp = gadgetWorld(g); word = g.kind === "door" ? ("enter " + (g.targetName || "the level")) : "use"; lift = g.kind === "door" ? 104 : 38; }
+    else {
+      var seatNear = coasterSeatNear();
+      if (!seatNear) return;
+      wp = seatPos(seatNear.t, seatNear.seat); word = "ride"; lift = 40;
+    }
+    var key = keyLabel((keyBinds.interact && keyBinds.interact[0]) || "KeyF");
     ctx.save();
-    ctx.translate(wp.x, wp.y - (g.kind === "door" ? 104 : 38)/camScale);
+    ctx.translate(wp.x, wp.y - lift/camScale);
     ctx.scale(1/camScale, 1/camScale);
     var bob = Math.sin(performance.now()/260) * 2;
     ctx.translate(0, bob);
@@ -10913,17 +11243,18 @@
     // and its markers, THEN Front decoration on top — so anything you
     // paint on the front layer correctly covers the player, LBP-style.
     drawLayer(0); drawLightGlows(0);
-    drawBolts(0); drawLinks(0); drawGadgets(0); drawSprites(0);
+    drawBolts(0); drawLinks(0); drawTracks(0); drawGadgets(0); drawSprites(0);
     drawLayer(1); drawLightGlows(1);
-    drawBolts(1); drawLinks(1); drawGadgets(1); drawSprites(1);
+    drawBolts(1); drawLinks(1); drawTracks(1); drawGadgets(1); drawSprites(1);
     drawBubbles();
     checkpoints.forEach(function(cp, i){ drawFlag(cp, i===0 ? "#5F9E5A" : "#2F86A6", i===0 ? "start" : "checkpoint"); });
     drawFlag(goalPoint, "#F2B705", "goal");
     forEachPlayer(drawPlayer);
+    drawSeatFronts();
     drawParticles();
     drawMaterialWater();
     drawLayer(2); drawLightGlows(2);
-    drawBolts(2); drawLinks(2); drawGadgets(2); drawSprites(2);
+    drawBolts(2); drawLinks(2); drawTracks(2); drawGadgets(2); drawSprites(2);
     drawWires();
     forEachPlayer(drawUsePrompt);
     drawSpeech();
@@ -11766,7 +12097,7 @@
                   note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
     logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["impact","💥","Impact sensor"],["projsensor","🎯","Projectile sensor"],["tag","🏷","Tag"],["tagsensor","📡","Tag sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["timer","⏱","Timer"],["counter","🔢","Counter"],["gate","🔀","Gate"],["changer","🌗","World changer"]],
                   note:"Put them on something. Right-click one and Connect it to a motor, a piston, a camera, a mover or a world changer — it drives that while it is on." },
-    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["rocket","🚀","Rocket"],["spot","🔦","Spotlight"],["door","🚪","Level door"],["speech","💬","Speech bubble"],["destroyer","💣","Destroyer"],["sound","🔊","Sound"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
+    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["rocket","🚀","Rocket"],["track","🎢","Coaster track"],["spot","🔦","Spotlight"],["door","🚪","Level door"],["speech","💬","Speech bubble"],["destroyer","💣","Destroyer"],["sound","🔊","Sound"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
                   note:"A camera shows its shot while the player is in its zone. A mover carries an object along a line. A creature eye makes an object chase the player." }
   };
   function renderToolsTab(el, pageId){
@@ -12618,6 +12949,7 @@
       setFps: function(st, v){ g.skin.fps[st] = v; },
       aspect: function(){
         if (kind === "background") return 2;
+        if (kind === "seat") return 1.4;
         if (kind === "emitter" || !host || !host.body) return 1;
         var box = skinBox(host, g); if (!box) return 1;
         return Math.max(0.2, Math.min(5, (box.x2 - box.x) / Math.max(1, box.y2 - box.y)));
@@ -12689,7 +13021,7 @@
       },
       useDrawingAsHitbox: function(){ var idle = skinFrame(g.skin, "idle", 0, false); if (!idle || !drawingHasArt(idle)) return false; g.hitbox = idle.map(function(st){ var c = JSON.parse(JSON.stringify(st)); c.c = "#4FA9D6"; return c; }); touchDrawing(g.hitbox); return true; },
       extraRight: function(el){ ceSkinExtras(el, g); },
-      onClose: function(){ if (kind === "material"){ finishMaterialDraft(g); return; } if (kind === "background"){ finishBackgroundDraft(g); return; } if (kind === "projectile"){ finishProjectileDraft(g); return; } if (g.draft){ finishStickerDraft(g); return; } if (host){ host.studioHold = false; } applyDrawnSteps(g); if (host && host.body && objects.indexOf(host) >= 0) refreshObjectPhysics(host); renderSelBar(); }
+      onClose: function(){ if (kind === "material"){ finishMaterialDraft(g); return; } if (kind === "background"){ finishBackgroundDraft(g); return; } if (kind === "seat"){ finishSeatDraft(g); return; } if (kind === "projectile"){ finishProjectileDraft(g); return; } if (g.draft){ finishStickerDraft(g); return; } if (host){ host.studioHold = false; } applyDrawnSteps(g); if (host && host.body && objects.indexOf(host) >= 0) refreshObjectPhysics(host); renderSelBar(); }
     };
     return sub;
   }
@@ -14256,6 +14588,10 @@
 
   function paintAt(rawPt){
     var pt = snapPt(rawPt);
+    if (currentTool === "track"){
+      if (trackDraft){ var tl = trackDraft.pts[trackDraft.pts.length - 1]; if (dist(tl, rawPt) > 3) trackDraft.pts.push({ x: rawPt.x, y: rawPt.y }); }
+      return;
+    }
     if (currentTool === "spawn"){ checkpoints[0].x = pt.x; checkpoints[0].y = pt.y; return; }
     if (currentTool === "checkpoint"){
       if (!lastPaint || dist(pt,lastPaint) > 60){
@@ -14600,6 +14936,14 @@
   // Nothing you are part-way through drawing should sag, roll or fall:
   // the shape stays frozen until the mouse comes up, then goes live.
   function endPaintStroke(){
+    if (trackDraft){
+      var td = trackDraft; trackDraft = null;
+      var made = td.pts.length >= 2 ? addTrack(td.pts, td.layer) : null;
+      if (made){ selectTrack(made); sfx("place"); showToast("A coaster track — walk up to the seat and press " + keyLabel((keyBinds.interact && keyBinds.interact[0]) || "KeyF") + " to ride. Right-click it for seats and pace."); }
+      else showToast("Draw a longer line for a track.");
+      painting = false; lastPaint = null;
+      return;
+    }
     if (stroke && stroke.erase){
       stroke = null;
       endBulk();
@@ -14768,6 +15112,7 @@
     selectedRegion = null;
     selection = [];
     selectedBolt = null;
+    selectedTrack = null;
     if (maskPaint && selectedGadget === maskPaint.g) endMaskPaint();
     selectedGadget = null;
     selectedLink = null;
@@ -15592,6 +15937,12 @@
       renderLinkBox();
       return;
     }
+    if (selectedTrack){
+      if (tracks.indexOf(selectedTrack) < 0){ clearSelection(); return; }
+      if (mode !== "build" || !opWanted){ objPanelEl.hidden = true; return; }
+      renderTrackBox();
+      return;
+    }
     if (selectedGadget){
       if (gadgets.indexOf(selectedGadget) < 0){ clearSelection(); return; }
       if (mode !== "build" || !opWanted){ objPanelEl.hidden = true; return; }
@@ -16372,6 +16723,8 @@
         if (le) beginAttachDrag("link", lh, pt, le);
         return;
       }
+      var th = trackAt(pt.x, pt.y, 12);
+      if (th){ dragging = null; selectTrack(th); renderSelBar(); return; }
       // the zone box moves from anywhere inside it — after the camera and
       // any other gadget in the box have had their chance to be picked
       var camIn = selCam ? cameraHandleAt(selCam, pt, true) : null;
@@ -16592,8 +16945,9 @@
     if (selectedLink && links.indexOf(selectedLink) < 0){ clearSelection(); return; }
     if (selectedGadget && gadgets.indexOf(selectedGadget) < 0){ clearSelection(); return; }
     if (selectedBolt && bolts.indexOf(selectedBolt) < 0){ clearSelection(); return; }
+    if (selectedTrack && tracks.indexOf(selectedTrack) < 0){ clearSelection(); return; }
     if (objPanelEl.hidden) return;
-    if (selectedBolt || selectedGadget || selectedLink) return;
+    if (selectedBolt || selectedGadget || selectedLink || selectedTrack) return;
     if (!selected || objects.indexOf(selected) < 0) clearSelection();
   }
 
@@ -16751,6 +17105,8 @@
         if (boltHit){ selectBolt(boltHit); opWanted = true; renderSelBar(); return; }
         var linkHit = linkAt(pt.x, pt.y);
         if (linkHit){ selectLink(linkHit); opWanted = true; renderSelBar(); return; }
+        var trackHit = trackAt(pt.x, pt.y, 12);
+        if (trackHit){ selectTrack(trackHit); opWanted = true; renderSelBar(); return; }
         var hitObj = objectAt(pt.x, pt.y);
         if (hitObj){
           selectedRegion = regionAt(pt.x, pt.y);
@@ -16790,6 +17146,13 @@
       return;
     }
     // A drag-out shape is one action; freehand is one action per stroke.
+    if (currentTool === "track"){
+      // a track is drawn like a stroke, but it becomes a line, not material
+      pushUndo("drawing a track");
+      trackDraft = { pts: [{ x: pt2.x, y: pt2.y }], layer: buildLayer };
+      painting = true; lastPaint = null; stroke = null;
+      return;
+    }
     if (matOf(currentTool) && paintMode === "fill"){ fillAt(pt2); return; }
     var shapeable = matOf(currentTool) && paintMode !== "brush";
     if (shapeable){
@@ -17154,7 +17517,8 @@
     exitGlueMode();
     closeObjCtxMenu();
     closePauseMenu();
-    forEachPlayer(function(){ releaseRope(); if (flying) setFlying(false); });
+    forEachPlayer(function(){ releaseRope(); if (flying) setFlying(false); if (me.riding) leaveCoaster(false); });
+    resetTracks();
     closePersonalMenu();
     endPaintStroke();
     // Play always runs live. Carrying a paused simulation into Play is
@@ -17345,6 +17709,7 @@
       goal: goalPoint,
       bubbles: bubbles.map(function(b){ return { x:b.x, y:b.y }; }),
       objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps, links: linkSnaps,
+      tracks: tracks.map(packTrack),
       water: packWaterSparse(), waterCell: WATER_CELL, worldW: WORLD_W, worldH: WORLD_H,
       world: packWorldSettings(),
       materials: usedCustomMats(),
@@ -17369,6 +17734,7 @@
     (data.bolts || []).forEach(function(b){ mv(b, "x", "y"); });
     (data.gadgets || []).forEach(function(g){ mv(g, "x", "y"); });
     (data.links || []).forEach(function(l){ mv(l, "ax", "ay"); mv(l, "bx", "by"); });
+    (data.tracks || []).forEach(function(t){ if (t && Array.isArray(t.pts)) t.pts.forEach(function(q){ if (Array.isArray(q)){ q[0] = +q[0] + dx; q[1] = +q[1] + dy; } }); });
     (data.checkpoints || []).forEach(function(c){ mv(c, "x", "y"); });
     (data.bubbles || []).forEach(function(b){ mv(b, "x", "y"); });
     (data.blocks || []).forEach(function(b){ mv(b, "x", "y"); });
@@ -17421,6 +17787,7 @@
         var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : (ws.toLink != null ? links[ws.toLink] : gadgets[ws.toGadget]);
         if (src && tgt) addWire(src, tgt, ws.port);
       });
+      (Array.isArray(data.tracks) ? data.tracks : []).forEach(unpackTrack);
       if (data.hub && !(data.world && data.world.levelType)){ data.world = data.world || {}; data.world.levelType = "hub"; }   // a file from before level types
       if (data.world){
         worldSettings.gravity = data.world.gravity != null ? data.world.gravity : 1;

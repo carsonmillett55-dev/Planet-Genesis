@@ -82,7 +82,7 @@ the whole object. Covered by `tsel.js`.
 - **Ice must get slipperier on a slope.** DONE 2026-09-11 — ice is skated on: the keys accelerate rather than set your speed, letting go coasts, and a slope takes you down it.
 - **Level size at least 4x larger** than now — as large as possible. DONE 2026-09-11 — 19200 × 9600, sixteen times the area. Old levels land at the bottom-left of the new map with the new room above and to the right.
 - **Replace "rope grab" with a proper LBP-style grab.** DONE — see below.
-- **Temporarily hide an object in a layer**, the way LBP does.
+- **Temporarily hide an object in a layer**, the way LBP does. DONE 2026-09-11 — hold the middle button on a thing and it is hidden while you hold.
 - **Double jump toggle** in world settings. DONE 2026-09-11 — World → Player, saved with the level.
 - **Inventory and popit menu** should match LBP's menus as closely as possible,
   functionally and visually.
@@ -313,7 +313,17 @@ Built: the Animated object gadget. Paint the object in the shape you want the
 hitbox to be, draw the look over it (Idle loops; a wire plays Action, looping
 or once-and-hold), or set it to no collision.
 
-### Rollercoaster
+### Rollercoaster — first cut DONE 2026-09-12
+
+Built as written: the Coaster track tool (Tools → Gameplay) draws a grey
+line through anything; the coaster waits at its start, F sits you in, it
+runs the line (faster downhill, never slower than its pace) and stops at
+the end; Space hops off and it glides back for the next run. One to
+twelve seats, coupled by their place along the rail rather than
+simulated, so they never stretch or pile up; a seat of your own drawing
+on every car; each player their own seat. Still to do: moving a drawn
+track, loops that keep the seats upright, a wire that sends it, a
+customised look for the track itself.
 
 A track **material**, not a gadget:
 
@@ -531,11 +541,12 @@ puts the character there.
 - **Level pictures** — a save takes a picture of what is on screen and the
   load list shows it.
 
-### Portals
+### Portals — DONE 2026-09-12 as level doors
 
 String levels together — walk through a portal to arrive in another level, like
 LBP. The use case Carson named: one level too big for a single world, split
-into parts.
+into parts. The Level door does this: put one down, pick the level it leads
+to, F goes in and finishing it (or Leave) comes back to the door.
 
 ---
 
