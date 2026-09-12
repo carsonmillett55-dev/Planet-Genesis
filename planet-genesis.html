@@ -4540,6 +4540,14 @@
       if (fly2) vy = 0;                           // a flier hangs where it is
     }
     Body.setVelocity(b, { x: vx, y: vy });
+    if (topdownNow() && sees && (Math.abs(dx) > 4 || Math.abs(dy) > 4)){
+      // seen from above a creature turns to face the player — the body itself,
+      // so its drawn look turns with it (drawn facing left: the other way round)
+      var faceAng = Math.atan2(dy, dx) + ((g.drawnFacing || 1) === -1 ? Math.PI : 0);
+      var da = faceAng - b.angle; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+      g.homeAngle = b.angle + Math.max(-0.12, Math.min(0.12, da));   // a turn, not a snap
+      g.face = g.drawnFacing || 1;                                   // no mirroring on top of the turn
+    }
     if (Math.abs(b.angle - g.homeAngle) > 1e-6) Body.setAngle(b, g.homeAngle);
     Body.setAngularVelocity(b, 0);
   }

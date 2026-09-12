@@ -122,6 +122,8 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.waitForTimeout(1500);
   const cr = (await objs()).filter(o => !o.still && o.mats[0] === 'wood' && Math.abs(o.x - post.x) < 60)[0];
   ok('a walking creature comes DOWN toward the player, seen from above', cr && cr.y > post.y + 80, { post: post.y, now: cr && cr.y });
+  const crAng = await p.evaluate(px => { const o = window.__pg.objects().filter(q => !q.body.isStatic && q.pieces[0].m === 'wood' && Math.abs(q.body.position.x - px) < 60)[0]; return o ? o.body.angle : null; }, post.x);
+  ok('and has turned to face them (down: about a quarter turn)', crAng != null && Math.abs(crAng - Math.PI/2) < 0.6, crAng);
 
   console.log('== back to an adventure, gravity is back ==');
   await build();
