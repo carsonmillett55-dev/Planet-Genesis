@@ -21,6 +21,7 @@ HOOK = """
     zoomTo: function(z, x, y){ camFollow = false; camZoom = z; applyCamScale(); camX = x - viewRectW/camScale/2; camY = y - viewRectH/camScale/2; clampCamNow(); },
     setMode: setMode, mode: function(){ return mode; },
     load: loadLevelData, serialize: serializeLevel, autosave: autosaveNow,
+    charState: function(){ return { crouching: crouching, sliding: sliding, anim: charPoseId() }; },
     peek: function(v){ if (v != null && !!v !== layerPeek) togglePeek(); return layerPeek; },
     layerAlpha: function(l){ return layerDepth(l).a; },
     enclosedArea: function(x, y){ var r = enclosedRegionAt(x, y, buildLayer); return r ? Math.round(Math.abs(pgArea(r))) : 0; },

@@ -338,8 +338,8 @@ it emits while the signal is on.
 
 ### Character improvements
 
-- **Crouch**, animatable for custom characters.
-- **Slide** — crouch while running to slide a little. Animatable.
+- **Crouch**, animatable for custom characters. DONE 2026-09-11 — Down on the ground; the hitbox squashes to three fifths, you fit under low things, you stand when there is room. A Crouch pose in the creator.
+- **Slide** — crouch while running to slide a little. Animatable. DONE 2026-09-11 — Down at a run; half a second of slide with the keys off. A Slide pose in the creator.
 - **Custom hand-drawn hitboxes** for characters, potentially **size-changing**
   so a crouch can have a shorter box. DONE 2026-09-11 for the standing
   character: the studio goes Size → look → Hitbox, the size is any height

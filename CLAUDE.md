@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 759 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 768 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 759 checks + checkgeom, in order
+npm test                   # all 768 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -60,7 +60,7 @@ node tbolt.js              # 57 — bolts: through the layers, four kinds, limit
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
 node tlink.js              # 60 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
 node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint; the weight slider
-node tjump.js              # 18 — the jump: no wall climbing, grace off a ledge, a press just before landing; ice is skated on; the double jump setting
+node tjump.js              # 27 — the jump: no wall climbing, grace off a ledge, a press just before landing; ice is skated on; crouch under a low shelf and the slide; the double jump setting
 node tmover.js             # 22 — the Mover: two-click placing, once and bounce, riding it, a loose host held, wired, the knob, save/load
 node tworld.js             # 22 — the Water sensor (touching, not a pool above; on Front), and the World changer's light and water, wired, latched, saved
 node tcreature.js          # 32 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, painted weak spot and danger, colour, a Back-layer creature, save/load
@@ -743,6 +743,26 @@ the air (`canDoubleJumpNow`: not grounded, `airJumps < 1`, not hanging,
 not flying), on a fresh press only — a buffered press is for landing —
 a little lower than a ground jump (−12.5). `airJumps` is cleared by the
 ground, so a walk off a ledge still gets one.
+
+**Crouch and slide.** Down on the ground crouches (`setCrouch`): the
+body is rebuilt squashed toward the feet by `CROUCH_K` (0.6) —
+`buildPlayerBody` scales the drawn hitbox with `pgScale` about the feet
+line, or shortens the box — swapped in place with the feet where they
+were, velocity and ground kept, so a crouched character fits under a
+low shelf. The picture squashes with it (`charArt` is the crouched box),
+and the studio has **Crouch** and **Slide** poses whose drawing box is
+the squatter one (`aspect()` per state), so a drawn pose is not
+distorted. Walking crouched is half speed. Letting go of Down stands
+you up — unless something is over your head: a probe tall body is
+tested with `Query.collides` against everything solid first, and a
+refusal is tried again every step until you are clear. **Down at a run
+is a slide** (`sliding`, `SLIDE_MS` 480, its own speed `slideV` easing
+by `SLIDE_DECAY` a step, set outright so floor friction does not eat
+it): the keys do nothing until it is over, then you are crouched while
+Down is held. Every spawn stands you up. Both events, `collisionStart`
+and `collisionActive`, feed `groundContacts`: a pair's first step is a
+Start, so a body swapped in mid-step read as airborne for a step and
+cancelled the slide it was made for.
 
 **Ice is skated on.** The walk sets the sideways speed outright every
 step, which is why ice was only slippery for objects: the player

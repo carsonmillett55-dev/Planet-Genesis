@@ -1589,6 +1589,8 @@
     { id:"jump",  label:"Jump",  frames:1, emoji:"⬆️" },
     { id:"fall",  label:"Fall",  frames:1, emoji:"⬇️" },
     { id:"swing", label:"Swing", frames:1, emoji:"🤾" },
+    { id:"crouch",label:"Crouch",frames:1, emoji:"🧎" },
+    { id:"slide", label:"Slide", frames:1, emoji:"🛝" },
     { id:"happy", label:"Happy", frames:1, emoji:"😄" },
     { id:"sad",   label:"Sad",   frames:1, emoji:"😢" },
     { id:"angry", label:"Angry", frames:1, emoji:"😠" },
@@ -4870,6 +4872,16 @@
     if (drawingHasArt(charSprites.idle[0])) return charSprites.idle[0];
     return null;
   }
+  function charPoseId(){
+    var stateId = "idle";
+    if (grabConstraint) stateId = "swing";
+    else if (player && !grounded && player.velocity.y < -1.2) stateId = "jump";
+    else if (player && !grounded && player.velocity.y > 1.2) stateId = "fall";
+    else if (sliding) stateId = "slide";
+    else if (crouching) stateId = "crouch";
+    else if (input.left || input.right || (player && Math.abs(player.velocity.x) > 0.6)) stateId = "run";
+    return stateId;
+  }
   function currentCharAnim(){
     if (charMode === "simple") return { frame: charSprites.idle[0] };
     if (charMode !== "animated") return null;
@@ -4877,15 +4889,11 @@
       return { frame: pickCharFrame(activeEmote, 0) };
     }
     if (activeEmote) activeEmote = null;
-    var stateId = "idle";
-    if (grabConstraint) stateId = "swing";
-    else if (player && !grounded && player.velocity.y < -1.2) stateId = "jump";
-    else if (player && !grounded && player.velocity.y > 1.2) stateId = "fall";
-    else if (input.left || input.right || (player && Math.abs(player.velocity.x) > 0.6)) stateId = "run";
+    var stateId = charPoseId();
     var fc = charFrameCounts[stateId];
     var period = 1000 / Math.max(1, charFps[stateId] || 2);
     var idx = fc > 1 ? Math.floor(performance.now()/period) % fc : 0;
-    return { frame: pickCharFrame(stateId, idx) };
+    return { frame: pickCharFrame(stateId, idx), state: stateId };
   }
   // Drawn art is rasterised at 2x the on-screen size and cached, so a
   // smooth brush stroke stays smooth at any character size without
@@ -4934,10 +4942,18 @@
      all worked out from them) and charArt holds the picture where it was
      drawn, so a hitbox drawn small in the middle of a big picture still
      puts the picture around it. */
+  /* Crouching squashes the body toward the feet by CROUCH_K — the drawn
+     hitbox and the picture with it, so a crouched character fits under a
+     low ceiling and the same drawing reads as ducking (a drawn Crouch
+     pose goes in the shorter box). Standing back up needs the headroom;
+     `setCrouch` checks with a probe body before swapping. */
+  var CROUCH_K = 0.6, crouchK = 1, crouching = false, sliding = false, slideUntil = 0, slideDir = 0, slideV = 0;
+  var SLIDE_MS = 480, SLIDE_DECAY = 0.988;
   function buildPlayerBody(sp){
     var opts = { friction:0.02, frictionAir:0.01, restitution:0, density:0.006, label:"player", collisionFilter: playerFilter() };
     var artW = Math.round(CHAR_BASE_W * charScale), artH = Math.round(CHAR_BASE_H * charScale);
     var poly = drawingHasArt(charHit) ? drawingToPoly(charHit, artW, artH, 1.0) : [];
+    if (poly.length && crouchK !== 1) poly = pgClean(pgScale(poly, 1, crouchK, 0, artH/2), 1.4);   // toward the feet
     if (poly.length){
       // the biggest island only — a body has to be one piece
       var best = 0, bestA = 0;
@@ -4953,18 +4969,41 @@
           var body = Body.create({ parts: parts, friction:0.02, frictionAir:0.01, restitution:0, label:"player", collisionFilter: playerFilter() });
           var c0 = { x: body.position.x, y: body.position.y };   // the shape's centroid, in the art box's frame
           PW = Math.round(bb.x2 - bb.x); PH = Math.round(bb.y2 - bb.y);
-          charArt = { x: -artW/2 - c0.x, y: -artH/2 - c0.y, w: artW, h: artH };
+          charArt = { x: -artW/2 - c0.x, y: (artH/2 - artH * crouchK) - c0.y, w: artW, h: artH * crouchK };
           Body.setPosition(body, { x: sp.x, y: sp.y });
           return body;
         }
       }
     }
-    PW = artW; PH = artH; charArt = { x: -PW/2, y: -PH/2, w: PW, h: PH };
-    opts.chamfer = { radius: Math.min(16 * Math.max(0.6, charScale), PW * 0.4) };
+    PW = artW; PH = Math.round(artH * crouchK); charArt = { x: -PW/2, y: -PH/2, w: PW, h: PH };
+    opts.chamfer = { radius: Math.min(16 * Math.max(0.6, charScale), PW * 0.4, PH * 0.4) };
     return Bodies.rectangle(sp.x, sp.y, PW, PH, opts);
+  }
+  function setCrouch(on){
+    if (!player || crouching === on) return;
+    var feetY = player.position.y + PH/2, x = player.position.x, vel = { x: player.velocity.x, y: player.velocity.y };
+    var wasGrounded = grounded, wasGB = groundBody, wasMat = groundMat;
+    crouchK = on ? CROUCH_K : 1;
+    var probe = buildPlayerBody({ x: x, y: feetY - 40 });
+    Body.setPosition(probe, { x: x, y: feetY - PH/2 - 1 });
+    if (!on){
+      // headroom: anything solid where the tall body would be keeps you down
+      var solids = Composite.allBodies(world).filter(function(b){ return b !== player && b.parent !== player && !b.isSensor && !(carried && b === carried.body); });
+      if (Query.collides(probe, solids).length){ crouchK = CROUCH_K; buildPlayerBody({ x: x, y: feetY - 40 }); return; }
+    }
+    crouching = on;
+    if (!on) sliding = false;
+    World.remove(world, player);
+    player = probe;
+    Body.setInertia(player, Infinity);
+    World.add(world, player);
+    Body.setPosition(player, { x: x, y: feetY - PH/2 });
+    Body.setVelocity(player, vel);
+    grounded = wasGrounded; groundBody = wasGB; groundMat = wasMat;
   }
   function spawnPlayer(atPos){
     if (player) World.remove(world, player);
+    crouching = false; sliding = false; crouchK = 1;
     var sp = atPos || getSpawnPos();
     player = buildPlayerBody(sp);
     Body.setInertia(player, Infinity);
@@ -5181,7 +5220,10 @@
   // compound's collisions at the PART level: pair.bodyA is the convex piece
   // that touched, whose .parent is the player. A plain box is its own part.
   function isPlayerPart(b){ return !!b && (b === player || b.parent === player); }
-  onStep("collisionActive", function(ev){
+  // Both events: a pair's first step is a collisionStart, not a
+  // collisionActive, so a body swapped in mid-step (a crouch) would read
+  // as airborne for one step and cancel the slide it was made for.
+  function groundContacts(ev){
     if (!player) return;
     ev.pairs.forEach(function(p){
       if (!isPlayerPart(p.bodyA) && !isPlayerPart(p.bodyB)) return;
@@ -5204,7 +5246,9 @@
       var gb = isPlayerPart(p.bodyA) ? p.bodyB : p.bodyA; groundBodyNext = gb.parent || gb;
       groundMatNext = gb.plugin && gb.plugin.materialId ? matOf(gb.plugin.materialId) : null;   // the part touched, not the whole object
     });
-  });
+  }
+  onStep("collisionActive", groundContacts);
+  onStep("collisionStart", groundContacts);
   onStep("collisionStart", function(ev){
     if (!player || mode !== "play") return;
     ev.pairs.forEach(function(p){
@@ -5489,13 +5533,25 @@
     if (grabHeld && !grabConstraint) tryGrab();
     // Sprint is a bit quicker, not a dash — LBP has no sprint at all, so
     // this stays modest enough that levels built at walking pace still work.
-    var speed = flying ? FLY_SPEED : walkSpeedNow();
-    var vx = 0;
     var frozen = cameraFreezesPlayer();   // a camera shot with the controls off
+    // crouch: Down on the ground; a slide out of a run keeps the speed for a
+    // moment with the keys off; let go of Down and you stand once there is room
+    var wantCrouch = input.down && !frozen && !flying && !grabConstraint && grounded && playerWetness() < 0.35;
+    if (wantCrouch && !crouching){
+      var runSpeed = Math.abs(player.velocity.x - groundVel().x);
+      if (runSpeed > walkSpeedNow() * 0.8){ sliding = true; slideUntil = performance.now() + SLIDE_MS; slideDir = player.velocity.x > 0 ? 1 : -1; slideV = runSpeed; sfx("land"); }
+      setCrouch(true);
+    } else if (crouching && (!input.down || flying || grabConstraint || frozen)){
+      setCrouch(false);   // refused while something is over your head; tried again next step
+    }
+    if (sliding && (performance.now() > slideUntil || !grounded || !crouching)) sliding = false;
+    var speed = flying ? FLY_SPEED : walkSpeedNow() * (crouching ? 0.5 : 1);
+    var vx = 0;
     if (input.left && !frozen) vx -= speed;
     if (input.right && !frozen) vx += speed;
     if (frozen){ input.jumpQueued = false; input.jumpBufferUntil = 0; }
-    if (vx !== 0) facing = vx > 0 ? 1 : -1;
+    if (sliding){ slideV *= SLIDE_DECAY; vx = slideV * slideDir; if (slideV < 1.2) sliding = false; }   // a slide carries you, its own speed easing off; the keys do nothing until it is over
+    if (vx !== 0 && !sliding) facing = vx > 0 ? 1 : -1;
 
     if (carried){
       if (objects.indexOf(carried) < 0 || !carried.body || carried.body.isStatic){ dropCarried(); }
@@ -8965,7 +9021,7 @@
       setCount: function(st, n){ if (st !== "size" && st !== "hitbox") setStateFrameCount(st, n); },
       fps: function(st){ return charFps[st]; },
       setFps: function(st, v){ charFps[st] = v; persistCharFps(); },
-      aspect: function(){ return CHAR_ASPECT; },
+      aspect: function(){ return (pmEditState === "crouch" || pmEditState === "slide") ? CHAR_ASPECT / CROUCH_K : CHAR_ASPECT; },   // the crouched box is squatter
       persist: function(){ persistCharSprites(); persistCharFrameCounts(); persistCharFps(); persistCharHit(); },
       hint: function(){
         if (pmEditState === "size") return "How big you are, in your level as Play shows it. Slide the height and watch.";

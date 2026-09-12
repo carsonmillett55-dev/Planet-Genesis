@@ -112,7 +112,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   console.log('');
   console.log('== dragging a loose sponge ==');
   await fresh();
-  await rect('wood', 1, X-300, Y+100, X+400, Y+140);
+  await rect('wood', 1, X-390, Y+100, X+400, Y+140);         // as far left as the screen allows (a drag must start on it), so the dragged sponge never reaches its end
   await lockAll();
   await rect('sponge', 1, X, Y+20, X+70, Y+100);            // loose sponge on the floor
   await play();
@@ -121,7 +121,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const bx0 = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0].pos.x;
   await p.keyboard.down('KeyQ'); await p.waitForTimeout(250);
   ok('grabbed the loose sponge', await grabbing());
-  await p.keyboard.down('KeyA'); await p.waitForTimeout(900); await p.keyboard.up('KeyA');
+  await p.keyboard.down('KeyA'); await p.waitForTimeout(600); await p.keyboard.up('KeyA');
   await p.keyboard.up('KeyQ'); await p.waitForTimeout(200);
   const bx1 = (await stats()).filter(o => !o.static && o.pos.y < 2300)[0].pos.x;
   ok('walking away drags it along', bx1 < bx0 - 20, { from: bx0, to: bx1 });

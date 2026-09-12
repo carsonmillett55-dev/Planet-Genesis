@@ -169,6 +169,46 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('stood on an icy slope with no key down, you slide down it', slid.x > X + 40 + 60 && slid.y > Y - 30 + 20, slid);
 
   console.log('');
+  console.log('== crouch: shorter, slower, under a low ceiling; a slide out of a run ==');
+  await fresh();
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);          // floor
+  await rect('wood', 1, X+100, Y+30, X+400, Y+60);            // a shelf 40px above the floor: too low to walk under (the character is 56 tall), fine crouched (34)
+  await lockAll();
+  await play();
+  await standAt(X-100, Y+60); await p.waitForTimeout(500);
+  const tall = await p.evaluate(() => window.__pg.playerSize());
+  await p.keyboard.down('KeyS'); await p.waitForTimeout(150);
+  const low = await p.evaluate(() => window.__pg.playerSize());
+  const cs = await p.evaluate(() => window.__pg.charState());
+  ok('Down on the ground crouches: the body is three fifths the height', low.h < tall.h * 0.7 && low.h > tall.h * 0.5 && cs.crouching, { tall: tall.h, low: low.h, cs });
+  ok('and the pose is Crouch', cs.anim === 'crouch', cs.anim);
+  const feetTall = (await pos()).y + low.h / 2;
+  ok('the feet stay on the floor', Math.abs(feetTall - (Y + 100)) < 4, feetTall - (Y + 100));
+  await p.keyboard.down('KeyD'); await p.waitForTimeout(1500); await p.keyboard.up('KeyD');
+  const under = (await pos()).x;
+  ok('crouched, you walk in under the low shelf', under > X + 140, under);
+  await p.keyboard.up('KeyS'); await p.waitForTimeout(200);
+  ok('letting go under the shelf keeps you crouched — there is no room to stand', (await p.evaluate(() => window.__pg.charState())).crouching === true);
+  await p.keyboard.down('KeyA'); await p.waitForTimeout(1600); await p.keyboard.up('KeyA'); await p.waitForTimeout(200);
+  ok('out from under it, you stand back up', (await p.evaluate(() => window.__pg.charState())).crouching === false && (await p.evaluate(() => window.__pg.playerSize())).h === tall.h, await p.evaluate(() => window.__pg.playerSize()));
+  // the slide: at a run, press Down: you keep going with the keys off
+  await fresh();
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);
+  await lockAll();
+  await play();
+  await standAt(X-300, Y+60); await p.waitForTimeout(500);
+  await p.keyboard.down('KeyD'); await p.waitForTimeout(400);
+  await p.keyboard.down('KeyS'); await p.keyboard.up('KeyD'); await p.waitForTimeout(60);
+  const sl = await p.evaluate(() => window.__pg.charState());
+  const x0 = (await pos()).x;
+  await p.waitForTimeout(300);
+  const x1 = (await pos()).x;
+  ok('Down at a run is a slide', sl.sliding === true && sl.anim === 'slide', sl);
+  ok('which carries you on with no key held', x1 > x0 + 40, { x0, x1 });
+  await p.keyboard.up('KeyS'); await p.waitForTimeout(700);
+  ok('and it is over within the second, standing again', (await p.evaluate(() => window.__pg.charState())).sliding === false && (await p.evaluate(() => window.__pg.charState())).crouching === false);
+
+  console.log('');
   console.log('== the double jump, a level setting ==');
   await fresh();
   await rect('wood', 1, X-400, Y+100, X+400, Y+140);          // floor
