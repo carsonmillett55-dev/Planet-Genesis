@@ -77,6 +77,13 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
      where it was painted. Aim the light at where it actually IS, not at
      the paint coordinates, or the stroke lands in empty space and welds
      into nothing. */
+  // and let it land first: read mid-fall, the stroke lands where it WAS
+  // by the time the drag arrives (a few hundred ms) and welds into nothing
+  for (let w = 0; w < 30; w++){
+    const moving = await p.evaluate(() => { const o = window.__pg.objects().filter(q => !q.body.isStatic)[0]; return o ? Math.abs(o.body.velocity.y) > 0.05 : false; });
+    if (!moving) break;
+    await p.waitForTimeout(100);
+  }
   const plankPos = await p.evaluate(() => {
     const o = window.__pg.objects().filter(q => !q.body.isStatic)[0];
     return o ? { x:o.body.position.x, y:o.body.position.y } : null;

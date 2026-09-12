@@ -3875,7 +3875,7 @@
     return Math.abs(lp.x - g.local.x) < g.size/2 + PW*0.45 && Math.abs(feetY - g.local.y) < 16;
   }
   function leverInReach(g){
-    return !!player && dist(gadgetWorld(g), player.position) < 80;
+    return anyPlayerWithin(gadgetWorld(g), 80);
   }
   /* The lever the player could use right now, if any: nearest within reach. */
   function leverNearPlayer(){
@@ -3974,15 +3974,15 @@
     var i, g, dt = stepSeconds(), toDestroy = [];
     for (i = 0; i < gadgets.length; i++){ g = gadgets[i]; g.pos = gadgetWorld(g); }
     if (!runner.enabled){
-      for (i = 0; i < gadgets.length; i++){ g = gadgets[i]; if (g.kind === "eye" && player){ var ex = player.position.x - g.pos.x, ey = player.position.y - g.pos.y, el = Math.hypot(ex, ey) || 1; g.look = { x: ex / el, y: ey / el }; } }
+      for (i = 0; i < gadgets.length; i++){ g = gadgets[i]; if (g.kind === "eye" && player){ var epl = nearestPlayerBody(g.pos) || player, ex = epl.position.x - g.pos.x, ey = epl.position.y - g.pos.y, el = Math.hypot(ex, ey) || 1; g.look = { x: ex / el, y: ey / el }; } }
       return;
     }
     for (i = 0; i < gadgets.length; i++){
       g = gadgets[i];
       if (g.kind === "sensor"){
-        g.out = (player && dist(g.pos, player.position) < g.radius) ? 1 : 0;
+        g.out = anyPlayerWithin(g.pos, g.radius) ? 1 : 0;
       } else if (g.kind === "button"){
-        var pressed = buttonPressed(g);
+        var pressed = anyPlayer(function(){ return buttonPressed(g); });
         if (pressed && g.sticky) g.on = true;
         g.out = (g.sticky ? g.on : pressed) ? 1 : 0;
       } else if (g.kind === "lever"){
@@ -4015,7 +4015,7 @@
         }
         g.out = performance.now() < g.hitUntil ? 1 : 0;
       }
-      if (g.kind === "gun" && mode === "play" && player && dist(g.pos, player.position) < PW / 2 + 26 && (!playerGun || playerGun.from !== g.id)) armPlayer(g);
+      if (g.kind === "gun" && mode === "play") forEachPlayer(function(P){ if (player && !P.bubble && dist(g.pos, player.position) < PW / 2 + 26 && (!playerGun || playerGun.from !== g.id)) armPlayer(g); });
       if (g.kind === "objemitter") objEmitterStep(g);
       if (g.kind === "impact"){
         // a pulse from the last hit, or on while touching
@@ -4054,7 +4054,7 @@
         }
       }
       if (g.kind === "speech"){
-        var near = !!player && dist(g.pos, player.position) < g.radius;
+        var near = anyPlayerWithin(g.pos, g.radius);
         var want = g.input != null ? g.input > 0 : near;
         if (want && !g.wasOn){ g.suppressed = g.once && g.said; if (!g.suppressed) g.said = true; }
         g.wasOn = want;
@@ -4190,7 +4190,7 @@
       var k = 9 * (1 - d / (R * 3));
       Body.setVelocity(q.body, { x: q.body.velocity.x + dx / d * k, y: q.body.velocity.y + dy / d * k - k * 0.3 });
     });
-    if (player){ var pdx = player.position.x - at.x, pdy = player.position.y - at.y, pd = Math.hypot(pdx, pdy) || 1; if (pd < R * 3){ var pk = 7 * (1 - pd / (R * 3)); Body.setVelocity(player, { x: player.velocity.x + pdx / pd * pk, y: player.velocity.y + pdy / pd * pk - pk * 0.3 }); } }
+    eachPlayerBody(function(pb){ var pdx = pb.position.x - at.x, pdy = pb.position.y - at.y, pd = Math.hypot(pdx, pdy) || 1; if (pd < R * 3){ var pk = 7 * (1 - pd / (R * 3)); Body.setVelocity(pb, { x: pb.velocity.x + pdx / pd * pk, y: pb.velocity.y + pdy / pd * pk - pk * 0.3 }); } });
     if (!obj || !obj.body || mode !== "play" || objects.indexOf(obj) < 0) return;
     // what it hit: the piece under the point says whether it is soft
     var lp = worldPtToLocal(obj, at.x, at.y), matKey = null;
@@ -4451,7 +4451,7 @@
       var k = a0 * (1 - 0.5 * Math.max(0, along) / g.reach);
       Body.setVelocity(b, { x: b.velocity.x + f.ux * k, y: b.velocity.y + f.uy * k });
     };
-    if (player && !flying) push(player, player.position.x, player.position.y, PH / 2);
+    eachPlayerBody(function(pb, P){ if (!(P === me ? flying : P.flying)) push(pb, pb.position.x, pb.position.y, (P === me ? PH : P.PH) / 2); });
     for (var i = 0; i < objects.length; i++){
       var o = objects[i], b = o.body;
       if (!b || b.isStatic || b.isSensor || o === g.obj || o.decorative) continue;
@@ -4468,23 +4468,25 @@
      shoving into the player. It is a real body still: it falls, it pushes,
      it can be carried on a platform. */
   function eyeSees(g){
-    if (!player) return false;
-    return dist(g.pos, player.position) <= g.range;
+    var pl = nearestPlayerBody(g.pos);
+    if (!pl) return false;
+    return dist(g.pos, pl.position) <= g.range;
   }
   function creatureStep(g){
     var o = g.obj, b = o && o.body;
     if (!b) return;
-    var sees = eyeSees(g);
-    if (sees){ var lx = player.position.x - g.pos.x, ly = player.position.y - g.pos.y, ll = Math.hypot(lx, ly) || 1; g.look = { x: lx / ll, y: ly / ll }; }
+    var pP = nearestPlayer(g.pos), pl = pP ? playerBody(pP) : null, sees = eyeSees(g);
+    if (sees){ var lx = pl.position.x - g.pos.x, ly = pl.position.y - g.pos.y, ll = Math.hypot(lx, ly) || 1; g.look = { x: lx / ll, y: ly / ll }; }
     var v = g.speed / STEPS_PER_SEC;              // px per step
-    var dx = player ? player.position.x - b.position.x : 0, dy = player ? player.position.y - b.position.y : 0;
+    var dx = pl ? pl.position.x - b.position.x : 0, dy = pl ? pl.position.y - b.position.y : 0;
+    var plW = pP ? (pP === me ? PW : pP.PW) : PW, plH = pP ? (pP === me ? PH : pP.PH) : PH;   // the nearest player's size
     if (o.studioHold) return;                     // being drawn on: it holds still
     if (o.decorative || b.isSensor){
       // a Back or Front creature has no physics to walk with, and neither
       // has one with no collision: it is moved by hand toward the player,
       // floating whichever way it is set
       if (!sees) return;
-      var sx0 = (b.bounds.max.x - b.bounds.min.x) / 2 + PW / 2 + 8, sy0 = (b.bounds.max.y - b.bounds.min.y) / 2 + PH / 2 + 8;
+      var sx0 = (b.bounds.max.x - b.bounds.min.x) / 2 + plW / 2 + 8, sy0 = (b.bounds.max.y - b.bounds.min.y) / 2 + plH / 2 + 8;
       var mx = Math.abs(dx) > sx0 ? (dx > 0 ? v : -v) : 0, my = g.fly && Math.abs(dy) > sy0 ? (dy > 0 ? v : -v) : 0;
       if (Math.abs(dx) > 4) g.face = dx > 0 ? 1 : -1;
       g.moving = !!(mx || my);
@@ -4496,9 +4498,9 @@
     var vx = b.velocity.x, vy = b.velocity.y;
     if (sees && Math.abs(dx) > 4) g.face = dx > 0 ? 1 : -1;
     if (sees){
-      var stopX = (b.bounds.max.x - b.bounds.min.x) / 2 + PW / 2 + 8;   // stop short of the player
+      var stopX = (b.bounds.max.x - b.bounds.min.x) / 2 + plW / 2 + 8;   // stop short of the player
       vx = Math.abs(dx) > stopX ? (dx > 0 ? v : -v) : 0;
-      if (g.fly){ var stopY = (b.bounds.max.y - b.bounds.min.y) / 2 + PH / 2 + 8; vy = Math.abs(dy) > stopY ? (dy > 0 ? v : -v) : 0; }
+      if (g.fly){ var stopY = (b.bounds.max.y - b.bounds.min.y) / 2 + plH / 2 + 8; vy = Math.abs(dy) > stopY ? (dy > 0 ? v : -v) : 0; }
     } else {
       vx = 0;
       if (g.fly) vy = 0;                          // a flier hangs where it is
@@ -4515,29 +4517,29 @@
      asked against the painted areas. The danger kills the player as a
      hazard does; the weak spot kills the creature. Only in Play — in
      Build a mistake would take the object with it for real. */
-  function creaturePop(g){
+  function creaturePop(g, by){
     var o = g.obj;
     if (g.kind === "creature" && g.skin && skinStateHasArt(g.skin, "die") && !g.dying){
       // a drawn death: play it through, then go
       g.dying = true; g.dieT0 = performance.now();
       sfx("delete");
-      Body.setVelocity(player, { x: player.velocity.x, y: -9 });
+      if (by) Body.setVelocity(by, { x: by.velocity.x, y: -9 });
       return;
     }
     puff(g.pos.x, g.pos.y, 14, { color:"#F6ECD9", speed:2.4, g:0.08, spread:Math.PI*2, life:26, r:3 });
     puff(g.pos.x, g.pos.y, 10, { color:g.color || "#E4574B", speed:1.8, g:0.1, spread:Math.PI*2, life:22, r:2.4 });
     sfx("delete");
-    Body.setVelocity(player, { x: player.velocity.x, y: -9 });   // a little bounce off it
+    if (by) Body.setVelocity(by, { x: by.velocity.x, y: -9 });   // a little bounce off it
     removeObject(o);
   }
   function creatureContactCheck(g){
-    if (mode !== "play" || !player || !g.obj || !g.obj.body) return;
+    if (mode !== "play" || !player || (me && me.bubble) || !g.obj || !g.obj.body || objects.indexOf(g.obj) < 0) return;
     var o = g.obj, b = o.body;
     if (g.weakMode === "eye"){
       // the old rule: feet on the eye
       if (grounded && groundBody === b){
         var feetY = player.position.y + PH / 2;
-        if (Math.abs(player.position.x - g.pos.x) <= 26 * (g.scale || 1) + PW / 2 && feetY <= g.pos.y + 12 && feetY >= g.pos.y - 40){ creaturePop(g); return; }
+        if (Math.abs(player.position.x - g.pos.x) <= 26 * (g.scale || 1) + PW / 2 && feetY <= g.pos.y + 12 && feetY >= g.pos.y - 40){ creaturePop(g, player); return; }
       }
     }
     if (g.dying) return;
@@ -4556,7 +4558,7 @@
       if (g.weakMode === "painted" && g.weak && pgContains(g.weak, lp.x, lp.y)) inWeak = true;
       if (g.danger && pgContains(g.danger, lp.x, lp.y)) inDanger = true;
     }
-    if (inWeak){ creaturePop(g); return; }
+    if (inWeak){ creaturePop(g, player); return; }
     if (inDanger && performance.now() > hazardSafeUntil){
       if (g.kind === "creature" && g.skin && skinStateHasArt(g.skin, "attack")) g.attackT0 = performance.now();   // it bites, visibly
       sfx("zap"); shake(11);
@@ -4577,7 +4579,7 @@
         continue;
       }
       creatureStep(g);
-      if (g.kind === "eye") creatureStompCheck(g); else creatureContactCheck(g);
+      forEachPlayer(function(){ creatureContactCheck(g); });
     }
   });
 
@@ -5267,7 +5269,7 @@
     return true;
   }
   onStep("beforeUpdate", function(){
-    if (player) keepInside(player);
+    eachPlayerBody(keepInside);
     for (var ki = 0; ki < objects.length; ki++) if (objects[ki].body) keepInside(objects[ki].body);
     if (runner.enabled){
       var toBreak = null;
@@ -5279,10 +5281,10 @@
         if (spin > MAX_SPIN) Body.setAngularVelocity(cb, Math.sign(cb.angularVelocity) * MAX_SPIN);
       }
       if (toBreak) toBreak.forEach(breakApart);
-      if (player){
-        var psp = Math.hypot(player.velocity.x, player.velocity.y);
-        if (psp > MAX_SPEED) Body.setVelocity(player, { x: player.velocity.x / psp * MAX_SPEED, y: player.velocity.y / psp * MAX_SPEED });
-      }
+      eachPlayerBody(function(pb){
+        var psp = Math.hypot(pb.velocity.x, pb.velocity.y);
+        if (psp > MAX_SPEED) Body.setVelocity(pb, { x: pb.velocity.x / psp * MAX_SPEED, y: pb.velocity.y / psp * MAX_SPEED });
+      });
     }
     if (!runner.enabled) return;
     var dt = stepSeconds();
@@ -5953,7 +5955,8 @@
 
     // The player floats too — you bob up to the surface and can swim
     // along it rather than trudging around on the bottom.
-    if (player && !flying && !noWater){
+    if (!noWater) forEachPlayer(function(P){
+      if (!player || flying || P.bubble) return;
       var pw = waterAt(player.position.x, player.position.y, PH/2);
       if (pw > 0.02){
         var pvol = PW*PH*0.78;
@@ -5961,7 +5964,7 @@
         Body.applyForce(player, player.position, { x: 0, y: -plift });
         Body.setVelocity(player, { x: player.velocity.x, y: player.velocity.y * (1 - 0.09*pw) });
       }
-    }
+    });
   });
 
   /* ============================================================
@@ -6130,13 +6133,8 @@
     P.charArt = charArt;
   }
   function forEachPlayer(fn){
-    var cur = me;
-    for (var i = 0; i < players.length; i++){
-      var P = players[i];
-      if (P !== cur){ if (cur) unbindTo(cur); bindFrom(P); }
-      fn(P, i);
-      if (P !== cur){ unbindTo(P); if (cur) bindFrom(cur); }
-    }
+    if (players.length === 1){ fn(players[0], 0); return; }
+    for (var i = 0; i < players.length; i++){ var P = players[i], idx = i; withPlayer(P, function(Q){ fn(Q, idx); }); }
   }
   /* The first player is the globals as they stand at boot: adopted into
      a shell once every one of them has been declared. */
@@ -6150,6 +6148,144 @@
     var b = body.parent || body;
     for (var i = 0; i < players.length; i++) if (players[i].player === b || (players[i] === me && player === b)) return players[i];
     return null;
+  }
+  /* Run `fn` with P bound — the globals are P's for the duration and P
+     takes them back after, whatever happens inside. */
+  function withPlayer(P, fn){
+    var cur = me;
+    if (P === cur){ fn(P); return; }
+    if (cur) unbindTo(cur);
+    bindFrom(P);
+    try { fn(P); }
+    finally { unbindTo(P); if (cur) bindFrom(cur); }
+  }
+  function playerBody(P){ return P === me ? player : P.player; }
+  /* Every player's body that is in the world (a bubbled one is not),
+     without binding: fn(body, P). For the readers that only want a
+     position — sensors, fans, the goal. */
+  function eachPlayerBody(fn){
+    for (var i = 0; i < players.length; i++){
+      var P = players[i]; if (P.bubble) continue;
+      var b = playerBody(P); if (b) fn(b, P);
+    }
+  }
+  function nearestPlayer(pt){
+    if (players.length < 2) return player && me && !me.bubble ? me : null;
+    var best = null, bd = Infinity;
+    eachPlayerBody(function(b, P){ var d = dist(pt, b.position); if (d < bd){ bd = d; best = P; } });
+    return best;
+  }
+  function nearestPlayerBody(pt){ var P = nearestPlayer(pt); return P ? playerBody(P) : null; }
+  function anyPlayerWithin(pt, r){
+    if (players.length < 2) return !!player && !(me && me.bubble) && dist(pt, player.position) < r;
+    var hit = false;
+    eachPlayerBody(function(b){ if (!hit && dist(pt, b.position) < r) hit = true; });
+    return hit;
+  }
+  // true when fn() is true for some player, each bound in turn
+  function anyPlayer(fn){
+    if (players.length < 2) return !(me && me.bubble) && !!fn(me);
+    var hit = false;
+    forEachPlayer(function(P){ if (!hit && !P.bubble && fn(P)) hit = true; });
+    return hit;
+  }
+  function leadPlayer(){ return players[0]; }
+  /* ---- Joining and leaving. A second, third, fourth player is a pad
+     that pressed Start or A while nobody held it: a fresh shell with the
+     first player's size and its own colour, spawned beside the first.
+     The press that joined is not a jump. A player whose pad has been
+     gone for a while leaves; the first player never does. ---- */
+  function addPlayer(padIndex){
+    if (players.length >= PLAYER_MAX) return null;
+    var used = {}, slot = 0; players.forEach(function(Q){ used[Q.slot] = true; }); while (used[slot]) slot++;
+    var P = makePlayerShell(slot), lead = players[0];
+    P.keyboard = false; P.pad = padIndex;
+    P.charScale = lead === me ? charScale : lead.charScale;
+    P.charColor = CHAR_COLORS[slot % CHAR_COLORS.length];
+    P.padPrev = { jump: true, start: true, interact: false };
+    P.hazardSafeUntil = performance.now() + 900;
+    players.push(P);
+    var lb = playerBody(lead);
+    withPlayer(P, function(){ spawnPlayer(lb ? { x: lb.position.x, y: lb.position.y - 4 } : null); });
+    showToast("🎮 Player " + (slot + 1) + " joined!");
+    sfx("place");
+    return P;
+  }
+  function removePlayer(P){
+    var i = players.indexOf(P);
+    if (i <= 0) return;
+    withPlayer(P, function(){ releaseRope(); if (me.bubble) unbubble(); if (player) World.remove(world, player); player = null; });
+    players.splice(i, 1);
+    showToast("Player " + (P.slot + 1) + " left.");
+  }
+  /* ---- Left behind. With several players the camera follows the first,
+     and one who falls off the screen — or dies — goes into a bubble
+     that floats to the first and pops beside them (Carson: "the camera
+     follows one person and the others get dragged along, I like the
+     Mario bubble mechanic"). The body is out of the world while
+     bubbled; jump hurries the bubble along. ---- */
+  var BUBBLE_MARGIN = 0.18, BUBBLE_AFTER_STEPS = 45, BUBBLE_SPEED = 7, BUBBLE_HURRY = 15;
+  function bubbleUp(){   // the bound player, where they stand — kept on screen
+    if (!player || me.bubble) return;
+    releaseRope();
+    var visW = viewRectW / camScale, visH = viewRectH / camScale, mx = visW * 0.08, my = visH * 0.08;
+    var bx = Math.max(camX + mx, Math.min(camX + visW - mx, player.position.x)), by = Math.max(camY + my, Math.min(camY + visH - my, player.position.y));
+    World.remove(world, player);
+    me.bubble = { x: bx, y: by, t0: performance.now() };
+    grounded = false; groundedNext = false; sliding = false; me.offSteps = 0;
+    hazardSafeUntil = performance.now() + 900;
+    sfx("splash");
+  }
+  function unbubble(){   // the body back in the world, where the bubble is
+    var b = me.bubble; if (!b) return;
+    me.bubble = null;
+    World.add(world, player);
+    Body.setPosition(player, { x: b.x, y: b.y });
+    Body.setVelocity(player, { x: 0, y: 0 });
+    hazardSafeUntil = performance.now() + 900;
+  }
+  function popBubble(){
+    var b = me.bubble; if (!b) return;
+    puff(b.x, b.y, 10, { color:"#BFE6FF", speed:2.2, g:0.03, r:2.4, life:20 });
+    sfx("splash");
+    unbubble();
+  }
+  function bubbleStep(){
+    if (players.length < 2 || mode !== "play") return;
+    var lead = players[0], lb = playerBody(lead); if (!lb) return;
+    var visW = viewRectW / camScale, visH = viewRectH / camScale, mx = visW * BUBBLE_MARGIN, my = visH * BUBBLE_MARGIN, now = performance.now();
+    forEachPlayer(function(P, i){
+      if (i === 0 || !player) return;
+      if (me.bubble){
+        var bb = me.bubble, tx = lb.position.x, ty = lb.position.y - PH * 0.9;   // above the first player's head
+        var dx = tx - bb.x, dy = ty - bb.y, d = Math.hypot(dx, dy) || 1;
+        var sp = input.jumpQueued ? BUBBLE_HURRY : BUBBLE_SPEED;
+        input.jumpQueued = false; input.jumpBufferUntil = 0;
+        var step = Math.min(sp, d);
+        bb.x += dx / d * step; bb.y += dy / d * step;
+        if (d < 26 && now - bb.t0 > 500) popBubble();
+        return;
+      }
+      // "off the screen" is measured from the first player — the screen the
+      // default camera shows — so a camera shot looking elsewhere for a
+      // moment does not bubble everyone standing beside them
+      var off = Math.abs(player.position.x - lb.position.x) > visW / 2 + mx || Math.abs(player.position.y - lb.position.y) > visH / 2 + my;
+      me.offSteps = off ? (me.offSteps || 0) + 1 : 0;
+      if (me.offSteps > BUBBLE_AFTER_STEPS) bubbleUp();
+    });
+  }
+  function respawnAllPlayers(){ forEachPlayer(function(){ respawnPlayer(); }); }
+  /* Leaving Play: everyone back beside the first player, bubbles popped. */
+  function gatherPlayers(){
+    if (players.length < 2) return;
+    var lb = playerBody(players[0]); if (!lb) return;
+    forEachPlayer(function(P, i){
+      if (!i || !player) return;
+      if (me.bubble) unbubble();
+      releaseRope();
+      Body.setPosition(player, { x: lb.position.x, y: lb.position.y }); Body.setVelocity(player, { x: 0, y: 0 });
+      hazardSafeUntil = performance.now() + 900;
+    });
   }
   var charColor = localStorage.getItem("pg_char_color") || CHAR_COLORS[0];
   var grounded = false;
@@ -6655,7 +6791,8 @@
   var ICE_FRICTION_MAX = 0.05, ICE_ACCEL = 0.22, ICE_BRAKE = 0.994;
   function onIce(){ return grounded && !!groundMat && groundMat.friction <= ICE_FRICTION_MAX; }
   function canDoubleJumpNow(){ return !!worldSettings.doubleJump && !grounded && airJumps < 1 && !grabConstraint && !flying; }
-  onStep("beforeUpdate", function(){
+  onStep("beforeUpdate", function(){ forEachPlayer(groundStep); });
+  function groundStep(){
     var wasGrounded = grounded;
     grounded = groundedNext; groundBody = groundedNext ? groundBodyNext : null; groundMat = groundedNext ? groundMatNext : null;
     groundedNext = false; groundBodyNext = null; groundMatNext = null;
@@ -6668,7 +6805,7 @@
            { color:"#E0D2B0", speed:1.1 + lastFallSpeed*0.05, g:0.05, spread:Math.PI*2, life:18, r:2.6 });
     }
     if (player) lastFallSpeed = player.velocity.y;
-  });
+  }
   // A drawn hitbox makes the player a compound body, and Matter reports a
   // compound's collisions at the PART level: pair.bodyA is the convex piece
   // that touched, whose .parent is the player. A plain box is its own part.
@@ -6678,7 +6815,10 @@
   // as airborne for one step and cancel the slide it was made for.
   function groundContacts(ev){
     if (!player) return;
-    ev.pairs.forEach(function(p){
+    if (players.length > 1){ ev.pairs.forEach(function(p){ var P = playerOf(p.bodyA) || playerOf(p.bodyB); if (P) withPlayer(P, function(){ groundPair(p); }); }); return; }
+    ev.pairs.forEach(groundPair);
+  }
+  function groundPair(p){
       if (!isPlayerPart(p.bodyA) && !isPlayerPart(p.bodyB)) return;
       // Sensors overlap without holding anything up — a rope, a Back-layer
       // decoration, a walk-through light. Only a solid counts as ground.
@@ -6698,13 +6838,15 @@
       groundedNext = true;
       var gb = isPlayerPart(p.bodyA) ? p.bodyB : p.bodyA; groundBodyNext = gb.parent || gb;
       groundMatNext = gb.plugin && gb.plugin.materialId ? matOf(gb.plugin.materialId) : null;   // the part touched, not the whole object
-    });
   }
   onStep("collisionActive", groundContacts);
   onStep("collisionStart", groundContacts);
   onStep("collisionStart", function(ev){
     if (!player || mode !== "play") return;
-    ev.pairs.forEach(function(p){
+    if (players.length > 1){ ev.pairs.forEach(function(p){ var P = playerOf(p.bodyA) || playerOf(p.bodyB); if (P) withPlayer(P, function(){ touchPair(p); }); }); return; }
+    ev.pairs.forEach(touchPair);
+  });
+  function touchPair(p){
       var other = isPlayerPart(p.bodyA) ? p.bodyB : (isPlayerPart(p.bodyB) ? p.bodyA : null);
       if (!other) return;
       // Matter reports compound collisions at the PART level — pair.bodyA/
@@ -6734,8 +6876,7 @@
           if (owner) noteCrumble(owner, other);
         }
       }
-    });
-  });
+  }
   // Dissolve parts crumble a moment after you touch them, in Play mode only.
   /* Dissolve crumbles a moment after you touch it, in Play mode only.
 
@@ -6785,7 +6926,7 @@
      the grace after a respawn. */
   var CRUSH_FRAC = 0.42, CRUSH_STEPS = 10, crushSteps = 0, crushesSeen = 0;
   function crushCheck(){
-    if (!player || flying || !runner.enabled || grabConstraint || performance.now() < hazardSafeUntil){ crushSteps = 0; return; }
+    if (!player || flying || (me && me.bubble) || !runner.enabled || grabConstraint || performance.now() < hazardSafeUntil){ crushSteps = 0; return; }
     var solids = [], pb = player.bounds;
     for (var i = 0; i < objects.length; i++){
       var o = objects[i]; if (!o.body || o.decorative || o.projectile) continue;
@@ -6809,7 +6950,7 @@
       playerDied("Squashed!");
     }
   }
-  onStep("afterUpdate", function(){ crushCheck(); glueFollow(); });
+  onStep("afterUpdate", function(){ forEachPlayer(crushCheck); glueFollow(); });
   /* Glue mates follow whatever moves one of them by hand — a mover, a
      stiff piston, a creature driven along — the way a dragged group
      already moves together. After each step, a member that moved since
@@ -6863,12 +7004,15 @@
           sfx("deny");
           activeCheckpoint = 0;
           startPlayRun();
-          respawnPlayer();
+          respawnAllPlayers();
           return;
         }
         updateRunHud();
       }
     }
+    // a player who is not the first goes into a bubble and floats back to
+    // them, rather than to the checkpoint on their own
+    if (mode === "play" && players.length > 1 && me !== players[0]){ if (msg) showToast(msg); bubbleUp(); return; }
     respawnPlayer(msg);
   }
   function runTimeLeft(){ return worldSettings.timeLimit > 0 ? Math.max(0, worldSettings.timeLimit - (performance.now() - playRun.t0) / 1000) : null; }
@@ -6892,17 +7036,21 @@
       playRun.over = true;
       showToast(levelType() === "adventure" ? "Time's up — from the start again." : "Time's up! " + score + " points.");
       sfx("deny");
-      setTimeout(function(){ if (mode === "play"){ activeCheckpoint = 0; score = 0; comboMult = 1; updateScoreHud(); startPlayRun(); respawnPlayer(); resetGadgetsForPlay(); } }, 900);
+      setTimeout(function(){ if (mode === "play"){ activeCheckpoint = 0; score = 0; comboMult = 1; updateScoreHud(); startPlayRun(); respawnAllPlayers(); resetGadgetsForPlay(); } }, 900);
       return;
     }
-    if (worldSettings.fallLine != null && player.position.y > worldSettings.fallLine && performance.now() > hazardSafeUntil){
-      puff(player.position.x, player.position.y, 14, { color:"#F6ECD9", speed:2.2, g:0.02, r:2.4, life:22 });
-      sfx("zap");
-      playerDied("Fell off!");
-    }
+    if (worldSettings.fallLine != null) forEachPlayer(function(P){
+      if (!player || P.bubble) return;
+      if (player.position.y > worldSettings.fallLine && performance.now() > hazardSafeUntil){
+        puff(player.position.x, player.position.y, 14, { color:"#F6ECD9", speed:2.2, g:0.02, r:2.4, life:22 });
+        sfx("zap");
+        playerDied("Fell off!");
+      }
+    });
   }
   function respawnPlayer(msg){
     if (msg) showToast(msg);
+    if (me && me.bubble) unbubble();
     hazardSafeUntil = performance.now() + 900;
     if (flying) setFlying(false);
     var sp = getSpawnPos();
@@ -7048,15 +7196,44 @@
      characters once there are several. ---- */
   var padHeld = { left: false, right: false, up: false, down: false, sprint: false, grab: false, fire: false }, padPrev = {}, padAim = null, padSeen = false;
   function padButton(gp, i){ var b = gp.buttons[i]; return !!(b && (b.pressed || b.value > 0.5)); }
+  /* Which pad is whose: a player keeps the pad they have (`P.pad`, its
+     slot in the list). The first player takes the first free pad, as
+     ever; a free pad whose Start or A is pressed joins as a new player
+     (up to PLAYER_MAX), spawned beside the first; a pad unplugged lets go
+     of its player, who takes it back when it returns, and a joined
+     player whose pad has been gone for a few seconds leaves. Then every
+     player reads their own pad. */
+  var PAD_GONE_MS = 4000, padHinted = {};
   function pollGamepad(){
     var pads = navigator.getGamepads ? navigator.getGamepads() : null;
-    var gp = null;
-    if (pads) for (var i = 0; i < pads.length; i++){ if (pads[i] && pads[i].connected){ gp = pads[i]; break; } }
+    var free = [], taken = {}, now = performance.now(), i;
+    for (i = 0; i < players.length; i++){
+      var Pp = players[i];
+      if (Pp.pad != null && !(pads && pads[Pp.pad] && pads[Pp.pad].connected)) Pp.pad = null;
+      if (Pp.pad != null) taken[Pp.pad] = true;
+    }
+    if (pads) for (i = 0; i < pads.length; i++) if (pads[i] && pads[i].connected && !taken[i]) free.push(i);
+    for (i = 0; i < players.length && free.length; i++) if (players[i].pad == null && (i === 0 || players[i].padLostAt)){ players[i].pad = free.shift(); players[i].padLostAt = 0; }
+    for (i = 0; i < free.length; i++){
+      var fg = pads[free[i]];
+      if (players.length >= PLAYER_MAX) break;
+      if (!padHinted[free[i]]){ padHinted[free[i]] = true; showToast("🎮 Another controller — press Start on it to join as player " + (players.length + 1) + "."); }
+      if (padButton(fg, 9) || padButton(fg, 0)) addPlayer(free[i]);
+    }
+    for (i = players.length - 1; i > 0; i--){
+      var Pq = players[i];
+      if (Pq.pad != null){ Pq.padLostAt = 0; continue; }
+      if (!Pq.padLostAt) Pq.padLostAt = now;
+      else if (now - Pq.padLostAt > PAD_GONE_MS) removePlayer(Pq);
+    }
+    forEachPlayer(function(P){ pollPad(P.pad != null && pads ? pads[P.pad] : null); });
+  }
+  function pollPad(gp){
     if (!gp){
       if (padSeen){ padSeen = false; for (var k in padHeld) padHeld[k] = false; padAim = null; syncPadInput(); }
       return;
     }
-    if (!padSeen){ padSeen = true; showToast("🎮 Controller connected — stick to walk, A jumps, X grabs, Y uses, Start is the menu."); }
+    if (!padSeen){ padSeen = true; if (me.slot === 0) showToast("🎮 Controller connected — stick to walk, A jumps, X grabs, Y uses, Start is the menu."); }
     var ax = gp.axes[0] || 0, ay = gp.axes[1] || 0, dead = 0.3;
     var was = { left: padHeld.left, right: padHeld.right, up: padHeld.up, down: padHeld.down, sprint: padHeld.sprint, grab: padHeld.grab, fire: padHeld.fire };
     padHeld.left = ax < -dead || padButton(gp, 14);
@@ -7270,7 +7447,18 @@
   // ---- Physics-driven movement (runs inside Matter's own step, so it
   // only fires while the sim is unpaused — collisions resolve normally). ----
   onStep("beforeUpdate", function(){
-    if (!player || !runner.enabled) return;
+    if (!runner.enabled) return;
+    forEachPlayer(moveStep);
+  });
+  // where a carried thing is held out toward: the mouse for the keyboard
+  // player, the right stick for a pad player, else ahead of them
+  function carryAimPoint(){
+    if (!me || me.keyboard) return mouseWorld;
+    if (padAim) return { x: player.position.x + padAim.x * 200, y: player.position.y + padAim.y * 200 };
+    return { x: player.position.x + facing * 120, y: player.position.y - 20 };
+  }
+  function moveStep(){
+    if (!player || (me && me.bubble)) return;
     if (grabHeld && !grabConstraint) tryGrab();
     // Sprint is a bit quicker, not a dash — LBP has no sprint at all, so
     // this stays modest enough that levels built at walking pace still work.
@@ -7299,7 +7487,7 @@
       else {
         var cb = carried.body;
         if (cb.collisionFilter.group !== CARRY_GROUP) cb.collisionFilter.group = CARRY_GROUP;   // re-applied every step: a rebuild hands the object a fresh body
-        var tx = mouseWorld.x - player.position.x, ty = mouseWorld.y - player.position.y;
+        var aimAt = carryAimPoint(), tx = aimAt.x - player.position.x, ty = aimAt.y - player.position.y;
         var td = Math.hypot(tx, ty);
         if (td > 8){
           // the cursor sets only the direction, and the direction turns
@@ -7397,7 +7585,7 @@
     if (mode === "play" && player.position.y > WORLD_H + 400){
       playerDied("Whoa — resetting to start.");
     }
-  });
+  }
 
   // ---- Manual, physics-independent movement for while the sim is
   // paused — "the player should be able to move around when the
@@ -7430,6 +7618,10 @@
     lastFreeMoveT = now;
     if (!player || runner.enabled){ pausedVy = 0; return; }
     var k = dt/16.666;
+    if (players.length < 2){ freeMoveOne(k); return; }
+    forEachPlayer(function(P){ if (!player || P.bubble) return; pausedVy = P.pausedVy || 0; pausedGrounded = !!P.pausedGrounded; freeMoveOne(k); P.pausedVy = pausedVy; P.pausedGrounded = pausedGrounded; });
+  }
+  function freeMoveOne(k){
     var speed = (flying ? FLY_SPEED : walkSpeedNow()) * k;
     var dx = 0, dy = 0;
     if (input.left) dx -= speed;
@@ -9742,8 +9934,20 @@
     ctx.restore();
   }
 
+  function drawBubbledPlayer(){
+    var b = me.bubble, r = Math.max(PW, PH) * 0.36 + 8, t = performance.now();
+    ctx.save();
+    ctx.translate(b.x, b.y + Math.sin(t / 420) * 3);
+    ctx.save(); ctx.scale(0.55, 0.55); drawCharacter({ x: 0, y: 0 }, 0, false); ctx.restore();
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(160,220,255,0.28)"; ctx.fill();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.stroke();
+    ctx.beginPath(); ctx.arc(-r * 0.35, -r * 0.35, r * 0.2, 0, Math.PI * 2); ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.fill();
+    ctx.restore();
+  }
   function drawPlayer(){
     if (!player) return;
+    if (me && me.bubble){ drawBubbledPlayer(); return; }
     var p = player.position;
     if (flying){ p = { x:p.x, y:p.y + Math.sin(performance.now()/260)*3 }; }
     var squish = flying ? -0.12 : Math.min(1, Math.abs(player.velocity.y)/16) * (player.velocity.y>0?-1:1);
@@ -10455,13 +10659,13 @@
     drawBubbles();
     checkpoints.forEach(function(cp, i){ drawFlag(cp, i===0 ? "#5F9E5A" : "#2F86A6", i===0 ? "start" : "checkpoint"); });
     drawFlag(goalPoint, "#F2B705", "goal");
-    drawPlayer();
+    forEachPlayer(drawPlayer);
     drawParticles();
     drawMaterialWater();
     drawLayer(2); drawLightGlows(2);
     drawBolts(2); drawLinks(2); drawGadgets(2); drawSprites(2);
     drawWires();
-    drawUsePrompt();
+    forEachPlayer(drawUsePrompt);
     drawSpeech();
     drawGunBeams();
     drawWorldWaterOverlay();
@@ -10485,6 +10689,7 @@
     if (mode === "play" && gunHeld && playerGun && mouseOnCanvas) gunFire(mouseWorld);
     drawMinimap(now);
     runRules();
+    bubbleStep();
     if (musicPlayer.playing && pmOpen && musicGridEl && musicGridEl.isConnected) drawMusicGrid();
     tipWatch();
     if (showPerf){ perfDrawMs += (performance.now() - perfDrawT0 - perfDrawMs) * 0.1; drawPerfHud(now); }
@@ -10565,7 +10770,7 @@
     }
     c.globalAlpha = 1;
     if (waterCount > 0 && wMaxRow >= wMinRow){ c.fillStyle = "rgba(111,195,224,0.8)"; c.fillRect((wMinCol * WATER_CELL - f.x) * kx, (wMinRow * WATER_CELL - f.y) * ky, Math.max(1.5, (wMaxCol - wMinCol + 1) * WATER_CELL * kx), Math.max(1.5, (wMaxRow - wMinRow + 1) * WATER_CELL * ky)); }
-    if (player){ c.fillStyle = charColor || "#E8567A"; c.beginPath(); c.arc((player.position.x - f.x) * kx, (player.position.y - f.y) * ky, 3, 0, Math.PI*2); c.fill(); c.strokeStyle = "#2B1B12"; c.lineWidth = 1; c.stroke(); }
+    eachPlayerBody(function(pb, P){ c.fillStyle = (P === me ? charColor : P.charColor) || "#E8567A"; c.beginPath(); c.arc((pb.position.x - f.x) * kx, (pb.position.y - f.y) * ky, 3, 0, Math.PI*2); c.fill(); c.strokeStyle = "#2B1B12"; c.lineWidth = 1; c.stroke(); });
     var visW = viewRectW / camScale, visH = viewRectH / camScale;
     c.strokeStyle = "#F2B705"; c.lineWidth = 2; c.strokeRect((camX - f.x) * kx, (camY - f.y) * ky, Math.max(3, visW * kx), Math.max(3, visH * ky));
   }
@@ -16651,8 +16856,9 @@
       buildFrozen = snapshotFull();
     } else if (mode === "play"){
       musicStop();
-      if (playScaleHold != null){ var backTo = playScaleHold; playScaleHold = null; setCharScale(backTo, true); }
+      if (playScaleHold != null){ var backTo = playScaleHold; playScaleHold = null; setCharScale(backTo, true); forEachPlayer(function(P, i){ if (i) setCharScale(backTo, true); }); }
       restoreFull(buildFrozen);
+      gatherPlayers();
     }
     mode = m;
     modeBuildBtn.classList.toggle("active", m==="build");
@@ -16674,13 +16880,11 @@
     updateViewHud();
     particles.length = 0;
     sfx("mode");
-    input.left = input.right = input.up = input.down = false;
-    input.jumpQueued = false; input.jumpBufferUntil = 0;
+    forEachPlayer(function(){ input.left = input.right = input.up = input.down = false; input.jumpQueued = false; input.jumpBufferUntil = 0; });
     exitGlueMode();
     closeObjCtxMenu();
     closePauseMenu();
-    releaseRope();
-    if (flying) setFlying(false);
+    forEachPlayer(function(){ releaseRope(); if (flying) setFlying(false); });
     closePersonalMenu();
     endPaintStroke();
     // Play always runs live. Carrying a paused simulation into Play is
@@ -16698,13 +16902,17 @@
       startPlayRun();
       // the level's own character size, if it has one; the player's comes back with Build
       if (worldSettings.charSize != null && Math.abs(worldSettings.charSize - charScale) > 1e-6){ if (playScaleHold == null) playScaleHold = charScale; setCharScale(worldSettings.charSize, true); }
-      respawnPlayer();
+      if (worldSettings.charSize != null) forEachPlayer(function(P, i){ if (i) setCharScale(worldSettings.charSize, true); });
+      respawnAllPlayers();
       if (worldSettings.music && worldSettings.music.on && musicHas(worldSettings.music)) musicStart("play"); else musicStop();
       if (playFrom){
         // from here, not from the start: dropped in at the spot, on whatever is under it
-        Body.setPosition(player, { x: Math.max(PW, Math.min(WORLD_W - PW, playFrom.x)), y: Math.max(PH, Math.min(WORLD_H - PH, playFrom.y)) });
-        Body.setVelocity(player, { x: 0, y: 0 });
-        hazardSafeUntil = performance.now() + 900;
+        var pf = playFrom;
+        forEachPlayer(function(){
+          Body.setPosition(player, { x: Math.max(PW, Math.min(WORLD_W - PW, pf.x)), y: Math.max(PH, Math.min(WORLD_H - PH, pf.y)) });
+          Body.setVelocity(player, { x: 0, y: 0 });
+          hazardSafeUntil = performance.now() + 900;
+        });
         playFrom = null;
         showToast("Playing from here — a death goes back to the checkpoint.");
       }
@@ -16982,13 +17190,13 @@
 
   onStep("beforeUpdate", function(){
     if (mode !== "play" || !player) return;
-    if (goalPoint && dist(goalPoint, player.position) < 46) levelComplete();
+    if (goalPoint && anyPlayerWithin(goalPoint, 46)) levelComplete();
     bubbles.forEach(function(b){
-      if (!b.collected && dist(b, player.position) < 34) collectBubble(b);
+      if (!b.collected && anyPlayerWithin(b, 34)) collectBubble(b);
     });
     for (var i = 1; i < checkpoints.length; i++){
       var cp = checkpoints[i];
-      if (!cp.reached && dist(cp, player.position) < 40){
+      if (!cp.reached && anyPlayerWithin(cp, 40)){
         cp.reached = true;
         activeCheckpoint = i;
         showToast("🚩 Checkpoint!");

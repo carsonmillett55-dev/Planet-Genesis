@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1210 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` | Playwright suites, 1245 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1210 checks + checkgeom, in order
+npm test                   # all 1245 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -74,6 +74,7 @@ node tproj.js              # 42 — the launcher (bullets, shots that run out, a
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node tui.js                # 158 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider; My World and level doors, a level's character size; level types and their rules; a controller
+node tplayers.js           # 35 — local players: a second pad joins on Start, each pad drives its own character, the keyboard the first; a sensor sees any of them; the camera on the first and a bubble for one left behind, or one who dies; back to Build together; a pad gone and its player leaving
 node tgame.js              # 85 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -2308,9 +2309,90 @@ rubs out; bars, Clear this track, Tempo, Volume, "Plays in the level",
 tune". Not done: a music gadget (LBP2's sequencer as a thing on the
 level), saving tunes to the device, more voices.
 
+## Local players
+
+Carson: "a level that can support 4 people, a platformer, where the
+camera follows one person and the others get dragged along — I like the
+Mario bubble mechanic". Up to `PLAYER_MAX` (4) characters on one
+machine: the first is the keyboard and the first pad, as ever; each
+further pad joins as its own character.
+
+**Everything the character is lives in globals** — `player`, `input`,
+`grounded`, the grab, the gun, the look, fifty-odd of them — read
+directly by every system, hundreds of times over. Rather than thread a
+player through all of that, each player is a **struct of those same
+fields** (`makePlayerShell`, `FIELDS` is the list in `bindFrom` /
+`unbindTo`) and exactly one is *bound* at a time: `bindFrom(P)` copies
+its fields into the globals, `unbindTo(P)` copies them back, `me` is
+the bound one and is `players[0]` whenever no player-loop is running.
+`withPlayer(P, fn)` binds P round `fn` (and back, in a `finally`);
+`forEachPlayer(fn)` does that for each in turn — with one player it is
+a plain call and nothing moves. So a step or a draw written for "the
+player" runs for every player: the movement step (`moveStep`), the
+grounded step, `crushCheck`, the water's buoyancy, the fall line, the
+paused walk (`freeMoveOne`, with `pausedVy`/`pausedGrounded` kept on
+the struct), `drawPlayer`, `drawUsePrompt`, the launcher pickup, the
+creature contact check. **Collision events bind the pair's own
+player**: `groundContacts` and the hazard-touch `collisionStart` find
+`playerOf(part)` and run `groundPair` / `touchPair` under `withPlayer`,
+so each body's footing and each body's death are its own. The readers
+that only want a position take **any or the nearest player**:
+`eachPlayerBody(fn)` (bodies in the world — a bubbled one is not),
+`anyPlayerWithin(pt, r)` (sensors, speech, the goal, bubbles,
+checkpoints, a lever's prompt), `anyPlayer(fn)` (a button, which
+needs the bound PW/PH), `nearestPlayer(pt)` (a creature's sight and
+chase, the eye's look — stop distance from that player's size), the
+fan, the destroyer's shove, `keepInside` and the speed cap. A pop
+bounces the player who stomped (`creaturePop(g, by)`), not whoever is
+first — a bullet's pop bounces nobody now. `isPlayerPart` knows every
+player's parts. All players share `CARRY_GROUP`, so they walk through
+each other, as what they carry does.
+
+**Joining** (`pollGamepad`): a player keeps the pad they have (`P.pad`,
+its slot in `getGamepads()`); the first player takes the first free
+pad; a free pad — a toast says how, once per pad (`padHinted`) — whose
+Start or A is pressed joins (`addPlayer`): a fresh shell with the first
+player's size, its own colour from `CHAR_COLORS`, the plain look,
+`padPrev` marked so the press that joined is not a jump and does not
+open the pause menu, spawned beside the first. A pad unplugged lets go
+of its player, who takes it back when it returns (a free pad goes first
+to a player who lost theirs); one gone `PAD_GONE_MS` (4s) leaves
+(`removePlayer`, never the first). Then each player reads their own pad
+(`pollPad`, the old body of `pollGamepad`); the keyboard is the first
+player's only. A pad player carries toward the right stick, else ahead
+(`carryAimPoint`). The "Controller connected" toast is the first
+player's; a joiner gets "Player 2 joined!".
+
+**The camera follows the first player** (`playerAim` on the bound
+globals, outside any loop = `players[0]`), and **one left behind goes
+into a bubble** (`bubbleStep`, each frame in Play with several
+players): further from the first than half the screen plus
+`BUBBLE_MARGIN` — measured from the first player, not the camera rect,
+so a camera shot looking elsewhere does not bubble everyone beside
+them — for `BUBBLE_AFTER_STEPS` frames, `bubbleUp`: the body out of the
+world (`World.remove`), `P.bubble = {x, y}` clamped onto the screen,
+drawn by `drawBubbledPlayer` (the character at 0.55 in a bubble); it
+floats to above the first player's head at `BUBBLE_SPEED` px/frame
+(`BUBBLE_HURRY` with jump held) and pops within 26px after half a
+second (`popBubble` → `unbubble`: the body back in the world there,
+with the respawn grace). **Dying is a bubble too** for a player who is
+not the first, in Play (`playerDied`: the death still counts, then
+`bubbleUp` instead of the checkpoint); the first player respawns as
+ever, and out of lives or time's up respawns everyone
+(`respawnAllPlayers`). Play from here drops everyone at the spot; a
+level's character size applies to all; leaving Play `gatherPlayers`
+the rest beside the first, bubbles popped. Snapshots carry the first
+player only (the others are gathered on the way back). Still to come:
+Versus (several starts, per-player knockouts), the camera that frames
+everyone, emotes and the launcher HUD for pad players.
+
+`mkprev.py` rewrites the `getGamepads` line to read `window.__pgFakePads`
+(a list) or `window.__pgFakePad`; `players()`, `fakePads`, `addPlayer`,
+`removePlayer`, `playerTo2`, `bubble` in the hook. `tplayers.js`.
+
 ## A controller
 
-The first stage of local players. `pollGamepad()`, at the top of every
+`pollGamepad()`, at the top of every
 frame (the Gamepad API has no events for sticks): the first connected
 pad drives the character beside the keyboard — the left stick or the
 pad walks (up and down fly and swim, as the keys do), A jumps (through
