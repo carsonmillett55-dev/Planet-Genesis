@@ -127,6 +127,17 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ps = await players();
   ok('player two respawns, no bubble', !ps[1].bubble, ps[1]);
 
+  console.log('== every flag is a start: the checkpoint is for player two ==');
+  await build();
+  await p.evaluate(([x, y]) => window.__pg.addFlag(x, y), [X+500, Y+60]);
+  await play(); await p.waitForTimeout(300);
+  ps = await players();
+  ok('player one starts at the start flag, player two at the checkpoint', Math.abs(ps[1].x - (X+500)) < 30 && Math.abs(ps[0].x - (X+500)) > 200, ps.map(q => [q.id, Math.round(q.x)]));
+  await standAt(X+500, Y+60); await p.waitForTimeout(300);
+  ok('walking onto the flag is not a checkpoint in Versus', !/Checkpoint/.test(await toast()));
+  await build();
+  await p.evaluate(() => { const f = window.__pg.flags(); });
+
   console.log('== a Minigame: each player has their own score ==');
   await build();
   await wset('levelType', 'minigame'); await wset('lives', 0);

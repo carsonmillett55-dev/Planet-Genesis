@@ -311,6 +311,8 @@ HOOK = """
     waterLevelAt: function(x, y){ var i = waterIndexAt(x, y); return i < 0 ? null : +waterLevels[i].toFixed(4); },
     waterTotal: function(){ var t = 0; for (var i = 0; i < WCELLS; i++) t += waterLevels[i]; return +t.toFixed(3); },
     spawnY: function(){ return checkpoints[0].y; },
+    flags: function(){ return checkpoints.map(function(c){ return { x: c.x, y: c.y }; }); },
+    addFlag: function(x, y){ checkpoints.push({ x: x, y: y, reached: false }); return checkpoints.length; },
     brush: function(){ return { shape: paintShape, r: paintRadius(), mode: paintMode, layer: buildLayer }; },
     bounds: function(id){ var o = objects.filter(function(q){ return q.id===id; })[0]; if(!o) return null;
       var b=o.body.bounds; return {x:+b.min.x.toFixed(2),y:+b.min.y.toFixed(2),x2:+b.max.x.toFixed(2),y2:+b.max.y.toFixed(2)}; },

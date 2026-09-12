@@ -459,8 +459,8 @@ Minigame keep their rules so they play right when players can join.
    standing or the first to the count named the winner and a new round;
    players collide with each other now (one can stand on the other's
    head, as in LBP); a Minigame counts each player's own score and names
-   the top scorer at time's up. Not yet: several start points (players
-   spawn side by side at the one start), melee.
+   the top scorer at time's up; every flag is a start (put down
+   checkpoints and each player begins at their own). Not yet: melee.
 4. **Online**: rooms, joining, the level sent to everyone — Part E.
 5. **Top-down (2.5D)**: DONE 2026-09-12 as a level type — gravity off,
    the arrows walk every way, no jump, the character looks at the cursor

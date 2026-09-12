@@ -7525,7 +7525,13 @@
     hazardSafeUntil = performance.now() + 900;
     if (flying) setFlying(false);
     var sp = getSpawnPos();
-    if (players.length > 1 && pvpNow()){ var idx = players.indexOf(me); sp = { x: sp.x + (idx - (players.length - 1) / 2) * (PW + 14), y: sp.y }; }   // side by side, not in a heap
+    if (players.length > 1 && pvpNow()){
+      // in a Versus level every flag is a start: player i takes flag i (the
+      // start, then the checkpoints in order); sharing one, side by side
+      var idx = players.indexOf(me), nf = Math.max(1, checkpoints.length), flag = checkpoints[idx % nf] || sp;
+      var sharing = Math.floor(idx / nf), sharers = Math.ceil((players.length - (idx % nf)) / nf);
+      sp = { x: flag.x + (sharing - (sharers - 1) / 2) * (PW + 14), y: flag.y };
+    }
     Body.setPosition(player, { x: sp.x, y: sp.y });
     Body.setVelocity(player, {x:0,y:0});
     releaseRope();
@@ -12349,7 +12355,7 @@
       var fn = document.createElement("div"); fn.className = "noteText"; fn.textContent = "Falling past the fall line costs a life — a pit, or the edge of an arena. It draws as a red dashed line in Build."; el.appendChild(fn);
     }
     if (t.topdown){ var tn = document.createElement("div"); tn.className = "noteText"; tn.textContent = "The arrows or the stick walk in every direction; the character looks at the cursor (a pad's right stick). Water is a still pool; creatures chase every way; fans, movers, bolts and the rest work as they do."; el.appendChild(tn); }
-    if (t.pvp){ var pn = document.createElement("div"); pn.className = "noteText"; pn.textContent = "More players: plug in a controller and press Start on it — up to four on one machine. Each player's knockouts and lives count on their own; the winner is named and the round starts over."; el.appendChild(pn); }
+    if (t.pvp){ var pn = document.createElement("div"); pn.className = "noteText"; pn.textContent = "More players: plug in a controller and press Start on it, or press U on the keyboard — up to four on one machine. Each player's knockouts and lives count on their own; the winner is named and the round starts over. Every flag is a start: put down checkpoints and each player begins at their own."; el.appendChild(pn); }
     if (t.hub){ var hn = document.createElement("div"); hn.className = "noteText"; hn.textContent = "No lives, no clock. My World is a hub; any level can be one."; el.appendChild(hn); }
   }
   /* The chooser when a level is made: what kind is it? */
@@ -17831,6 +17837,7 @@
     bubbles.forEach(function(b){
       if (!b.collected && anyPlayerWithin(b, 34)) collectBubble(b, nearestPlayer(b));
     });
+    if (pvpNow()) return;   // in a Versus level the flags are the players' starts, not checkpoints
     for (var i = 1; i < checkpoints.length; i++){
       var cp = checkpoints[i];
       if (!cp.reached && anyPlayerWithin(cp, 40)){
