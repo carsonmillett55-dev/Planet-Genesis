@@ -229,6 +229,10 @@ implement it, including connected systems, rather than approximating.
 | **Emitters** | Research the LBP emitter system specifically — it is deeper than it looks. |
 | **World changer** | DONE 2026-09-11. Wired to any activator; moves the world's light and/or water level to its values over a time, back when the signal stops, or stays changed. |
 | **Mover** | DONE 2026-09-11, to the spec below. |
+| **Emitters** | DONE 2026-09-12. The Object emitter fires copies of a saved object: every so often, each living a while, so many at once, flung at a speed and angle; wired, a stream or one per signal. |
+| **Tags, tag sensors** | DONE 2026-09-12, LBP2's: a colour and label; a sensor hears its colour within reach, on/off or by closeness. |
+| **Impact sensors** | DONE 2026-09-12: a pulse on a hit or on while touching; the player only; a tag required. |
+| **Timers, counters** | DONE 2026-09-12, LBP2's: up / up-and-down / down, a target, a reset wire; a counter of rising edges with a reset. |
 | **Creature eye** | DONE 2026-09-11, to the spec below. |
 | **Camera** | DONE 2026-09-11. LBP2's Game Camera: zone, zoom, tracking, speed; wired, the switch decides. Plus the Movie Camera's hold time (or hold for good), shake, controls off, and a glide to a second spot and zoom — Carson's "easier than keyframing". Play has its own fixed zoom, set in World. **Still to do: tilt** (a camera roll; a rendering change — the frame transform, its inverse for the mouse, the light buffer and overlays all have to agree). |
 

@@ -1595,6 +1595,7 @@
   function usedCustomMats(){
     var out = {};
     objects.forEach(function(o){ o.pieces.forEach(function(pc){ var b = matBase(pc.m); if (customMats[b]) out[b] = packCustomMat(customMats[b]); }); });
+    gadgets.forEach(function(g){ if (g.emit) g.emit.pieces.forEach(function(pc){ var b = matBase(pc.m); if (customMats[b]) out[b] = packCustomMat(customMats[b]); }); });
     return out;
   }
   function matOf(key){
@@ -2927,7 +2928,10 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker"];
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter"];
+  // LBP's tag colours, and the names the box shows for them
+  var TAG_COLORS = ["#E4574B","#E8891D","#F2B705","#5F9E5A","#2A7B8C","#8E5BB5","#E85A9E","#F6ECD9"];
+  var TAG_NAMES = ["red","orange","yellow","green","blue","purple","pink","white"];
 
   /* ---- Skins: drawn, animated looks on things -----------------------
      A creature, an animated object or a particle carries a SKIN: a set of
@@ -3077,8 +3081,8 @@
     if (matOf(currentTool) && matOf(currentTool).isMask){ currentTool = "move"; canvas.dataset.tool = "move"; }
     renderSelBar();
   }
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker" };
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   // the sticker in hand: a saved drawing to place copies of; the size and turn it goes on at
   var stickerPick = null, stickerSize = parseFloat(localStorage.getItem("pg_sticker_size") || "120") || 120, stickerRot = 0;
@@ -3167,6 +3171,76 @@
         g.homeAngle = null; g.face = 1; g.look = { x: 1, y: 0 };
         g.dying = false; g.dieT0 = 0; g.attackT0 = 0;
       }
+    }
+    if (kind === "objemitter"){
+      /* LBP's emitter: it makes copies of an object — one from My Objects,
+         captured into the emitter itself (`emit`: the pieces, packed, and
+         the name), so a level carries what its emitters fire — at the
+         emitter's own spot, flung at `speed` in `angle`'s direction
+         (0 is up in the host's frame, as the particles have it). `freq`
+         seconds between them; each lives `life` seconds (0: for good);
+         no more than `maxAlive` at once; `maxTotal` in all (0: no end).
+         `pulse`: one per signal instead of a stream while on. Unwired, it
+         streams all the time the world runs. */
+      g.emit = extra.emit && Array.isArray(extra.emit.pieces) ? { name: String(extra.emit.name || "object").slice(0, 30), pieces: extra.emit.pieces } : null;
+      g.freq = extra.freq != null ? Math.max(0.1, Math.min(60, +extra.freq)) : 2;
+      g.life = extra.life != null ? Math.max(0, Math.min(600, +extra.life)) : 8;
+      g.maxAlive = extra.maxAlive != null ? Math.max(1, Math.min(60, +extra.maxAlive | 0)) : 5;
+      g.maxTotal = extra.maxTotal != null ? Math.max(0, Math.min(999, +extra.maxTotal | 0)) : 0;
+      g.speed = extra.speed != null ? Math.max(0, Math.min(3000, +extra.speed)) : 300;
+      g.angle = extra.angle != null ? Math.max(-180, Math.min(180, +extra.angle)) : 0;
+      g.spin = extra.spin != null ? Math.max(-720, Math.min(720, +extra.spin)) : 0;
+      g.pulse = !!extra.pulse;
+      g.nextAt = 0; g.total = 0; g.wasOn = false;
+      g.visible = extra.visible != null ? !!extra.visible : false;
+    }
+    if (kind === "tag"){
+      /* LBP2's tag: a coloured label on a thing that tag sensors look for.
+         Wired, it is worn only while the signal is on; unwired, always. */
+      g.color = extra.color != null ? Math.max(0, Math.min(TAG_COLORS.length - 1, +extra.color | 0)) : 0;
+      g.label = typeof extra.label === "string" ? extra.label.slice(0, 20) : "";
+      g.visible = extra.visible != null ? !!extra.visible : false;
+    }
+    if (kind === "tagsensor"){
+      /* LBP2's tag sensor: on while a tag of its colour is within reach.
+         `analog` makes the signal closeness instead — full at the sensor,
+         nothing at the edge — which is what LBP2's "signal strength:
+         closeness" does. */
+      g.color = extra.color != null ? Math.max(0, Math.min(TAG_COLORS.length - 1, +extra.color | 0)) : 0;
+      g.radius = extra.radius != null ? Math.max(20, Math.min(4000, +extra.radius)) : 300;
+      g.analog = !!extra.analog;
+      g.visible = extra.visible != null ? !!extra.visible : false;
+    }
+    if (kind === "impact"){
+      /* LBP2's impact sensor, on the thing it sits on: a pulse when the
+         thing hits something (or is hit), or, with `touching`, on for as
+         long as it is touching — LBP's "include touching". `playerOnly`
+         listens for the player alone; `requireTag` for things wearing a
+         tag of `tagColor`. */
+      g.touching = !!extra.touching;
+      g.playerOnly = !!extra.playerOnly;
+      g.requireTag = !!extra.requireTag;
+      g.tagColor = extra.tagColor != null ? Math.max(0, Math.min(TAG_COLORS.length - 1, +extra.tagColor | 0)) : 0;
+      g.hitUntil = 0; g.touchStep = -1; g.visible = extra.visible != null ? !!extra.visible : false;
+    }
+    if (kind === "timer"){
+      /* LBP2's timer: a position that runs toward a target time. `mode`:
+         "up" — counts up while the signal is on, holds while off;
+         "updown" — up while on, back down while off (LBP's Forwards /
+         Backwards); "down" — starts full and runs down while on. Output
+         on at the target (at zero, counting down). A second wire, the
+         reset, puts it back to the start. `level` is where it is, 0–1. */
+      g.target = extra.target != null ? Math.max(0.1, Math.min(600, +extra.target)) : 3;
+      g.mode = extra.mode === "updown" || extra.mode === "down" ? extra.mode : "up";
+      g.time = 0; g.inputReset = null; g.wasReset = false;
+      g.visible = extra.visible != null ? !!extra.visible : false;
+    }
+    if (kind === "counter"){
+      /* LBP2's counter: counts the signal's rising edges up to a target
+         and is on from then until reset. */
+      g.target = extra.target != null ? Math.max(1, Math.min(9999, +extra.target | 0)) : 3;
+      g.count = 0; g.wasOn = false; g.inputReset = null; g.wasReset = false;
+      g.visible = extra.visible != null ? !!extra.visible : false;
     }
     if (kind === "sticker"){
       /* A sticker, LittleBigPlanet's decal: a drawing stuck onto whatever
@@ -3334,12 +3408,19 @@
     });
   }
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan"); }
-  function addWire(from, to){
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter"); }
+  function hasResetPort(t){ return !!t && (t.kind === "timer" || t.kind === "counter"); }
+  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter"; }
+  function addWire(from, to, port){
     if (!from || !to || from === to) return false;
-    if (!canReceive(to)) return false;
-    for (var i = 0; i < wires.length; i++) if (wires[i].from === from.id && wires[i].to === to.id) return false;
-    wires.push({ from: from.id, to: to.id });
+    port = port === "reset" && hasResetPort(to) ? "reset" : "in";
+    if (port === "in" && !canReceive(to)) return false;
+    for (var i = 0; i < wires.length; i++) if (wires[i].from === from.id && wires[i].to === to.id && (wires[i].port || "in") === port) return false;
+    var w = { from: from.id, to: to.id };
+    if (port === "reset") w.port = "reset";
+    wires.push(w);
+    // wired from this moment: "unwired" (null) must never be read again, not even for the one step before the first wire pass
+    if (port === "reset"){ if (to.inputReset == null) to.inputReset = 0; } else if (to.input == null) to.input = 0;
     return true;
   }
   function wiresFrom(g){ return wires.filter(function(w){ return w.from === g.id; }); }
@@ -3445,7 +3526,7 @@
     }
   });
   onStep("beforeUpdate", function(){
-    var i, g;
+    var i, g, dt = stepSeconds();
     for (i = 0; i < gadgets.length; i++){ g = gadgets[i]; g.pos = gadgetWorld(g); }
     if (!runner.enabled){
       for (i = 0; i < gadgets.length; i++){ g = gadgets[i]; if (g.kind === "eye" && player){ var ex = player.position.x - g.pos.x, ey = player.position.y - g.pos.y, el = Math.hypot(ex, ey) || 1; g.look = { x: ex / el, y: ey / el }; } }
@@ -3471,6 +3552,33 @@
         g.out = fanOn(g) ? 1 : 0;
         if (g.out) fanBlow(g);
       }
+      if (g.kind === "tag") g.out = g.input == null ? 1 : (g.input > 0 ? 1 : 0);
+      if (g.kind === "objemitter") objEmitterStep(g);
+      if (g.kind === "impact"){
+        // a pulse from the last hit, or on while touching
+        g.out = g.touching ? (g.touchStep === runner.steps - 1 || g.touchStep === runner.steps ? 1 : 0) : (performance.now() < g.hitUntil ? 1 : 0);
+      }
+      if (g.kind === "timer"){
+        var tOn = g.input != null && g.input > 0, rst = g.inputReset != null && g.inputReset > 0;
+        if (g.time == null) g.time = g.mode === "down" ? g.target : 0;
+        if (rst && !g.wasReset) g.time = g.mode === "down" ? g.target : 0;
+        g.wasReset = rst;
+        if (!rst){
+          if (g.mode === "up"){ if (tOn) g.time = Math.min(g.target, g.time + dt); }
+          else if (g.mode === "updown"){ g.time = Math.max(0, Math.min(g.target, g.time + (tOn ? dt : -dt))); }
+          else { if (tOn) g.time = Math.max(0, g.time - dt); }
+        }
+        g.level = g.target > 0 ? g.time / g.target : 0;
+        g.out = (g.mode === "down" ? g.time <= 0.0001 : g.time >= g.target - 0.0001) ? 1 : 0;
+      }
+      if (g.kind === "counter"){
+        var cOn = g.input != null && g.input > 0, cRst = g.inputReset != null && g.inputReset > 0;
+        if (cRst && !g.wasReset) g.count = 0;
+        g.wasReset = cRst;
+        if (cOn && !g.wasOn && g.count < g.target) g.count++;
+        g.wasOn = cOn;
+        g.out = g.count >= g.target ? 1 : 0;
+      }
       if (g.kind === "watersensor"){
         // on while water is actually touching it: a wet cell within its
         // reach, or the world's water above it. It used to ask the column's
@@ -3481,14 +3589,102 @@
     }
     // Inputs: null when nothing is wired to you, else the strongest signal in.
     for (i = 0; i < bolts.length; i++) bolts[i].input = null;
-    for (i = 0; i < gadgets.length; i++) gadgets[i].input = null;
+    for (i = 0; i < gadgets.length; i++){ gadgets[i].input = null; if (hasResetPort(gadgets[i])) gadgets[i].inputReset = null; }
     for (i = 0; i < links.length; i++) links[i].input = null;
     for (i = 0; i < wires.length; i++){
       var src = gadgetById(wires[i].from), tgt = receiverById(wires[i].to);
       if (!src || !tgt) continue;
-      tgt.input = Math.max(tgt.input || 0, src.out);
+      if (wires[i].port === "reset") tgt.inputReset = Math.max(tgt.inputReset || 0, src.out);
+      else tgt.input = Math.max(tgt.input || 0, src.out);
+    }
+    for (i = 0; i < gadgets.length; i++){
+      g = gadgets[i];
+      if (g.kind !== "tagsensor") continue;
+      var best = 0;
+      for (var ti = 0; ti < gadgets.length; ti++){
+        var t = gadgets[ti];
+        if (t.kind !== "tag" || t.color !== g.color || !t.out) continue;
+        var d = dist(g.pos, t.pos);
+        if (d > g.radius) continue;
+        best = Math.max(best, g.analog ? Math.max(0.01, 1 - d / g.radius) : 1);
+      }
+      g.out = best;
     }
     updateWorldLive(stepSeconds());
+  });
+  /* ---- The object emitter ---------------------------------------- */
+  function emittedAlive(g){ var n = 0; for (var i = 0; i < objects.length; i++) if (objects[i].emitted && objects[i].emitted.by === g.id) n++; return n; }
+  function objEmitterStep(g){
+    var now = performance.now();
+    // what it fired that has lived its time
+    if (g.life > 0){
+      for (var i = objects.length - 1; i >= 0; i--){
+        var o = objects[i];
+        if (o.emitted && o.emitted.by === g.id && now - o.emitted.at > g.life * 1000){ puff(o.body.position.x, o.body.position.y, 6, { color:"#F6ECD9", speed:1.2, g:0.04, r:2 }); removeObject(o); }
+      }
+    }
+    if (!g.emit || !g.emit.pieces.length) return;
+    var on = g.input == null ? true : g.input > 0, edge = on && !g.wasOn;
+    g.wasOn = on;
+    var want = g.pulse ? edge : (on && now >= g.nextAt);
+    if (!want) return;
+    if (g.maxTotal > 0 && g.total >= g.maxTotal) return;
+    if (emittedAlive(g) >= g.maxAlive){ if (!g.pulse) g.nextAt = now + 100; return; }
+    emitObjectFrom(g);
+    g.nextAt = now + g.freq * 1000;
+  }
+  function emitObjectFrom(g){
+    var pieces = [];
+    g.emit.pieces.forEach(function(pc){
+      if (!matOf(pc.m) || matOf(pc.m).isFluid) return;
+      var poly = pgClean(pgUnpack(pc.g), GEOM_TOL);
+      if (poly.length) pieces.push({ m: pc.m, poly: poly });
+    });
+    if (!pieces.length) return null;
+    var ha = g.obj && g.obj.body ? g.obj.body.angle : 0;
+    var obj = spawnObjectFromPieces(pieces, g.layer, { a: ha, x: g.pos.x, y: g.pos.y }, false);
+    if (!obj) return null;
+    obj.emitted = { by: g.id, at: performance.now() };
+    refreshObjectPhysics(obj);
+    if (!obj.body.isStatic){
+      var a = ha + (g.angle - 90) * Math.PI / 180, v = g.speed / STEPS_PER_SEC;
+      Body.setVelocity(obj.body, { x: Math.cos(a) * v, y: Math.sin(a) * v });
+      Body.setAngularVelocity(obj.body, g.spin * Math.PI / 180 / STEPS_PER_SEC);
+    }
+    g.total++;
+    puff(g.pos.x, g.pos.y, 5, { color:"#F2B705", speed:1.6, g:0.05, r:2 });
+    return obj;
+  }
+  // pausing Build takes back everything emitted, so a paused level is the level as built
+  function clearEmitted(){ for (var i = objects.length - 1; i >= 0; i--) if (objects[i].emitted) removeObject(objects[i]); gadgets.forEach(function(g){ if (g.kind === "objemitter"){ g.total = 0; g.nextAt = 0; } }); }
+  /* ---- Impact sensors listen to the engine's own pairs: a Start is the
+     hit, an Active is the touch. Only a solid counts, and never the host
+     itself; `playerOnly` wants the player, `requireTag` wants a thing
+     wearing an active tag of the colour. ---- */
+  function impactOther(g, pair){
+    var host = g.obj && g.obj.body; if (!host) return null;
+    var a = pair.bodyA, b = pair.bodyB, aHost = a === host || a.parent === host, bHost = b === host || b.parent === host;
+    if (aHost === bHost) return null;
+    var other = aHost ? b : a;
+    if (other.isSensor) return null;
+    if (g.playerOnly && !isPlayerPart(other)) return null;
+    if (g.requireTag){
+      var po = other.parent || other, obj = po.plugin && po.plugin.obj;
+      if (!obj || !gadgets.some(function(t){ return t.kind === "tag" && t.obj === obj && t.color === g.tagColor && t.out; })) return null;
+    }
+    return other;
+  }
+  onStep("collisionStart", function(ev){
+    for (var i = 0; i < gadgets.length; i++){
+      var g = gadgets[i]; if (g.kind !== "impact") continue;
+      for (var k = 0; k < ev.pairs.length; k++){ if (impactOther(g, ev.pairs[k])){ g.hitUntil = performance.now() + 160; g.touchStep = runner.steps; break; } }
+    }
+  });
+  onStep("collisionActive", function(ev){
+    for (var i = 0; i < gadgets.length; i++){
+      var g = gadgets[i]; if (g.kind !== "impact" || !g.touching) continue;
+      for (var k = 0; k < ev.pairs.length; k++){ if (impactOther(g, ev.pairs[k])){ g.touchStep = runner.steps; break; } }
+    }
   });
   /* ---- The Fan ----------------------------------------------------
      Air in a column above the fan, in the fan's own frame. Anything whose
@@ -3688,7 +3884,15 @@
     worldLive.water = worldLive.waterY >= WORLD_H - 1 ? null : worldLive.waterY;
   }
   function resetGadgetsForPlay(){
-    gadgets.forEach(function(g){ if (g.kind === "button") g.on = false; g.held = false; if (g.kind === "changer") g.latched = false; });
+    gadgets.forEach(function(g){
+      if (g.kind === "button") g.on = false; g.held = false; if (g.kind === "changer") g.latched = false;
+      if (g.kind === "timer"){ g.time = g.mode === "down" ? g.target : 0; g.wasReset = false; }
+      if (g.kind === "counter"){ g.count = 0; g.wasOn = false; g.wasReset = false; }
+      if (g.kind === "impact"){ g.hitUntil = 0; g.touchStep = -1; }
+      if (g.kind === "objemitter"){ g.total = 0; g.nextAt = 0; g.wasOn = false; }
+    });
+    // every wired receiver starts Play reading "off", not "unwired"
+    wires.forEach(function(w){ var t = receiverById(w.to); if (!t) return; if (w.port === "reset") t.inputReset = 0; else t.input = 0; });
     moverHomeAll();
     worldLiveReset();
   }
@@ -6082,7 +6286,9 @@
                hitbox: g.hitbox && g.hitbox.length ? g.hitbox : null, weakD: g.weakD && g.weakD.length ? g.weakD : null, dangerD: g.dangerD && g.dangerD.length ? g.dangerD : null,
                art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h, a:g.art.a || 0 } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
                rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin,
-               width: g.width, reach: g.reach, strength: g.strength, rot: g.rot, flipX: g.flipX };
+               width: g.width, reach: g.reach, strength: g.strength, rot: g.rot, flipX: g.flipX,
+               label: g.label, analog: g.analog, touching: g.touching, playerOnly: g.playerOnly, requireTag: g.requireTag, tagColor: g.tagColor, target: g.target, mode: g.mode,
+               emit: g.emit ? { name: g.emit.name, pieces: g.emit.pieces } : undefined, freq: g.freq, life: g.life, maxAlive: g.maxAlive, maxTotal: g.maxTotal, pulse: g.pulse };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -6094,7 +6300,7 @@
     var gIdx = {}; gadgets.forEach(function(g, i){ gIdx[g.id] = i; });
     var bIdx = {}; bolts.forEach(function(b, i){ bIdx[b.id] = i; });
     var wireSnaps = wires.map(function(w){
-      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to], toLink: lIdx[w.to] };
+      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to], toLink: lIdx[w.to], port: w.port || undefined };
     }).filter(function(w){ return w.from != null && (w.toBolt != null || w.toGadget != null || w.toLink != null); });
     return {
       objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps, links: linkSnaps,
@@ -6135,7 +6341,7 @@
     });
     (Array.isArray(snap.wires) ? snap.wires : []).forEach(function(ws){
       var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : (ws.toLink != null ? links[ws.toLink] : gadgets[ws.toGadget]);
-      if (src && tgt) addWire(src, tgt);
+      if (src && tgt) addWire(src, tgt, ws.port);
     });
     checkpoints = snap.checkpoints.map(function(c){ return { x:c.x, y:c.y, reached:false }; });
     goalPoint = snap.goal ? { x:snap.goal.x, y:snap.goal.y } : null;
@@ -6209,7 +6415,7 @@
     v = !!v && mode === "build";
     if (runner.enabled === !v) return;
     runner.enabled = !v;
-    if (mode === "build"){ if (v){ moverReturnAll(); gadgets.forEach(function(g){ if (g.kind === "changer") g.latched = false; }); worldLiveReset(); } else moverHomeAll(); }   // paused: everything back at its start; running: travel from here
+    if (mode === "build"){ if (v){ moverReturnAll(); clearEmitted(); gadgets.forEach(function(g){ if (g.kind === "changer") g.latched = false; }); worldLiveReset(); } else moverHomeAll(); }   // paused: everything back at its start; running: travel from here
     updatePauseState();
   }
   function togglePause(){
@@ -7241,6 +7447,41 @@
       ctx.fillStyle = "#F6ECD9";
       for (var fi = -8; fi <= 8; fi += 4){ ctx.fillRect(fi - 1, -7, 2, 2); ctx.fillRect(fi - 1, 5, 2, 2); }
       ctx.beginPath(); ctx.moveTo(-3, -3); ctx.lineTo(4, 0); ctx.lineTo(-3, 3); ctx.closePath(); ctx.fill();
+    } else if (g.kind === "objemitter"){
+      // a hopper with an open mouth, lit while it fires
+      ctx.beginPath(); ctx.moveTo(-10, 8); ctx.lineTo(10, 8); ctx.lineTo(7, -6); ctx.lineTo(-7, -6); ctx.closePath();
+      ctx.fillStyle = on ? "#F2B705" : "#8E5BB5"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.rect(-6, -12, 12, 6); ctx.fillStyle = "#F6ECD9"; ctx.fill(); ctx.stroke();
+    } else if (g.kind === "tag"){
+      // a luggage tag in its colour
+      var tc = TAG_COLORS[g.color] || TAG_COLORS[0];
+      ctx.beginPath(); ctx.moveTo(-10, -6); ctx.lineTo(4, -6); ctx.lineTo(11, 0); ctx.lineTo(4, 6); ctx.lineTo(-10, 6); ctx.closePath();
+      ctx.fillStyle = tc; ctx.globalAlpha = (alpha == null ? 1 : alpha) * (on ? 1 : 0.5); ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(-6, 0, 2, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
+      ctx.globalAlpha = alpha == null ? 1 : alpha;
+    } else if (g.kind === "tagsensor"){
+      // a dish in its colour, lit when it hears one
+      var sc = TAG_COLORS[g.color] || TAG_COLORS[0];
+      ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2); ctx.fillStyle = on ? sc : "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, 5, Math.PI * 0.75, Math.PI * 2.25); ctx.strokeStyle = "#F6ECD9"; ctx.lineWidth = 2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI*2); ctx.fillStyle = sc; ctx.fill();
+    } else if (g.kind === "impact"){
+      // a starburst
+      ctx.beginPath();
+      for (var sb = 0; sb < 8; sb++){ var ra = sb % 2 ? 5 : 11, an = sb * Math.PI / 4; ctx.lineTo(Math.cos(an) * ra, Math.sin(an) * ra); }
+      ctx.closePath(); ctx.fillStyle = on ? "#F2B705" : "#E8891D"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+    } else if (g.kind === "timer"){
+      // a clock face, its hand at the position
+      ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI*2); ctx.fillStyle = on ? "#7FD4D9" : "#F6ECD9"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      var ha = -Math.PI/2 + (g.level || 0) * Math.PI * 2;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(ha) * 8, Math.sin(ha) * 8); ctx.lineWidth = 2.2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, 1.8, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
+    } else if (g.kind === "counter"){
+      // a little box with the count in it
+      ctx.beginPath(); ctx.rect(-11, -9, 22, 18); ctx.fillStyle = on ? "#7FD4D9" : "#F6ECD9"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.fillStyle = "#2B1B12"; ctx.font = "bold 10px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText((g.count || 0) + "/" + g.target, 0, 0.5);
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
     } else if (g.kind === "fan"){
       // a round housing with four blades, turning while it blows
       ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI*2);
@@ -7376,6 +7617,13 @@
         ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#5F9E5A"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
         ctx.restore();
       }
+      if (mode === "build" && g.kind === "tagsensor" && (g === selectedGadget || currentTool === "tagsensor")){
+        ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
+        ctx.beginPath(); ctx.arc(0, 0, g.radius, 0, Math.PI*2);
+        ctx.fillStyle = "rgba(127,212,217,0.10)"; ctx.fill();
+        ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = TAG_COLORS[g.color] || "#2A7B8C"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.restore();
+      }
       if (mode === "build" && g.kind === "sensor" && (g === selectedGadget || currentTool === "sensor")){
         ctx.save(); ctx.rotate(-(g.obj && g.obj.body ? g.obj.body.angle : 0));
         ctx.beginPath(); ctx.arc(0, 0, g.radius, 0, Math.PI*2);
@@ -7424,6 +7672,18 @@
           ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#7FB9CE"; ctx.setLineDash([6/camScale, 4/camScale]); ctx.stroke(); ctx.setLineDash([]);
           ctx.restore();
         }
+      }
+      if (mode === "build" && g.kind === "objemitter" && (g === selectedGadget || currentTool === "objemitter")){
+        // the way it fires, and the first second of flight
+        ctx.save();
+        var oa = (g.angle - 90) * Math.PI / 180, ovx = Math.cos(oa) * g.speed / 60, ovy = Math.sin(oa) * g.speed / 60, opx = 0, opy = 0;
+        var gsc2 = worldSettings.gravity != null ? worldSettings.gravity : 1;
+        ctx.beginPath(); ctx.moveTo(0, 0);
+        for (var fi2 = 0; fi2 < 60; fi2++){ opx += ovx; opy += ovy; ovy += 0.278 * gsc2 * 4; if (fi2 % 3 === 0) ctx.lineTo(opx, opy); }
+        ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#8E5BB5"; ctx.setLineDash([4/camScale, 5/camScale]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(Math.cos(oa) * 28, Math.sin(oa) * 28); ctx.lineTo(Math.cos(oa + 2.6) * 12 + Math.cos(oa) * 14, Math.sin(oa + 2.6) * 12 + Math.sin(oa) * 14); ctx.lineTo(Math.cos(oa - 2.6) * 12 + Math.cos(oa) * 14, Math.sin(oa - 2.6) * 12 + Math.sin(oa) * 14); ctx.closePath();
+        ctx.fillStyle = "#8E5BB5"; ctx.fill();
+        ctx.restore();
       }
       if (mode === "build" && g.kind === "emitter" && (g === selectedGadget || currentTool === "emitter")){
         // so it is not guesswork: the direction and spread as a wedge, the
@@ -7679,10 +7939,10 @@
       ctx.beginPath(); ctx.moveTo(a.x, a.y);
       var mx = (a.x + b.x)/2, my = (a.y + b.y)/2 - 30;
       ctx.quadraticCurveTo(mx, my, b.x, b.y);
-      ctx.strokeStyle = src.out ? "#5F9E5A" : "#2A7B8C"; ctx.setLineDash([8/camScale, 5/camScale]);
+      ctx.strokeStyle = w.port === "reset" ? (src.out ? "#C08BE0" : "#8E5BB5") : (src.out ? "#5F9E5A" : "#2A7B8C"); ctx.setLineDash([8/camScale, 5/camScale]);
       ctx.lineDashOffset = -performance.now()/40/camScale; ctx.stroke(); ctx.setLineDash([]);
     });
-    if (wiring){
+    if (wiring && wiring.from){
       var s0 = gadgetWorld(wiring.from);
       ctx.beginPath(); ctx.moveTo(s0.x, s0.y); ctx.lineTo(mouseWorld.x, mouseWorld.y);
       ctx.strokeStyle = "#F2B705"; ctx.setLineDash([6/camScale, 4/camScale]); ctx.stroke(); ctx.setLineDash([]);
@@ -9175,9 +9435,9 @@
                   note:"Move & Select drags, resizes and picks things to set up. Erase takes material off the layer you are on. Vacuum takes water and nothing else. Hold Tab anywhere to glue two objects into one." },
     connectors: { title:"Connectors", defs:[["bolt","🔩","Bolt"],["sprungbolt","🌀","Sprung bolt"],["motorbolt","⚙","Motor bolt"],["wobblebolt","↔","Wobble bolt"],["piston","🔩","Piston"],["rope","➰","Rope"]],
                   note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
-    logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["changer","🌗","World changer"]],
+    logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["impact","💥","Impact sensor"],["tag","🏷","Tag"],["tagsensor","📡","Tag sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["timer","⏱","Timer"],["counter","🔢","Counter"],["changer","🌗","World changer"]],
                   note:"Put them on something. Right-click one and Connect it to a motor, a piston, a camera, a mover or a world changer — it drives that while it is on." },
-    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["fan","🌀","Fan"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
+    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["fan","🌀","Fan"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
                   note:"A camera shows its shot while the player is in its zone. A mover carries an object along a line. A creature eye makes an object chase the player." }
   };
   function renderToolsTab(el, pageId){
@@ -11792,6 +12052,16 @@
      just cancels. */
   function finishWire(pt){
     if (!wiring) return false;
+    if (wiring.to){
+      // the other way round: a timer's or counter's reset, picking the thing that resets it
+      var srcG = gadgetAt(pt.x, pt.y, 22), toG = wiring.to;
+      wiring = null;
+      if (!srcG || !gadgetHasOutput(srcG) || srcG === toG){ showToast("Click a switch, sensor, button, lever, timer or counter to reset it from."); sfx("deny"); return true; }
+      pushUndo("wiring a reset");
+      if (addWire(srcG, toG, "reset")){ showToast("Wired: that resets it."); sfx("glue"); } else showToast("Already wired to that.");
+      selectGadget(toG); opWanted = true; renderSelBar();
+      return true;
+    }
     var from = wiring.from;
     var tgt = boltAt(pt.x, pt.y, 22) || gadgetAt(pt.x, pt.y, 22) || linkAt(pt.x, pt.y, 14);
     wiring = null;
@@ -12112,6 +12382,81 @@
         "It chases the player once they are in sight and stops just short of them. The red area kills the player on touch; the pale area is where it can be killed.";
       en.style.flexBasis = "100%"; opSection(null).appendChild(en);
     }
+    if (g.kind === "objemitter"){
+      var eo = opSection("Fires");
+      var en = document.createElement("div"); en.className = "noteText"; en.style.flexBasis = "100%";
+      en.textContent = g.emit ? "Fires copies of '" + g.emit.name + "'. Pick another from My Objects below." : "Pick something from My Objects for it to fire — right-click anything you build and Save it there first.";
+      eo.appendChild(en);
+      savedObjects.forEach(function(sv){
+        opBtn(eo, "📤 " + sv.name, "Fire copies of this", function(){
+          pushUndo("changing an emitter");
+          var snap = savedObjectPieces(sv).map(function(pc){ return { m: pc.m, g: pgPack(pc.poly) }; });
+          g.emit = { name: sv.name, pieces: snap }; renderSelBar(); sfx("tick");
+        }, "wide" + (g.emit && g.emit.name === sv.name ? " on" : ""));
+      });
+      var ef = opSection("How");
+      slider(ef, "Every", g.freq, 0.1, 60, 0.1, function(v){ g.freq = v; }, function(v){ return (+v).toFixed(1) + "s"; }, "changing an emitter");
+      slider(ef, "Each lives", g.life, 0, 120, 0.5, function(v){ g.life = v; }, function(v){ return v <= 0 ? "for good" : (+v).toFixed(1) + "s"; }, "changing an emitter");
+      slider(ef, "At most alive", g.maxAlive, 1, 60, 1, function(v){ g.maxAlive = Math.round(v); }, function(v){ return Math.round(v) + ""; }, "changing an emitter");
+      slider(ef, "In all", g.maxTotal, 0, 200, 1, function(v){ g.maxTotal = Math.round(v); }, function(v){ return v <= 0 ? "no end" : Math.round(v) + ""; }, "changing an emitter");
+      slider(ef, "Speed", g.speed, 0, 3000, 10, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing an emitter");
+      slider(ef, "Direction", g.angle, -180, 180, 5, function(v){ g.angle = v; }, function(v){ return v === 0 ? "straight up" : (Math.abs(v) === 180 ? "straight down" : Math.round(Math.abs(v)) + "° to the " + (v > 0 ? "right" : "left")); }, "changing an emitter");
+      slider(ef, "Spin", g.spin, -720, 720, 10, function(v){ g.spin = v; }, function(v){ return v === 0 ? "none" : Math.round(v) + "°/s"; }, "changing an emitter");
+      var ep = opSection("When wired");
+      opBtn(ep, "🌊 A stream while the signal is on", "", function(){ pushUndo("changing an emitter"); g.pulse = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.pulse ? " on" : ""));
+      opBtn(ep, "1️⃣ One each time the signal comes on", "", function(){ pushUndo("changing an emitter"); g.pulse = true; renderSelBar(); sfx("tick"); }, "wide" + (g.pulse ? " on" : ""));
+      var enote = document.createElement("div"); enote.className = "noteText";
+      enote.textContent = "Unwired, it fires all the time the world runs. What it fires is not part of the level: pausing Build takes it all back.";
+      enote.style.flexBasis = "100%"; opSection(null).appendChild(enote);
+    }
+    if (g.kind === "tag" || g.kind === "tagsensor" || (g.kind === "impact" && g.requireTag)){
+      var key = g.kind === "impact" ? "tagColor" : "color";
+      var tcs = opSection(g.kind === "tag" ? "Colour" : "Listens for");
+      var tRow = document.createElement("div"); tRow.className = "colorGrid"; tRow.style.flexBasis = "100%";
+      TAG_COLORS.forEach(function(c, i){
+        var b = document.createElement("button"); b.className = "colorSw" + (g[key] === i ? " active" : ""); b.style.background = c; b.title = TAG_NAMES[i];
+        b.addEventListener("click", function(){ pushUndo("changing a tag"); g[key] = i; renderSelBar(); sfx("tick"); });
+        tRow.appendChild(b);
+      });
+      tcs.appendChild(tRow);
+    }
+    if (g.kind === "tag"){
+      var tn = document.createElement("div"); tn.className = "noteText";
+      tn.textContent = g.input != null ? "Wired: it is worn only while the signal is on." : "A " + TAG_NAMES[g.color] + " tag on this thing. Tag sensors of that colour notice it within their reach; an impact sensor can ask for it. Wire a switch to it and it is worn only while the signal is on.";
+      tn.style.flexBasis = "100%"; opSection(null).appendChild(tn);
+    }
+    if (g.kind === "tagsensor"){
+      slider(opSection("Reach"), "Reach", g.radius, 20, 4000, 10, function(v){ g.radius = v; }, function(v){ return Math.round(v) + "px"; }, "changing a tag sensor");
+      var ts = opSection("Signal");
+      opBtn(ts, "On / off", "On while any " + TAG_NAMES[g.color] + " tag is in reach", function(){ pushUndo("changing a tag sensor"); g.analog = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.analog ? " on" : ""));
+      opBtn(ts, "Closeness", "Stronger the nearer the tag: full beside it, nothing at the edge of reach", function(){ pushUndo("changing a tag sensor"); g.analog = true; renderSelBar(); sfx("tick"); }, "wide" + (g.analog ? " on" : ""));
+    }
+    if (g.kind === "impact"){
+      var ib = opSection("Triggers");
+      opBtn(ib, g.touching ? "🤝 On while touching" : "💥 A pulse when it is hit", g.touching ? "Stays on for as long as something is against it" : "On for a moment each time something hits it, or it hits something", function(){ pushUndo("changing an impact sensor"); g.touching = !g.touching; renderSelBar(); sfx("tick"); }, "wide" + (g.touching ? " on" : ""));
+      opBtn(ib, g.playerOnly ? "🙂 The player only" : "🙂 Anything, the player included", "", function(){ pushUndo("changing an impact sensor"); g.playerOnly = !g.playerOnly; renderSelBar(); sfx("tick"); }, "wide" + (g.playerOnly ? " on" : ""));
+      opBtn(ib, g.requireTag ? "🏷 Only things wearing a " + TAG_NAMES[g.tagColor] + " tag" : "🏷 Any thing, tagged or not", "", function(){ pushUndo("changing an impact sensor"); g.requireTag = !g.requireTag; renderSelBar(); sfx("tick"); }, "wide" + (g.requireTag ? " on" : ""));
+      var inote = document.createElement("div"); inote.className = "noteText";
+      inote.textContent = "It listens to the thing it sits on: on when that thing hits something or is hit. Wire it to what should happen.";
+      inote.style.flexBasis = "100%"; opSection(null).appendChild(inote);
+    }
+    if (g.kind === "timer"){
+      slider(opSection("Time"), "Target", g.target, 0.1, 600, 0.1, function(v){ g.target = v; if (g.time > v) g.time = v; }, function(v){ return (+v).toFixed(1) + "s"; }, "changing a timer");
+      var tm = opSection("Counts");
+      opBtn(tm, "⏫ Up while on, holds while off", "", function(){ pushUndo("changing a timer"); g.mode = "up"; g.time = 0; renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "up" ? " on" : ""));
+      opBtn(tm, "⏫⏬ Up while on, back down while off", "", function(){ pushUndo("changing a timer"); g.mode = "updown"; g.time = 0; renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "updown" ? " on" : ""));
+      opBtn(tm, "⏬ Down from full while on", "", function(){ pushUndo("changing a timer"); g.mode = "down"; g.time = g.target; renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "down" ? " on" : ""));
+      var tnote = document.createElement("div"); tnote.className = "noteText";
+      tnote.textContent = "Its own output comes on when it reaches the target" + (g.mode === "down" ? " — zero, counting down" : "") + ". Wire something to it to run it; Reset from… puts it back to the start. Now at " + (g.time || 0).toFixed(1) + "s.";
+      tnote.style.flexBasis = "100%"; opSection(null).appendChild(tnote);
+    }
+    if (g.kind === "counter"){
+      slider(opSection("Count to"), "Target", g.target, 1, 100, 1, function(v){ g.target = Math.round(v); }, function(v){ return Math.round(v) + ""; }, "changing a counter");
+      var cnote = document.createElement("div"); cnote.className = "noteText";
+      cnote.textContent = "Each time its signal comes on it counts one; at the target its own output comes on and stays on. Reset from… puts it back to nought. Now at " + (g.count || 0) + ".";
+      cnote.style.flexBasis = "100%"; opSection(null).appendChild(cnote);
+      opBtn(opSection(null), "↺ Back to nought now", "", function(){ g.count = 0; renderSelBar(); sfx("tick"); }, "wide");
+    }
     if (g.kind === "watersensor"){
       var wn = document.createElement("div"); wn.className = "noteText";
       wn.textContent = "On while it is under water — the world's water or painted water. Put it where the water will reach, and wire it to what should happen then.";
@@ -12207,12 +12552,22 @@
     outs.forEach(function(w){
       var t = receiverById(w.to);
       var lbl = t ? (t.kind ? (BOLT_KIND_LABEL[t.kind] || GADGET_LABEL[t.kind] || LINK_LABEL[t.kind] || t.kind) : "?") : "?";
-      opBtn(ws, "✕ " + lbl, "Remove this wire", function(){
+      opBtn(ws, "✕ " + lbl + (w.port === "reset" ? " (reset)" : ""), "Remove this wire", function(){
         pushUndo("removing a wire"); wires = wires.filter(function(q){ return q !== w; }); renderSelBar(); sfx("delete");
       }, "wide");
     });
-    opBtn(ws, wiring && wiring.from === g ? "… click what it should drive (Esc cancels)" : "🔌 Connect to…",
-      "Then click a motor bolt, wobble bolt, piston, camera, mover, world changer, creature, animated object or particles",
+    if (hasResetPort(g)){
+      wires.filter(function(w){ return w.to === g.id && w.port === "reset"; }).forEach(function(w){
+        var sg = gadgetById(w.from);
+        opBtn(ws, "✕ reset from " + (sg ? GADGET_LABEL[sg.kind] : "?"), "Remove this reset wire", function(){
+          pushUndo("removing a wire"); wires = wires.filter(function(q){ return q !== w; }); renderSelBar(); sfx("delete");
+        }, "wide");
+      });
+      opBtn(ws, wiring && wiring.to === g ? "… click what should reset it (Esc cancels)" : "🔁 Reset from…", "Then click a switch, sensor, button or lever: while it is on, this goes back to the start",
+        function(){ wiring = wiring && wiring.to === g ? null : { to: g, port: "reset" }; renderSelBar(); sfx("tick"); }, "wide" + (wiring && wiring.to === g ? " on" : ""));
+    }
+    if (gadgetHasOutput(g)) opBtn(ws, wiring && wiring.from === g ? "… click what it should drive (Esc cancels)" : "🔌 Connect to…",
+      "Then click a motor bolt, wobble bolt, piston, camera, mover, world changer, creature, object, particles, fan, tag, timer or counter",
       function(){ wiring = wiring && wiring.from === g ? null : { from: g }; renderSelBar(); sfx("tick"); }, "wide" + (wiring && wiring.from === g ? " on" : ""));
     var vis = opSection("In play");
     opBtn(vis, g.visible === false ? "🙈 Hidden in Play" : "👁 Visible in Play",
@@ -13847,8 +14202,9 @@
      ============================================================ */
   function serializeLevel(name){
     var objIndex = {};
-    var objSnaps = objects.map(function(o,i){ objIndex[o.id] = i; return packObject(o); });
-    var gadgetSnaps = gadgets.map(function(g){
+    var objSnaps = [];
+    objects.forEach(function(o){ if (o.emitted) return; objIndex[o.id] = objSnaps.length; objSnaps.push(packObject(o)); });   // what an emitter fired is not the level
+    var gadgetSnaps = gadgets.filter(function(g){ return !(g.obj && g.obj.emitted); }).map(function(g){
       var wp = gadgetWorld(g);
       return { kind:g.kind, o:g.obj ? objIndex[g.obj.id] : null, x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
@@ -13863,7 +14219,9 @@
                hitbox: g.hitbox && g.hitbox.length ? g.hitbox : null, weakD: g.weakD && g.weakD.length ? g.weakD : null, dangerD: g.dangerD && g.dangerD.length ? g.dangerD : null,
                art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h, a:g.art.a || 0 } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
                rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin,
-               width: g.width, reach: g.reach, strength: g.strength, rot: g.rot, flipX: g.flipX };
+               width: g.width, reach: g.reach, strength: g.strength, rot: g.rot, flipX: g.flipX,
+               label: g.label, analog: g.analog, touching: g.touching, playerOnly: g.playerOnly, requireTag: g.requireTag, tagColor: g.tagColor, target: g.target, mode: g.mode,
+               emit: g.emit ? { name: g.emit.name, pieces: g.emit.pieces } : undefined, freq: g.freq, life: g.life, maxAlive: g.maxAlive, maxTotal: g.maxTotal, pulse: g.pulse };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -13875,7 +14233,7 @@
     var gIdx = {}; gadgets.forEach(function(g, i){ gIdx[g.id] = i; });
     var bIdx = {}; bolts.forEach(function(b, i){ bIdx[b.id] = i; });
     var wireSnaps = wires.map(function(w){
-      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to], toLink: lIdx[w.to] };
+      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to], toLink: lIdx[w.to], port: w.port || undefined };
     }).filter(function(w){ return w.from != null && (w.toBolt != null || w.toGadget != null || w.toLink != null); });
     var boltSnaps = bolts.map(function(b){ var wp = boltWorldPoint(b);
       return { a:objIndex[b.objA.id], b:objIndex[b.objB.id], x:wp.x, y:wp.y, tight:b.tight, mode:b.mode,
@@ -13957,7 +14315,7 @@
       });
       (Array.isArray(data.wires) ? data.wires : []).forEach(function(ws){
         var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : (ws.toLink != null ? links[ws.toLink] : gadgets[ws.toGadget]);
-        if (src && tgt) addWire(src, tgt);
+        if (src && tgt) addWire(src, tgt, ws.port);
       });
       if (data.world){
         worldSettings.gravity = data.world.gravity != null ? data.world.gravity : 1;

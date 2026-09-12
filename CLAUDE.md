@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` | Playwright suites, 844 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` | Playwright suites, 887 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 844 checks + checkgeom, in order
+npm test                   # all 887 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -69,6 +69,7 @@ node tstudio.js            # 71 — the studio: strokes, undo/redo, the tools, f
 node tfill.js              # 14 — the fill: a closed outline fills with material or water; open space, material, a gap and an island
 node tfan.js               # 9 — the Fan: lifts the player and a loose crate, hovers in reach, wired on/off, saved
 node tstickers.js          # 15 — stickers: drawn, kept, stuck on a thing (never on nothing), riding, picked by their picture, size/turn/flip, saved
+node tlogic.js             # 43 — tags and tag sensors, impact sensors, timers, counters, the reset wire, the object emitter
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
@@ -489,6 +490,12 @@ Each gadget has an **output**, 0 or 1:
 | **emitter** | throws out drawn particles while on (unwired: always) — see Skins | skin, rate, pspeed, angle, spread, grav, life, psize, spin |
 | **fan** | blows a column of air up from itself — up in its host's frame — that lifts the player and anything loose; wired, while the signal is on, else always | width, reach, strength |
 | **sticker** | a drawing stuck onto a thing or the background, riding with it — see Stickers | skin, size, rot, flipX |
+| **tag** | worn by its host: a colour (and a label); wired, only while the signal is on | color, label |
+| **tagsensor** | a tag of its colour within `radius`; `analog` for closeness | color, radius, analog |
+| **impact** | its host hit something (a pulse) or, with `touching`, is touching it; the player only, or things wearing a tag | touching, playerOnly, requireTag, tagColor |
+| **timer** | its time reached the target: counts up while on, up and down, or down from full; a reset wire | target, mode |
+| **counter** | the signal's rising edges reached the target; a reset wire | target |
+| **objemitter** | fires copies of a saved object — see The object emitter | emit, freq, life, maxAlive, maxTotal, speed, angle, spin, pulse |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
 
@@ -518,6 +525,63 @@ in hand.
 
 Snapshots (undo, mode switch) and level saves both carry gadgets and wires,
 by index. Entering Play resets buttons and held levers.
+
+## The logic family, LBP2's
+
+Researched against LBP2's own tweak menus, built to the same shape:
+
+- **Tag** — a colour from `TAG_COLORS` (LBP's eight) and a label, worn
+  by its host. Wired, it is worn only while the signal is on (`out`).
+- **Tag sensor** — `out` 1 while any active tag of its colour is within
+  `radius` of it; with `analog`, closeness instead — full beside the tag,
+  nothing at the edge — LBP2's "signal strength: closeness". Computed in
+  a second pass after every tag's output, so it reads the tags as they
+  are this step.
+- **Impact sensor** — listens to the engine's own pairs for its host
+  (`impactOther`: a Start is the hit, an Active the touch; never a
+  sensor, never the host itself): a 160ms pulse on a hit, or on for as
+  long as something is against it (`touching`, LBP's "include
+  touching"); `playerOnly`; `requireTag` + `tagColor` for things wearing
+  an active tag. `groundContacts` and this share the pair events.
+- **Timer** — `time` runs toward `target`: `up` while the signal is on
+  (holds off), `updown` (LBP's forwards/backwards), or `down` from full.
+  Output at the target (zero, counting down); `level` is 0–1 for anyone
+  who wants the analogue. Not `pos` — that is every gadget's world spot.
+- **Counter** — counts the signal's rising edges to `target`, on from
+  then until reset.
+
+**The reset wire.** Timers and counters have a second port:
+`wires[].port === "reset"` feeds `inputReset` instead of `input`
+(`addWire(from, to, port)`, `hasResetPort`). It is made the other way
+round — the timer's box says "Reset from…" (`wiring = { to: g, port }`)
+and the next click on a switch, sensor, button, lever, timer or counter
+(`gadgetHasOutput`) closes it — and draws purple. Saved as `port` in the
+level file and in snapshots.
+
+**A wired receiver never reads as unwired.** `null` input means "nothing
+is wired to you"; `addWire` sets the port to 0 at once and
+`resetGadgetsForPlay` sets every wired port to 0, because the first step
+of Play ran before the first wire pass and an emitter wired to a lever
+that was off fired once as though unwired.
+
+## The object emitter
+
+LBP's emitter — Carson: "emitters which can launch your saved objects
+… one of my favourite and most important features". `kind:"objemitter"`
+on the Gameplay page. It **captures** the object into itself: the box
+lists My Objects and picking one copies its packed pieces into
+`g.emit = { name, pieces }`, so a level carries what its emitters fire
+(`usedCustomMats` scans emitters' pieces too). Each `freq` seconds,
+while on (unwired: always the world runs; wired: the signal; `pulse`:
+one per rising edge), `emitObjectFrom` spawns the pieces at the
+emitter's spot in the host's frame, flings it at `speed` in `angle`'s
+direction (0 up, as the particles have it), spins it, and marks it
+`o.emitted = { by, at }`. No more than `maxAlive` at once, `maxTotal` in
+all; each lives `life` seconds (0: for good) and puffs away. **What it
+fired is not the level**: `serializeLevel` leaves emitted objects (and
+gadgets riding them) out, entering Play's snapshot never sees them, and
+pausing Build takes them all back (`clearEmitted`). A guide in Build
+shows the first second of flight.
 
 ## Links: pistons and rope
 
