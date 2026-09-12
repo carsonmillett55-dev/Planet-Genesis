@@ -941,6 +941,7 @@
   #transport button:hover{ background:var(--desk-dark); }
   #transport button[hidden]{ display:none !important; }
   #transport button#stateBtn.paused{ background:var(--yellow); color:var(--ink); border-color:var(--yellow-dark); }
+  #transport button#playHereBtn{ width:auto; padding:0 .7rem; font-size:.82rem; font-weight:700; white-space:nowrap; }
   #pausedBanner{
     position:absolute; top:.6rem; left:50%; transform:translateX(-50%); z-index:17;
     background:var(--yellow); color:var(--ink); border:3px solid var(--yellow-dark);
@@ -948,6 +949,13 @@
     padding:.2rem 1.1rem; border-radius:999px; pointer-events:none;
   }
   #pausedBanner[hidden]{ display:none !important; }
+  /* the minimap: the whole map in a corner of Build, the view a box on it */
+  #minimap{
+    position:absolute; right:.6rem; bottom:.6rem; width:240px; height:120px; z-index:6;
+    border:3px solid var(--ink); border-radius:10px; background:rgba(246,236,217,.85); cursor:pointer;
+    box-shadow:0 4px 12px rgba(0,0,0,.35);
+  }
+  #minimap[hidden]{ display:none; }
   #scoreHud{
     position:absolute; top:2.7rem; left:.6rem; z-index:16;
     background:rgba(242,183,5,.9); border:2px solid var(--ink); border-radius:999px;
@@ -1325,6 +1333,7 @@
         </div>
       </div>
       <div id="scoreHud" hidden>⭐ 0</div>
+      <canvas id="minimap" width="240" height="120" title="The whole map — click to look there (M hides it)"></canvas>
 
       <div id="pausedBanner" hidden>❚❚ PAUSED</div>
       <div id="transport">
@@ -1332,6 +1341,7 @@
           <button id="undoBtn" title="Undo">↶</button>
           <button id="redoBtn" title="Redo">↷</button>
         </div>
+        <button id="playHereBtn" title="Play from here — start playing where you are working, not at the level's start (Ctrl+P)">▶ Play here</button>
         <button id="stateBtn" title="Playing — click to pause">▶</button>
       </div>
 
@@ -1899,6 +1909,7 @@
     { id:"recenter",  label:"Centre camera",    def:["KeyC"] },
     { id:"grid",      label:"Grid snap on/off", def:["KeyG"] },
     { id:"peek",      label:"Peek behind the layers in front", def:["KeyV"] },
+    { id:"minimap",   label:"Map on/off",             def:["KeyM"] },
     { id:"rotLeft",   label:"Turn the selection left 15°",  def:["KeyZ"] },
     { id:"rotRight",  label:"Turn the selection right 15°", def:["KeyX"] },
     { id:"flip",      label:"Flip the selection",           def:["KeyH"] },
@@ -3792,8 +3803,8 @@
     var txt = "🔫 " + (playerGun.mode === "ray" ? "Ray" : (playerGun.mode === "object" && playerGun.obj ? playerGun.obj.name : (playerGun.def ? playerGun.def.name : "Bullet"))) + (playerGun.ammo > 0 ? " · " + playerGun.left + " left" : "");
     ctx.font = "bold 14px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "top";
     var w = ctx.measureText(txt).width;
-    ctx.fillStyle = "rgba(43,27,18,0.75)"; ctx.fillRect(12, 56, w + 18, 26);
-    ctx.fillStyle = "#F6ECD9"; ctx.fillText(txt, 21, 61);
+    ctx.fillStyle = "rgba(43,27,18,0.75)"; ctx.fillRect(12, 98, w + 18, 26);   // under the score pill
+    ctx.fillStyle = "#F6ECD9"; ctx.fillText(txt, 21, 103);
     ctx.restore();
   }
   /* ---- The object emitter ---------------------------------------- */
@@ -6010,6 +6021,7 @@
       if (e.code === "KeyL"){ e.preventDefault(); openLoad(); return; }
       if (e.code === "KeyN"){ e.preventDefault(); doNew(); return; }
       if (e.code === "KeyD" && !e.repeat){ e.preventDefault(); duplicateSelected(); return; }
+      if (e.code === "KeyP" && !e.repeat){ e.preventDefault(); playFromHere(); return; }
       if (e.code === "Equal" || e.code === "NumpadAdd"){ e.preventDefault(); zoomAround(camCenterWorld(), 1.25); updateViewHud(); return; }
       if (e.code === "Minus" || e.code === "NumpadSubtract"){ e.preventDefault(); zoomAround(camCenterWorld(), 0.8); updateViewHud(); return; }
       return;
@@ -6074,6 +6086,7 @@
     if (isAction("recenter", e.code) && !e.repeat){ recenterCamera(); }
     if (isAction("grid", e.code) && !e.repeat && mode === "build"){ toggleGrid(); }
     if (isAction("peek", e.code) && !e.repeat && mode === "build"){ togglePeek(); }
+    if (isAction("minimap", e.code) && !e.repeat && mode === "build"){ toggleMinimap(); }
     if (e.code === "F3" && !e.repeat){ e.preventDefault(); showPerf = !showPerf; perfWorst = 0; showToast(showPerf ? "Frame times on (F3 again to hide)" : "Frame times off"); }
     // the transforms, as keys: the object box's Turn & flip and Layer buttons
     if (mode === "build" && selList().length && !e.repeat){
@@ -8992,6 +9005,7 @@
     ctx.restore();
     drawGunHud();
     if (mode === "play" && gunHeld && playerGun && mouseOnCanvas) gunFire(mouseWorld);
+    drawMinimap(now);
     if (showPerf){ perfDrawMs += (performance.now() - perfDrawT0 - perfDrawMs) * 0.1; drawPerfHud(now); }
     updatePersonalMenuPos();
     updateSelBarPos();
@@ -9020,6 +9034,68 @@
     lines.forEach(function(l, i){ ctx.fillText(l, x, y + i * 16); });
     ctx.restore();
   }
+  /* ---- The minimap: every object as a dot of its colour on a 240 × 120
+     picture of the map, the view as a box, the character as a dot. Drawn
+     twice a second at most — it is a rough map, not a second view — and
+     hidden in Play. A click looks there. M toggles it. ---- */
+  var minimapEl = document.getElementById("minimap"), minimapCtx = minimapEl.getContext("2d"), minimapAt = 0, minimapOn = localStorage.getItem("pg_minimap") !== "0";
+  /* The map frames the LEVEL — everything built, the view and the
+     character, with a margin — not the whole 19200 × 9600 world, most of
+     which is empty and would squash a level into a few pixels. The frame
+     is never smaller than MINIMAP_MIN_W wide and keeps the canvas's 2:1
+     shape; `minimapFrame` is what a click is read against. */
+  var MINIMAP_MIN_W = 3200, minimapFrame = { x: 0, y: 0, w: WORLD_W, h: WORLD_H };
+  function minimapFit(){
+    var visW = viewRectW / camScale, visH = viewRectH / camScale;
+    var x0 = camX, y0 = camY, x1 = camX + visW, y1 = camY + visH;
+    for (var i = 0; i < objects.length; i++){
+      var bb = objects[i].body.bounds;
+      if (bb.min.x < x0) x0 = bb.min.x; if (bb.min.y < y0) y0 = bb.min.y;
+      if (bb.max.x > x1) x1 = bb.max.x; if (bb.max.y > y1) y1 = bb.max.y;
+    }
+    if (waterCount > 0 && wMaxRow >= wMinRow){
+      x0 = Math.min(x0, wMinCol * WATER_CELL); y0 = Math.min(y0, wMinRow * WATER_CELL);
+      x1 = Math.max(x1, (wMaxCol + 1) * WATER_CELL); y1 = Math.max(y1, (wMaxRow + 1) * WATER_CELL);
+    }
+    if (player){ x0 = Math.min(x0, player.position.x - 60); x1 = Math.max(x1, player.position.x + 60); y0 = Math.min(y0, player.position.y - 60); y1 = Math.max(y1, player.position.y + 60); }
+    var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, w = (x1 - x0) * 1.12, h = (y1 - y0) * 1.12;
+    var aspect = minimapEl.width / minimapEl.height;
+    w = Math.max(w, MINIMAP_MIN_W, h * aspect); h = w / aspect;
+    w = Math.min(w, WORLD_W); h = Math.min(h, WORLD_H);
+    var fx = Math.max(0, Math.min(WORLD_W - w, cx - w/2)), fy = Math.max(0, Math.min(WORLD_H - h, cy - h/2));
+    minimapFrame = { x: fx, y: fy, w: w, h: h };
+  }
+  function drawMinimap(now){
+    var show = mode === "build" && minimapOn;
+    if (minimapEl.hidden !== !show) minimapEl.hidden = !show;
+    if (!show || now - minimapAt < 500) return;
+    minimapAt = now;
+    minimapFit();
+    var W = minimapEl.width, H = minimapEl.height, f = minimapFrame, kx = W / f.w, ky = H / f.h, c = minimapCtx;
+    c.clearRect(0, 0, W, H);
+    c.fillStyle = "rgba(191,227,245,0.5)"; c.fillRect(0, 0, W, H);
+    // the world's own edge, where it falls inside the frame
+    c.strokeStyle = "rgba(43,27,18,0.35)"; c.lineWidth = 1; c.setLineDash([3, 3]);
+    c.strokeRect((0 - f.x) * kx + 0.5, (0 - f.y) * ky + 0.5, WORLD_W * kx, WORLD_H * ky); c.setLineDash([]);
+    for (var i = 0; i < objects.length; i++){
+      var o = objects[i], bb = o.body.bounds, mat = matOf(o.pieces[0] ? o.pieces[0].m : "wood");
+      c.fillStyle = mat ? mat.color : "#9C6B3E"; c.globalAlpha = o.layer === MID_LAYER ? 1 : 0.55;
+      c.fillRect((bb.min.x - f.x) * kx, (bb.min.y - f.y) * ky, Math.max(1.5, (bb.max.x - bb.min.x) * kx), Math.max(1.5, (bb.max.y - bb.min.y) * ky));
+    }
+    c.globalAlpha = 1;
+    if (waterCount > 0 && wMaxRow >= wMinRow){ c.fillStyle = "rgba(111,195,224,0.8)"; c.fillRect((wMinCol * WATER_CELL - f.x) * kx, (wMinRow * WATER_CELL - f.y) * ky, Math.max(1.5, (wMaxCol - wMinCol + 1) * WATER_CELL * kx), Math.max(1.5, (wMaxRow - wMinRow + 1) * WATER_CELL * ky)); }
+    if (player){ c.fillStyle = charColor || "#E8567A"; c.beginPath(); c.arc((player.position.x - f.x) * kx, (player.position.y - f.y) * ky, 3, 0, Math.PI*2); c.fill(); c.strokeStyle = "#2B1B12"; c.lineWidth = 1; c.stroke(); }
+    var visW = viewRectW / camScale, visH = viewRectH / camScale;
+    c.strokeStyle = "#F2B705"; c.lineWidth = 2; c.strokeRect((camX - f.x) * kx, (camY - f.y) * ky, Math.max(3, visW * kx), Math.max(3, visH * ky));
+  }
+  minimapEl.addEventListener("pointerdown", function(e){
+    e.preventDefault(); e.stopPropagation();
+    var r = minimapEl.getBoundingClientRect(), f = minimapFrame;
+    var wx = f.x + (e.clientX - r.left) / r.width * f.w, wy = f.y + (e.clientY - r.top) / r.height * f.h;
+    var visW = viewRectW / camScale, visH = viewRectH / camScale;
+    camFollow = false; camX = wx - visW/2; camY = wy - visH/2; clampCamNow(); updateViewHud(); minimapAt = 0;
+  });
+  function toggleMinimap(){ minimapOn = !minimapOn; localStorage.setItem("pg_minimap", minimapOn ? "1" : "0"); showToast(minimapOn ? "Map on" : "Map off (M brings it back)"); }
   var hoverLayerEl = document.getElementById("hoverLayer"), hoverLayerShown = "";
   function updateHoverLayer(){
     var o = (mode === "build" && currentTool === "move" && mouseOnCanvas && !camPan && !dragging && hoverObj && objects.indexOf(hoverObj) >= 0) ? hoverObj : null;
@@ -14479,6 +14555,21 @@
   var modeBuildBtn = document.getElementById("modeBuild");
   var modePlayBtn = document.getElementById("modePlay");
 
+  /* Play from here: Play, but starting where you are working rather
+     than at the level's start — on a map this size the start can be a
+     long walk away from the part you are building. `playFrom` is the spot
+     (the character's own if it is on screen, else the middle of the
+     view); the start marker itself is untouched. Ctrl+P, or the button
+     beside Play. A death still returns to the real checkpoint. */
+  var playFrom = null;
+  function playFromHere(){
+    if (mode !== "build") return;
+    var visW = viewRectW / camScale, visH = viewRectH / camScale, cx = camX + visW/2, cy = camY + visH/2;
+    var at = { x: cx, y: cy };
+    if (player && player.position.x >= camX && player.position.x <= camX + visW && player.position.y >= camY && player.position.y <= camY + visH) at = { x: player.position.x, y: player.position.y };
+    playFrom = at;
+    setMode("play");
+  }
   function setMode(m){
     if (m === mode) return;
     if (m === "play"){
@@ -14490,6 +14581,7 @@
     modeBuildBtn.classList.toggle("active", m==="build");
     modePlayBtn.classList.toggle("active", m==="play");
     viewHudEl.hidden = m !== "build";
+    document.getElementById("playHereBtn").hidden = m !== "build";
     scoreHudEl.hidden = m !== "play";
     clearSelection();
     hoverObj = null;
@@ -14525,10 +14617,19 @@
       updateScoreHud();
       resetGadgetsForPlay();
       respawnPlayer();
+      if (playFrom){
+        // from here, not from the start: dropped in at the spot, on whatever is under it
+        Body.setPosition(player, { x: Math.max(PW, Math.min(WORLD_W - PW, playFrom.x)), y: Math.max(PH, Math.min(WORLD_H - PH, playFrom.y)) });
+        Body.setVelocity(player, { x: 0, y: 0 });
+        hazardSafeUntil = performance.now() + 900;
+        playFrom = null;
+        showToast("Playing from here — a death goes back to the checkpoint.");
+      }
     }
   }
   modeBuildBtn.addEventListener("click", function(){ setMode("build"); });
   modePlayBtn.addEventListener("click", function(){ setMode("play"); });
+  document.getElementById("playHereBtn").addEventListener("click", function(){ playFromHere(); });
 
   /* ============================================================
      8. Toast + confirm dialog
