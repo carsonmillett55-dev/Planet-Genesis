@@ -29,6 +29,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const byId = async (id) => (await gadgets()).filter(g => g.id === id)[0];
   const G = async (k, i) => (await kinds(k))[i || 0];   // ids renumber on a mode switch: read by kind and index
   const objs = () => p.evaluate(() => window.__pg.objects().length);
+  const pos = () => p.evaluate(() => window.__pg.playerPos());
   const lockAll = () => p.evaluate(() => { window.__pg.objects().forEach(o => { if (!o.body.isStatic){ window.__pg.select(o); window.__pg.anchor(); } }); window.__pg.deselect(); });
   const fresh = async () => {
     await p.evaluate(() => { window.__pg.setMode('build'); window.__pg.paused(true); window.__pg.clear(); window.__pg.starter(); window.__pg.setLayer(1); window.__pg.setPaintMode('rect'); window.__pg.deselect(); window.__pg.setFlying(true); });
@@ -331,6 +332,86 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const x1 = await p.evaluate(id => { const o = window.__pg.objects().filter(o => o.id === id)[0]; return o ? o.body.position.x : null; }, born[0].obj);
   ok('and it chases the player like the one it was saved from', x1 !== null && x1 > x0 + 20, { x0, x1 });
   await build();
+
+  console.log('== the rocket pushes what it is stuck to ==');
+  await fresh();
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);
+  await lockAll();
+  await rect('wood', 1, X-40, Y+20, X+40, Y+100);   // a loose crate on the floor
+  const crateR = await p.evaluate(() => window.__pg.objects().filter(o => !o.body.isStatic)[0].id);
+  const rk = await place('rocket', X, Y+60);
+  ok('a rocket sits on the crate, pushing up at 1×', !!rk && rk.obj === crateR && rk.angle === 0 && rk.strength === 1, rk && { obj: rk.obj, angle: rk.angle, strength: rk.strength });
+  const y0 = (await p.evaluate(id => window.__pg.objVel(id), crateR)).y;
+  await play(); await p.waitForTimeout(600);
+  const v1 = await p.evaluate(id => window.__pg.objVel(id), crateR);
+  ok('in Play it lifts the crate off the floor', v1 && v1.y < y0 - 60, { y0, y1: v1 && v1.y });
+  ok('and shows it firing', (await G('rocket')).firing === true);
+  await build();
+  const crateNow = () => p.evaluate(() => { const o = window.__pg.objects().filter(o => !o.body.isStatic)[0]; return o ? { vx: o.body.velocity.x, vy: o.body.velocity.y, x: o.body.position.x, y: o.body.position.y } : null; });   // ids renumber on a mode switch
+  await p.evaluate(id => window.__pg.gadgetSet(id, { angle: 90 }), (await G('rocket')).id);
+  await play(); await p.waitForTimeout(600);
+  const v2 = await crateNow();
+  ok('pointed right, it pushes the crate along the floor', v2 && v2.x > X + 60, v2 && v2.x);
+  await build();
+  const senR = await place('sensor', X-350, Y+120);
+  await wire(senR.id, (await G('rocket')).id);
+  await play(); await standAt(X+300, Y+60); await p.waitForTimeout(400);
+  ok('wired to a sensor that is off, it does not fire', (await G('rocket')).firing === false && Math.abs((await crateNow()).vx) < 1);
+  await build();
+  const savedR = await p.evaluate(() => window.__pg.serialize('r'));
+  ok('the level file carries the rocket', savedR.gadgets.filter(g => g.kind === 'rocket')[0].angle === 90 && savedR.gadgets.filter(g => g.kind === 'rocket')[0].strength === 1);
+
+  console.log('== too fast or too hard: capped, and a glued thing comes apart ==');
+  await fresh();
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);
+  await lockAll();
+  await rect('wood', 1, X-60, Y+40, X, Y+100);      // two materials glued into one thing, resting on the floor
+  await rect('metal', 1, X-6, Y+40, X+60, Y+100);   // overlapping the wood a touch, so they weld
+  const glued = await p.evaluate(() => window.__pg.objects().filter(o => !o.body.isStatic && o.pieces.length === 2)[0]);
+  ok('a wood-and-metal thing, one object', !!glued);
+  const bk0 = (await p.evaluate(() => window.__pg.bangs())).breaks;
+  await play(); await p.waitForTimeout(200);
+  const gid = (await p.evaluate(() => window.__pg.objects().filter(o => !o.body.isStatic && o.pieces.length === 2).map(o => o.id)))[0];
+  await p.evaluate(id => window.__pg.flingObj(id, 20, -5, 0), gid); await p.waitForTimeout(150);
+  ok('flung hard but under the limit, it holds together', (await p.evaluate(() => window.__pg.bangs())).breaks === bk0 && (await p.evaluate(id => window.__pg.objVel(id), gid)) !== null);
+  await p.evaluate(id => window.__pg.flingObj(id, 60, -10, 0), gid); await p.waitForTimeout(150);
+  ok('flung past the limit, it comes apart into its two materials', (await p.evaluate(() => window.__pg.bangs())).breaks === bk0 + 1 && (await p.evaluate(id => window.__pg.objVel(id), gid)) === null && (await p.evaluate(() => window.__pg.objects().filter(o => !o.body.isStatic).length)) >= 2, await p.evaluate(() => window.__pg.bangs()));
+  const fast = await p.evaluate(() => window.__pg.objects().filter(o => !o.body.isStatic).map(o => Math.hypot(o.body.velocity.x, o.body.velocity.y)));
+  ok('and nothing goes faster than the cap', fast.every(v => v <= 48.5), fast);
+  await build();
+
+  console.log('== squashed: between two things, or inside one; not by a landing ==');
+  await fresh();
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);
+  await rect('metal', 1, X+100, Y-200, X+140, Y+100);   // a wall to be pressed against
+  await lockAll();
+  await rect('metal', 1, X-300, Y-60, X-200, Y+100);   // a heavy block to push into the player
+  await p.evaluate(() => { const o = window.__pg.objects().filter(o => !o.body.isStatic)[0]; window.__pg.select(o); window.__pg.anchor(); window.__pg.deselect(); });
+  const pusher = (await p.evaluate(() => window.__pg.objects().filter(o => o.pieces[0].m === 'metal' && o.body.bounds.min.x < 300)))[0];
+  const mvP = await place('mover', X-250, Y+20);
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X+90, Y+20]);   // its run: right up to the wall
+  await p.evaluate(id => window.__pg.gadgetSet(id, { speed: 260 }), (await G('mover')).id);
+  const cq0 = (await p.evaluate(() => window.__pg.bangs())).crushes;
+  await play(); await standAt(X+60, Y+60);   // standing against the wall, in the block's path
+  await p.waitForTimeout(2200);
+  const cq1 = (await p.evaluate(() => window.__pg.bangs())).crushes;
+  ok('pressed into the wall by the block, the character is squashed', cq1 > cq0, { cq0, cq1 });
+  const ppC = await pos();
+  ok('and goes back to the start', Math.abs(ppC.x - (X+60)) > 150, ppC);
+  await build();
+  // a plain drop onto the floor is not a crush
+  const cq2 = (await p.evaluate(() => window.__pg.bangs())).crushes;
+  await play(); await standAt(X-100, Y-300); await p.waitForTimeout(900);
+  ok('a fall onto the floor is not a crush', (await p.evaluate(() => window.__pg.bangs())).crushes === cq2);
+  // inside a thing: a wall painted over the character in Build, unpaused
+  await p.evaluate(() => { window.__pg.setMode('build'); window.__pg.paused(true); }); await camHome(); await p.waitForTimeout(200);
+  await standAt(X-100, Y+60);
+  const cq3 = (await p.evaluate(() => window.__pg.bangs())).crushes;
+  await rect('wood', 1, X-160, Y-20, X-40, Y+100);   // painted right over them
+  await lockAll();
+  await p.evaluate(() => window.__pg.paused(false)); await p.waitForTimeout(500);
+  ok('ending up inside a thing, with the world running in Build, squashes too', (await p.evaluate(() => window.__pg.bangs())).crushes > cq3);
+  await p.evaluate(() => window.__pg.paused(true));
 
   ok('no page errors', errs.length === 0, errs);
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');

@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1112 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1133 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1112 checks + checkgeom, in order
+npm test                   # all 1133 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -70,11 +70,11 @@ node tfill.js              # 14 — the fill: a closed outline fills with materi
 node tfan.js               # 9 — the Fan: lifts the player and a loose crate, hovers in reach, wired on/off, saved
 node tstickers.js          # 15 — stickers: drawn, kept, stuck on a thing (never on nothing), riding, picked by their picture, size/turn/flip, saved
 node tlogic.js             # 43 — tags and tag sensors, impact sensors, timers, counters, the reset wire, the object emitter
-node tproj.js              # 42 — the launcher (bullets, shots that run out, a ray, a saved object), a drawn projectile that hurts a creature, an emitter firing bullets, the save tabs; how it flies is the firer's, the Impact drawing, an emitter firing rays, the projectile sensor's every-Nth-hit, named projectile, box, painted spots and destroy
+node tproj.js              # 42 — the launcher (bullets, shots that run out, a ray, a saved object), a drawn projectile that hurts a creature, an emitter firing bullets, the save tabs; how it flies is the firer's, the Impact drawing, an emitter firing rays, the projectile sensor's every-Nth-hit, named projectile, box, painted spots and destroy; the missile's hole, scorch and launcher
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node tui.js                # 97 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider
-node tgame.js              # 71 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter
+node tgame.js              # 85 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -794,6 +794,66 @@ shot — then the count. `resetGadgetsForPlay` clears `count` and
 `emit`): spawned from the emitter's spot walked out of its host along
 the line of fire (`Query.point`) and a half-size further, `ownerObj`
 the host, so a bullet is not born inside the pedestal it sits on.
+
+## The missile
+
+`MISSILE_DEF`, a built-in projectile beside the bullet (`missile:
+true`, `blast` 44): a grey rocket with a red nose, its own Impact
+frames, a wedge hitbox. The launcher's `mode: "missile"` and the
+emitter's bullet kind (Bullet / Missile buttons) fire it; a projectile
+sensor can ask for it by name. On a breaking hit `missileBang`: sparks,
+smoke, a shake, a shove to every loose Mid body and the player within
+three blasts, and — **in Play only** — what it hit: the piece under
+the hit point (or the nearest) says whether the material is soft
+(`SOFT_FOR_MISSILE`: wood, sponge, rubber, ice, dissolve, floaty,
+glass, light, hazard, the drawn bodies; a custom material under 0.012
+density), and a soft hit punches a circle of the blast's radius out of
+the object in its own frame (`subLocalPoly`, then `rebuildFromPieces`,
+`splitObject` if it came apart, `removeObject` if nothing is left),
+while a hard hit (metal, dark matter) gets a **scorch** — a sticker
+gadget with a generated dark blob (`scorchDrawing`), `scorch: true`,
+trimmed to the host as stickers are, gone with Play's snapshot.
+Carson: "punch holes in certain soft materials on impact, heavy metal
+not affected, just leaves a black stain".
+
+## The rocket
+
+LBP's rocket (`kind:"rocket"`, Gameplay, host required): `angle`
+degrees round from straight up in the host's frame is the way it
+pushes; `strength` in gravities — each gadget step while on (wired:
+the signal; unwired: always the world runs) it applies `mass × |g| ×
+gravity.scale × 1.5 × strength` at its own spot along that direction
+(`Body.applyForce`), so 1× lifts its host and a half, and off the
+middle it turns the host as a real one would; a flame puff every third
+step. Nothing to push on a locked or decorative host (the box says
+so). `firing` is what the glyph and the suites read.
+
+## Too fast, too hard
+
+Every free body is capped at `MAX_SPEED` (48 px/step) and `MAX_SPIN`
+(0.45 rad/step) in a `beforeUpdate` step beside `keepInside`, the
+player at the speed cap only — nothing outruns the walls' thickness or
+the solver. And a thing of several materials flung past `BREAK_SPEED`
+(34) or spun past `BREAK_SPIN` (0.32) **comes apart into its pieces**
+(`breakApart`: each material piece a new object through
+`newObjectFromPoly` with most of the motion, a puff, the original
+removed — its gadgets and bolts with it). `objectCanBreak` rules out a
+locked, decorative or one-piece thing, a projectile, and anything
+wearing a creature, custom object or eye. Carson: "when things spin too
+fast or get hit too hard they break to avoid breaking the game".
+
+## Squashed
+
+`crushCheck`, an `afterUpdate` step: the deepest overlap between the
+player and any solid (`Query.collides` depths; a carried object left
+out) past `CRUSH_FRAC` (0.42) of the body's narrow side for
+`CRUSH_STEPS` (10) steps in a row is a crush, not a graze — a landing
+dents a body a pixel or two, a squeeze pushes right into it — and the
+character dies (zap, shake, "Squashed!", `respawnPlayer`). In Play, and
+in Build whenever the world runs ("even in create mode"); never while
+flying, hanging on a grab, paused (the paused walk backs out of
+overlaps itself) or in the grace after a respawn. Carson: "don't make
+these too sensitive".
 
 ## The save tabs
 

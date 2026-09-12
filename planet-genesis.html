@@ -1722,6 +1722,7 @@
     "tool:objemitter": ["Object emitter", "Fires copies of something you saved — pick which in its box — at a rate, up to a limit. Wire a switch to it to fire on demand. To save something, right-click it: Save as object."],
     "tool:gun":        ["Launcher", "A pickup: walk into it in Play and the cursor becomes a gun. Click to fire. Its box picks what it shoots — a bullet, a ray, a projectile you drew, or something you saved."],
     "tool:fan":        ["Fan", "Blows upward and lifts the player. Its size and strength are in its box, and a wire switches it on and off."],
+    "tool:rocket":     ["Rocket", "Stick it to something loose and it pushes that thing the way it points — a car, a lift, a flying machine. Strength and direction are in its box; wire a switch to it to fire it on demand. Off the middle of a thing, it spins it."],
     "tool:spot":       ["Spotlight", "Put it on something and it shines a cone of light the way it points — turn the thing to aim it, or set the direction, width and reach in its box. Wire a switch to it to turn it on and off. Best with World Light turned down."],
     "tool:speech":     ["Speech bubble", "Put it on something and type what it says. It speaks while the player is within reach — or, wired, while the signal is on. A sign, a talking creature, a hint."],
     "tool:destroyer":  ["Destroyer", "Put it on something and wire a switch, a sensor or a timer to it: the moment the signal comes on, that thing is gone — with a bang, if you like. A bridge that falls, a wall that blows open. Play only."],
@@ -3110,7 +3111,7 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter","gun","projsensor","speech","destroyer","sound","gate","spot"];
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter","gun","projsensor","speech","destroyer","sound","gate","spot","rocket"];
   // LBP's tag colours, and the names the box shows for them
   var TAG_COLORS = ["#E4574B","#E8891D","#F2B705","#5F9E5A","#2A7B8C","#8E5BB5","#E85A9E","#F6ECD9"];
   var TAG_NAMES = ["red","orange","yellow","green","blue","purple","pink","white"];
@@ -3148,6 +3149,26 @@
   function circlePts(n){ var out = []; for (var i = 0; i < n; i++){ var a = i / n * Math.PI * 2; out.push(0.5 + 0.44 * Math.cos(a), 0.5 + 0.44 * Math.sin(a)); } return out; }
   var BULLET_DEF = { name: "Bullet", art: { w: 18, h: 18 }, skin: { states: { idle: [[{ c: "#F2B705", w: 0, f: true, p: circlePts(20) }, { c: "#FFFDE8", w: 0, f: true, p: circlePts(20).map(function(v, i){ return i % 2 === 0 ? 0.5 + (v - 0.5) * 0.45 - 0.08 : 0.5 + (v - 0.5) * 0.45 - 0.08; }) }]] }, fps: { idle: 1 } },
                      hitbox: [{ c: "#4FA9D6", w: 0, f: true, p: circlePts(16) }], speed: 900, grav: 0.3, life: 4, breaks: true, hurts: true };
+  /* LBP's missile, built in like the bullet: a rocket with a red nose
+     that BLOWS UP where it lands — a hole punched out of soft material
+     (wood, sponge, rubber, ice, glass, the rest), a black scorch on
+     metal and dark matter, a shove to whatever is loose near by. Carson:
+     "punch holes in certain soft materials on impact, heavy metal not
+     affected, just leaves a black stain". */
+  var MISSILE_DEF = { name: "Missile", art: { w: 36, h: 14 }, missile: true, blast: 44,
+                      skin: { states: { idle: [[
+                        { c: "#8B8374", w: 0, f: true, p: [0.05, 0.3, 0.72, 0.3, 0.72, 0.7, 0.05, 0.7] },
+                        { c: "#B3261E", w: 0, f: true, p: [0.72, 0.28, 0.98, 0.5, 0.72, 0.72] },
+                        { c: "#B3261E", w: 0, f: true, p: [0.05, 0.3, 0.2, 0.3, 0.05, 0.05] },
+                        { c: "#B3261E", w: 0, f: true, p: [0.05, 0.7, 0.2, 0.7, 0.05, 0.95] },
+                        { c: "#F2B705", w: 0, f: true, p: [0.0, 0.4, 0.06, 0.4, 0.06, 0.6, 0.0, 0.6] } ]],
+                        impact: [[ { c: "#F2B705", w: 0, f: true, p: circlePts(12).map(function(v, i){ return 0.5 + (v - 0.5) * (i % 4 < 2 ? 1.0 : 0.5); }) },
+                                   { c: "#FFFDE8", w: 0, f: true, p: circlePts(10).map(function(v){ return 0.5 + (v - 0.5) * 0.5; }) } ],
+                                 [ { c: "#8B8374", w: 0, f: true, p: circlePts(12) } ]] },
+                              fps: { idle: 1, impact: 10 } },
+                      hitbox: [{ c: "#4FA9D6", w: 0, f: true, p: [0.05, 0.3, 0.98, 0.5, 0.05, 0.7] }], speed: 700, grav: 0.15, life: 5, breaks: true, hurts: true };
+  var SOFT_FOR_MISSILE = { wood: 1, sponge: 1, rubber: 1, ice: 1, dissolve: 1, floaty: 1, glass: 1, light: 1, hazard: 1, creaturebody: 1, drawnbody: 1 };
+  function missileSoft(matKey){ var b = matBase(matKey); if (SOFT_FOR_MISSILE[b]) return true; var m = matOf(matKey); return !!(m && m.custom && m.density < 0.012); }
   function normalizeProjDef(d){
     if (!d || typeof d !== "object") return null;
     var out = { name: String(d.name || "Projectile").slice(0, 30),
@@ -3157,9 +3178,10 @@
                 grav: d.grav != null && isFinite(+d.grav) ? Math.max(0, Math.min(1, +d.grav)) : PROJ_DEFAULTS.grav,
                 life: d.life != null && isFinite(+d.life) ? Math.max(0.2, Math.min(60, +d.life)) : PROJ_DEFAULTS.life,
                 breaks: d.breaks != null ? !!d.breaks : PROJ_DEFAULTS.breaks, hurts: d.hurts != null ? !!d.hurts : PROJ_DEFAULTS.hurts };
+    if (d.missile){ out.missile = true; out.blast = d.blast != null ? Math.max(10, Math.min(200, +d.blast)) : 44; }
     return out;
   }
-  function packProjDef(d){ return { name: d.name, art: { w: d.art.w, h: d.art.h }, skin: packSkin(d.skin), hitbox: d.hitbox, speed: d.speed, grav: d.grav, life: d.life, breaks: d.breaks, hurts: d.hurts }; }
+  function packProjDef(d){ return { name: d.name, art: { w: d.art.w, h: d.art.h }, skin: packSkin(d.skin), hitbox: d.hitbox, speed: d.speed, grav: d.grav, life: d.life, breaks: d.breaks, hurts: d.hurts, missile: d.missile || undefined, blast: d.missile ? d.blast : undefined }; }
   var SKIN_STATES = {
     eye:      [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"move", label:"Moving", emoji:"🏃" }, { id:"action", label:"Action", emoji:"⚡" }],
     creature: [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"move", label:"Moving", emoji:"🏃" }, { id:"attack", label:"Attack", emoji:"💢" }, { id:"die", label:"Death", emoji:"💀" }, { id:"action", label:"Action", emoji:"⚡" }],
@@ -3303,8 +3325,8 @@
     if (matOf(currentTool) && matOf(currentTool).isMask){ currentTool = "move"; canvas.dataset.tool = "move"; }
     renderSelBar();
   }
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter", gun:"Launcher", projsensor:"Projectile sensor", speech:"Speech bubble", destroyer:"Destroyer", sound:"Sound", gate:"Gate", spot:"Spotlight" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter", gun:"gun", projsensor:"projsensor", speech:"speech", destroyer:"destroyer", sound:"sound", gate:"gate", spot:"spot" };
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter", gun:"Launcher", projsensor:"Projectile sensor", speech:"Speech bubble", destroyer:"Destroyer", sound:"Sound", gate:"Gate", spot:"Spotlight", rocket:"Rocket" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter", gun:"gun", projsensor:"projsensor", speech:"speech", destroyer:"destroyer", sound:"sound", gate:"gate", spot:"spot", rocket:"rocket" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   // the sticker in hand: a saved drawing to place copies of; the size and turn it goes on at
   var stickerPick = null, stickerSize = parseFloat(localStorage.getItem("pg_sticker_size") || "120") || 120, stickerRot = 0;
@@ -3427,7 +3449,7 @@
     if (kind === "gun"){
       /* The launcher powerup. `mode`: bullet, custom (a drawn projectile,
          captured in `ammoDef`), object (saved pieces in `emit`), ray. */
-      g.mode = extra.mode === "ray" || extra.mode === "custom" || extra.mode === "object" ? extra.mode : "bullet";
+      g.mode = extra.mode === "ray" || extra.mode === "custom" || extra.mode === "object" || extra.mode === "missile" ? extra.mode : "bullet";
       g.ammoDef = extra.ammo ? normalizeProjDef(extra.ammo) : null;
       g.emit = normalizeEmit(extra.emit);
       g.speed = extra.speed != null ? Math.max(50, Math.min(3000, +extra.speed)) : 900;
@@ -3503,6 +3525,16 @@
       g.target = extra.target != null ? Math.max(1, Math.min(9999, +extra.target | 0)) : 3;
       g.count = 0; g.wasOn = false; g.inputReset = null; g.wasReset = false;
       g.visible = extra.visible != null ? !!extra.visible : false;
+    }
+    if (kind === "rocket"){
+      /* LBP's rocket: stuck to a thing, it pushes the thing — `angle`
+         degrees round from straight up in the host's frame is the way it
+         pushes, `strength` in gravities (1: it lifts its own weight and a
+         half). Wired, while the signal is on; unwired, always the world
+         runs. Off-centre, it turns the thing as well, as a real one would. */
+      g.angle = extra.angle != null && isFinite(+extra.angle) ? +extra.angle : 0;
+      g.strength = extra.strength != null ? Math.max(0.1, Math.min(4, +extra.strength)) : 1;
+      g.visible = extra.visible != null ? !!extra.visible : true;
     }
     if (kind === "spot"){
       /* A spotlight: a cone of light from its spot, `angle` degrees round
@@ -3720,9 +3752,9 @@
     });
   }
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter" || t.kind === "speech" || t.kind === "destroyer" || t.kind === "sound" || t.kind === "gate" || t.kind === "spot"); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter" || t.kind === "speech" || t.kind === "destroyer" || t.kind === "sound" || t.kind === "gate" || t.kind === "spot" || t.kind === "rocket"); }
   function hasResetPort(t){ return !!t && (t.kind === "timer" || t.kind === "counter"); }
-  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun" && g.kind !== "speech" && g.kind !== "destroyer" && g.kind !== "sound" && g.kind !== "spot"; }
+  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun" && g.kind !== "speech" && g.kind !== "destroyer" && g.kind !== "sound" && g.kind !== "spot" && g.kind !== "rocket"; }
   function addWire(from, to, port){
     if (!from || !to || from === to) return false;
     port = port === "reset" && hasResetPort(to) ? "reset" : "in";
@@ -3909,6 +3941,17 @@
         g.wasOn = cOn;
         g.out = g.count >= g.target ? 1 : 0;
       }
+      if (g.kind === "rocket"){
+        var rOn = g.input != null ? g.input > 0 : true, rb = g.obj && g.obj.body;
+        g.firing = rOn && !!rb && !rb.isStatic && !g.obj.decorative;
+        if (g.firing){
+          var rha = rb.angle, rdir = rha + (g.angle - 90) * Math.PI / 180;
+          var gsc2 = engine.gravity.scale != null ? engine.gravity.scale : 0.001, gmag = Math.hypot(engine.gravity.x, engine.gravity.y) || 1;
+          var F = rb.mass * gmag * gsc2 * 1.5 * g.strength;
+          Body.applyForce(rb, g.pos, { x: Math.cos(rdir) * F, y: Math.sin(rdir) * F });
+          if (runner.steps % 3 === 0) puff(g.pos.x - Math.cos(rdir) * 10, g.pos.y - Math.sin(rdir) * 10, 2, { color: runner.steps % 6 ? "#F2B705" : "#F27E42", speed: 2.2, g: 0, r: 2.6, life: 14, dir: { x: -Math.cos(rdir), y: -Math.sin(rdir) } });
+        }
+      }
       if (g.kind === "speech"){
         var near = !!player && dist(g.pos, player.position) < g.radius;
         var want = g.input != null ? g.input > 0 : near;
@@ -4023,6 +4066,50 @@
     impactsSeen++; lastImpactAt = { x: x, y: y };
     sprites.push({ x: x, y: y, vx: 0, vy: 0, gr: 0, age: 0, life: lifeFrames, size: Math.max(def.art.w, def.art.h) * 1.3, rot: angle, vrot: 0, g: null, frames: frames, layer: layer != null ? layer : MID_LAYER, t0: performance.now(), noFade: true });
   }
+  /* Where a missile lands: a hole the size of its blast punched out of
+     soft material on what it hit (in Play — Build's snapshot has the wall
+     whole again), a scorch mark on hard material, sparks, a shake, and
+     a shove to anything loose within three blasts. */
+  var scorchesSeen = 0, holesSeen = 0;
+  function scorchDrawing(){
+    var pts = [];
+    for (var i = 0; i < 14; i++){ var a = i / 14 * Math.PI * 2, r = 0.34 + 0.12 * Math.sin(i * 2.7); pts.push(0.5 + r * Math.cos(a), 0.5 + r * Math.sin(a)); }
+    return [{ c: "#2B1B12", w: 0, f: true, a: 0.75, p: pts }, { c: "#111111", w: 0, f: true, a: 0.7, p: circlePts(10).map(function(v){ return 0.5 + (v - 0.5) * 0.45; }) }];
+  }
+  function missileBang(o, obj, at){
+    var R = (o.projectile.def.blast || 44);
+    puff(at.x, at.y, 22, { color:"#F2B705", speed:4.5, g:0.08, r:3.2, shape:"spark", life:30 });
+    puff(at.x, at.y, 10, { color:"#8B8374", speed:2, g:0.02, r:4, life:40 });
+    shake(8); sfx("zap");
+    // the shove
+    objects.forEach(function(q){
+      if (q === o || !q.body || q.body.isStatic || q.decorative || q.projectile) return;
+      var dx = q.body.position.x - at.x, dy = q.body.position.y - at.y, d = Math.hypot(dx, dy) || 1;
+      if (d > R * 3) return;
+      var k = 9 * (1 - d / (R * 3));
+      Body.setVelocity(q.body, { x: q.body.velocity.x + dx / d * k, y: q.body.velocity.y + dy / d * k - k * 0.3 });
+    });
+    if (player){ var pdx = player.position.x - at.x, pdy = player.position.y - at.y, pd = Math.hypot(pdx, pdy) || 1; if (pd < R * 3){ var pk = 7 * (1 - pd / (R * 3)); Body.setVelocity(player, { x: player.velocity.x + pdx / pd * pk, y: player.velocity.y + pdy / pd * pk - pk * 0.3 }); } }
+    if (!obj || !obj.body || mode !== "play" || objects.indexOf(obj) < 0) return;
+    // what it hit: the piece under the point says whether it is soft
+    var lp = worldPtToLocal(obj, at.x, at.y), matKey = null;
+    for (var i = 0; i < obj.pieces.length; i++) if (pgContains(obj.pieces[i].poly, lp.x, lp.y)){ matKey = obj.pieces[i].m; break; }
+    if (!matKey){ var best = Infinity; for (var j = 0; j < obj.pieces.length; j++){ var bb = pgBounds(obj.pieces[j].poly); if (!bb) continue; var cx = Math.max(bb.x, Math.min(bb.x + bb.w, lp.x)), cy = Math.max(bb.y, Math.min(bb.y + bb.h, lp.y)), dd = Math.hypot(cx - lp.x, cy - lp.y); if (dd < best){ best = dd; matKey = obj.pieces[j].m; } } }
+    if (matKey && missileSoft(matKey)){
+      // a hole, in the host's own frame
+      var hole = pgTransform([[circleRing(0, 0, R, 0.7)]], -obj.body.angle, 0, 0);
+      hole = pgTranslate(hole, lp.x, lp.y);
+      if (subLocalPoly(obj, hole, GEOM_TOL)){
+        holesSeen++;
+        if (!obj.pieces.length) removeObject(obj);
+        else { rebuildFromPieces(obj); if (objects.indexOf(obj) >= 0 && countIslands(obj) > 1) splitObject(obj); }
+      }
+    } else {
+      // hard: a scorch, a sticker that rides the thing and is trimmed to it
+      var sc = addGadget("sticker", obj, { x: at.x, y: at.y }, { skin: { states: { sticker: [scorchDrawing()] }, fps: { sticker: 1 } }, size: R * 2.2, rot: Math.random() * Math.PI * 2, visible: true });
+      if (sc){ sc.scorch = true; scorchesSeen++; }
+    }
+  }
   function projectileHit(o, other, supports){
     var pj = o.projectile; if (!pj || pj.hit) return;
     var po = other.parent || other, obj = po.plugin && po.plugin.obj;
@@ -4032,6 +4119,7 @@
     if (pj.breaks) pj.hit = true;
     var at = supports && supports.length && supports[0] ? supports[0] : o.body.position;
     if (pj.breaks) spawnImpact(pj.def, at.x, at.y, o.body.angle, o.layer);
+    if (pj.def && pj.def.missile && pj.breaks) missileBang(o, obj, at);
     if (obj){
       gadgets.forEach(function(g){
         if (g.kind === "projsensor" && g.obj === obj) projSensorHit(g, pj.name || "Projectile", at, o.body.velocity);
@@ -4107,7 +4195,7 @@
       if (ob){ ob.emitted = { by: "gun", at: now }; refreshObjectPhysics(ob); attachSavedGadgets(playerGun.obj, ob, obAt); var vv = playerGun.speed / STEPS_PER_SEC; Body.setVelocity(ob.body, { x: Math.cos(ang) * vv, y: Math.sin(ang) * vv }); }
       sfx("shape");
     } else {
-      var def = playerGun.mode === "custom" && playerGun.def ? playerGun.def : BULLET_DEF;
+      var def = playerGun.mode === "custom" && playerGun.def ? playerGun.def : (playerGun.mode === "missile" ? normalizeProjDef(MISSILE_DEF) : BULLET_DEF);
       spawnProjectile(def, muzzle.x, muzzle.y, ang, { owner: "player", speed: playerGun.speed, grav: playerGun.flight.grav, life: playerGun.flight.life, breaks: playerGun.flight.breaks, hurts: playerGun.flight.hurts });
       sfx("tick");
     }
@@ -4131,7 +4219,7 @@
     if (mode !== "play" || !playerGun) return;
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    var txt = "🔫 " + (playerGun.mode === "ray" ? "Ray" : (playerGun.mode === "object" && playerGun.obj ? playerGun.obj.name : (playerGun.def ? playerGun.def.name : "Bullet"))) + (playerGun.ammo > 0 ? " · " + playerGun.left + " left" : "");
+    var txt = "🔫 " + (playerGun.mode === "ray" ? "Ray" : (playerGun.mode === "missile" ? "Missile" : (playerGun.mode === "object" && playerGun.obj ? playerGun.obj.name : (playerGun.mode === "custom" && playerGun.def ? playerGun.def.name : "Bullet")))) + (playerGun.ammo > 0 ? " · " + playerGun.left + " left" : "");
     ctx.font = "bold 14px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "top";
     var w = ctx.measureText(txt).width;
     ctx.fillStyle = "rgba(43,27,18,0.75)"; ctx.fillRect(12, 98, w + 18, 26);   // under the score pill
@@ -5047,9 +5135,54 @@
     Body.setAngularVelocity(target, w);
     Body.setVelocity(target, { x: other.velocity.x - w * ry, y: other.velocity.y + w * rx });
   }
+  /* Nothing goes faster than the walls are thick or spins faster than
+     the solver can follow: every free body is capped at MAX_SPEED px a
+     step and MAX_SPIN rad a step, so a motor cannot fling a crate through
+     the level or a wheel tear itself apart. And a thing made of several
+     materials that is flung or spun past BREAK_SPEED / BREAK_SPIN comes
+     apart into its pieces — the glue lets go, as LBP's does when a
+     thing is hit too hard — with a puff, each piece keeping the motion.
+     Carson: "when things spin too fast or get hit too hard they break to
+     avoid breaking the game". A drawn thing, a creature and a projectile
+     never break; the player is capped only. */
+  var MAX_SPEED = 48, MAX_SPIN = 0.45, BREAK_SPEED = 34, BREAK_SPIN = 0.32, breaksSeen = 0;
+  function breakApart(o){
+    if (!o.body || o.pieces.length < 2 || objects.length + o.pieces.length > PLACED_CAP) return false;
+    var v = o.body.velocity, w = o.body.angularVelocity, layer = o.layer, made = [];
+    o.pieces.slice().forEach(function(pc){
+      var world = objToWorld(o, pc.poly);
+      var q = newObjectFromPoly(pc.m, world, layer);
+      if (q && q.body){ Body.setVelocity(q.body, { x: v.x * 0.7, y: v.y * 0.7 }); Body.setAngularVelocity(q.body, w * 0.5); made.push(q); }
+    });
+    if (!made.length) return false;
+    puff(o.body.position.x, o.body.position.y, 14, { color:"#8B8374", speed:2.4, g:0.06, r:3, life:28 });
+    sfx("delete"); breaksSeen++;
+    removeObject(o);
+    return true;
+  }
+  function objectCanBreak(o){
+    if (!o.body || o.body.isStatic || o.decorative || o.projectile || o.pieces.length < 2) return false;
+    for (var i = 0; i < gadgets.length; i++){ var g = gadgets[i]; if (g.obj === o && (g.kind === "creature" || g.kind === "anim" || g.kind === "eye")) return false; }
+    return true;
+  }
   onStep("beforeUpdate", function(){
     if (player) keepInside(player);
     for (var ki = 0; ki < objects.length; ki++) if (objects[ki].body) keepInside(objects[ki].body);
+    if (runner.enabled){
+      var toBreak = null;
+      for (var ci = 0; ci < objects.length; ci++){
+        var cb = objects[ci].body; if (!cb || cb.isStatic) continue;
+        var sp = Math.hypot(cb.velocity.x, cb.velocity.y), spin = Math.abs(cb.angularVelocity);
+        if ((sp > BREAK_SPEED || spin > BREAK_SPIN) && objectCanBreak(objects[ci])){ (toBreak = toBreak || []).push(objects[ci]); continue; }
+        if (sp > MAX_SPEED) Body.setVelocity(cb, { x: cb.velocity.x / sp * MAX_SPEED, y: cb.velocity.y / sp * MAX_SPEED });
+        if (spin > MAX_SPIN) Body.setAngularVelocity(cb, Math.sign(cb.angularVelocity) * MAX_SPIN);
+      }
+      if (toBreak) toBreak.forEach(breakApart);
+      if (player){
+        var psp = Math.hypot(player.velocity.x, player.velocity.y);
+        if (psp > MAX_SPEED) Body.setVelocity(player, { x: player.velocity.x / psp * MAX_SPEED, y: player.velocity.y / psp * MAX_SPEED });
+      }
+    }
     if (!runner.enabled) return;
     var dt = stepSeconds();
     for (var i = 0; i < bolts.length; i++){
@@ -6383,6 +6516,42 @@
     });
   });
 
+  /* Crushed. Squeezed between two things, or ending up inside one, the
+     character dies — in Play, and in Build too when the world runs
+     (Carson: "even in create mode"). The measure is how deep a solid
+     overlaps the body: `Query.collides` gives each contact's depth, and
+     when the deepest is past CRUSH_FRAC of the body's narrow side for
+     CRUSH_STEPS steps in a row it is a crush, not a graze — a landing
+     dents a body a pixel or two, a squeeze pushes right into it. Not
+     sensitive on purpose. Never while flying, hanging on a grab, or in
+     the grace after a respawn. */
+  var CRUSH_FRAC = 0.42, CRUSH_STEPS = 10, crushSteps = 0, crushesSeen = 0;
+  function crushCheck(){
+    if (!player || flying || !runner.enabled || grabConstraint || performance.now() < hazardSafeUntil){ crushSteps = 0; return; }
+    var solids = [], pb = player.bounds;
+    for (var i = 0; i < objects.length; i++){
+      var o = objects[i]; if (!o.body || o.decorative || o.projectile) continue;
+      if (objectWalkThrough(o)) continue;
+      var ob = o.body.bounds;
+      if (ob.max.x < pb.min.x || ob.min.x > pb.max.x || ob.max.y < pb.min.y || ob.min.y > pb.max.y) continue;
+      solids.push(o.body);
+    }
+    if (carried && carried.body) solids = solids.filter(function(b){ return b !== carried.body; });
+    var deepest = 0;
+    if (solids.length){
+      var hits = Query.collides(player, solids);
+      for (var h = 0; h < hits.length; h++) if (hits[h].depth > deepest) deepest = hits[h].depth;
+    }
+    var limit = Math.min(PW, PH) * CRUSH_FRAC;
+    crushSteps = deepest > limit ? crushSteps + 1 : 0;
+    if (crushSteps >= CRUSH_STEPS){
+      crushSteps = 0; crushesSeen++;
+      sfx("zap"); shake(10);
+      puff(player.position.x, player.position.y, 18, { color:"#E8567A", speed:3, g:0.06, r:2.6, shape:"spark", life:24 });
+      respawnPlayer("Squashed!");
+    }
+  }
+  onStep("afterUpdate", function(){ crushCheck(); });
   // A breath of invulnerability after respawning, so landing back on
   // top of whatever killed you can't put you straight into a loop.
   var hazardSafeUntil = 0;
@@ -8282,6 +8451,14 @@
       ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2); ctx.fillStyle = on ? sc : "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, 5, Math.PI * 0.75, Math.PI * 2.25); ctx.strokeStyle = "#F6ECD9"; ctx.lineWidth = 2; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI*2); ctx.fillStyle = sc; ctx.fill();
+    } else if (g.kind === "rocket"){
+      // a little rocket, its nose the way it pushes, lit while it fires
+      ctx.save(); ctx.rotate((g.angle || 0) * Math.PI / 180);
+      ctx.beginPath(); ctx.rect(-4, -6, 8, 14); ctx.fillStyle = "#8B8374"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-4, -6); ctx.lineTo(0, -13); ctx.lineTo(4, -6); ctx.closePath(); ctx.fillStyle = "#B3261E"; ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-4, 4); ctx.lineTo(-8, 10); ctx.lineTo(-4, 8); ctx.closePath(); ctx.moveTo(4, 4); ctx.lineTo(8, 10); ctx.lineTo(4, 8); ctx.closePath(); ctx.fillStyle = "#B3261E"; ctx.fill(); ctx.stroke();
+      if (g.firing){ ctx.beginPath(); ctx.moveTo(-3, 8); ctx.lineTo(0, 16 + Math.random() * 4); ctx.lineTo(3, 8); ctx.closePath(); ctx.fillStyle = "#F2B705"; ctx.fill(); }
+      ctx.restore();
     } else if (g.kind === "spot"){
       // a torch: a head in its colour, a beam mark
       ctx.beginPath(); ctx.rect(-4, -2, 8, 12); ctx.fillStyle = "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
@@ -10543,7 +10720,7 @@
                   note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
     logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["impact","💥","Impact sensor"],["projsensor","🎯","Projectile sensor"],["tag","🏷","Tag"],["tagsensor","📡","Tag sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["timer","⏱","Timer"],["counter","🔢","Counter"],["gate","🔀","Gate"],["changer","🌗","World changer"]],
                   note:"Put them on something. Right-click one and Connect it to a motor, a piston, a camera, a mover or a world changer — it drives that while it is on." },
-    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["spot","🔦","Spotlight"],["speech","💬","Speech bubble"],["destroyer","💣","Destroyer"],["sound","🔊","Sound"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
+    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["rocket","🚀","Rocket"],["spot","🔦","Spotlight"],["speech","💬","Speech bubble"],["destroyer","💣","Destroyer"],["sound","🔊","Sound"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
                   note:"A camera shows its shot while the player is in its zone. A mover carries an object along a line. A creature eye makes an object chase the player." }
   };
   function renderToolsTab(el, pageId){
@@ -13881,6 +14058,7 @@
     if (g.kind === "gun"){
       var gm = opSection("Fires");
       opBtn(gm, "• Bullet", "The plain bullet", function(){ pushUndo("changing a launcher"); g.mode = "bullet"; renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "bullet" ? " on" : ""));
+      opBtn(gm, "🚀 Missile", "Blows up where it lands: a hole in soft material, a scorch on hard", function(){ pushUndo("changing a launcher"); g.mode = "missile"; renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "missile" ? " on" : ""));
       opBtn(gm, "⚡ A ray", "Instant, straight to the first thing in the way", function(){ pushUndo("changing a launcher"); g.mode = "ray"; renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "ray" ? " on" : ""));
       (mySkins.projectile || []).forEach(function(pd){
         opBtn(gm, "🚀 " + pd.name, "A projectile you drew", function(){ pushUndo("changing a launcher"); g.mode = "custom"; g.ammoDef = normalizeProjDef(pd.data); renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "custom" && g.ammoDef && g.ammoDef.name === pd.name ? " on" : ""));
@@ -13889,7 +14067,7 @@
         opBtn(gm, "📦 " + sv.name, "Fires copies of this object", function(){ pushUndo("changing a launcher"); g.mode = "object"; g.emit = captureSavedObject(sv); renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "object" && g.emit && g.emit.name === sv.name ? " on" : ""));
       });
       if (!(mySkins.projectile || []).length){ var gn0 = document.createElement("div"); gn0.className = "noteText"; gn0.textContent = "Draw your own projectiles under Build → My Projectiles and they appear here."; gn0.style.flexBasis = "100%"; gm.appendChild(gn0); }
-      if (g.mode === "bullet" || g.mode === "custom") renderFlightRows(opSection("How it flies"), g, "changing a launcher");
+      if (g.mode === "bullet" || g.mode === "custom" || g.mode === "missile") renderFlightRows(opSection("How it flies"), g, "changing a launcher");
       var gs = opSection("How");
       slider(gs, "Speed", g.speed, 50, 1500, 10, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing a launcher");
       slider(gs, "Shots a second", g.rate, 0.5, 20, 0.5, function(v){ g.rate = v; }, function(v){ return (+v).toFixed(1); }, "changing a launcher");
@@ -13918,7 +14096,7 @@
       opBtn(psh, g.destroy ? "💥 That hit destroys the thing" : "🛡 The thing stays", "In Play only", function(){ pushUndo("changing a projectile sensor"); g.destroy = !g.destroy; renderSelBar(); sfx("tick"); }, "wide" + (g.destroy ? " on" : ""));
       var pso = opSection("Which projectiles");
       opBtn(pso, "Any", "", function(){ pushUndo("changing a projectile sensor"); g.only = null; renderSelBar(); sfx("tick"); }, !g.only ? "on" : "");
-      ["Bullet", "Ray"].concat((mySkins.projectile || []).map(function(pd){ return pd.name; })).forEach(function(nm){
+      ["Bullet", "Missile", "Ray"].concat((mySkins.projectile || []).map(function(pd){ return pd.name; })).forEach(function(nm){
         opBtn(pso, nm, "", function(){ pushUndo("changing a projectile sensor"); g.only = nm; renderSelBar(); sfx("tick"); }, g.only === nm ? "on" : "");
       });
       var psn = document.createElement("div"); psn.className = "noteText";
@@ -13940,7 +14118,7 @@
       });
       var en = document.createElement("div"); en.className = "noteText"; en.style.flexBasis = "100%";
       en.textContent = g.fireKind === "ray" ? "A ray: instant, straight to the first thing in its way, as far as its reach."
-                     : g.fireKind === "bullet" ? "The plain bullet."
+                     : g.fireKind === "bullet" ? (g.ammoDef && g.ammoDef.missile ? "The missile: it blows up where it lands — a hole in soft material, a scorch on hard." : "The plain bullet.")
                      : g.fireKind === "projectile" ? (g.ammoDef ? "Fires '" + g.ammoDef.name + "'." : "Pick a projectile you drew — Build → My Projectiles to draw one.")
                      : (g.emit ? "Fires copies of '" + g.emit.name + "'." : "Pick something from My Objects — right-click anything you build and Save it there.");
       eo.appendChild(en);
@@ -13950,6 +14128,10 @@
       if (g.fireKind === "projectile") (mySkins.projectile || []).forEach(function(pd){
         opBtn(eo, "🚀 " + pd.name, "Fire a projectile you drew", function(){ pushUndo("changing an emitter"); g.ammoDef = normalizeProjDef(pd.data); g.emit = null; renderSelBar(); sfx("tick"); }, "wide" + (g.ammoDef && g.ammoDef.name === pd.name ? " on" : ""));
       });
+      if (g.fireKind === "bullet"){
+        opBtn(eo, "• Bullet", "", function(){ pushUndo("changing an emitter"); g.ammoDef = normalizeProjDef(BULLET_DEF); g.emit = null; renderSelBar(); sfx("tick"); }, "wide" + (g.ammoDef && !g.ammoDef.missile ? " on" : ""));
+        opBtn(eo, "🚀 Missile", "Blows up where it lands", function(){ pushUndo("changing an emitter"); g.ammoDef = normalizeProjDef(MISSILE_DEF); g.emit = null; renderSelBar(); sfx("tick"); }, "wide" + (g.ammoDef && g.ammoDef.missile ? " on" : ""));
+      }
       if (g.fireKind === "ray") slider(eo, "Reach", g.reach, 100, 3000, 20, function(v){ g.reach = v; }, function(v){ return Math.round(v) + "px"; }, "changing an emitter");
       if (g.fireKind === "bullet" || g.fireKind === "projectile") renderFlightRows(opSection("How it flies"), g, "changing an emitter");
       var ef = opSection("How");
@@ -14014,6 +14196,15 @@
       cnote.textContent = "Each time its signal comes on it counts one; at the target its own output comes on and stays on. Reset from… puts it back to nought. Now at " + (g.count || 0) + ".";
       cnote.style.flexBasis = "100%"; opSection(null).appendChild(cnote);
       opBtn(opSection(null), "↺ Back to nought now", "", function(){ g.count = 0; renderSelBar(); sfx("tick"); }, "wide");
+    }
+    if (g.kind === "rocket"){
+      var rk = opSection("Push");
+      slider(rk, "Pushes", g.angle, -180, 180, 5, function(v){ g.angle = v; }, function(v){ return v === 0 ? "up" : (Math.abs(v) === 180 ? "down" : (v === 90 ? "right" : (v === -90 ? "left" : Math.round(v) + "°"))); }, "changing a rocket");
+      slider(rk, "Strength", g.strength, 0.1, 4, 0.1, function(v){ g.strength = v; }, function(v){ return (+v).toFixed(1) + "×"; }, "changing a rocket");
+      var rkn = document.createElement("div"); rkn.className = "noteText";
+      rkn.textContent = (g.obj && (g.obj.decorative || g.obj.body.isStatic) ? "The thing it sits on is " + (g.obj.decorative ? "on a layer with no physics" : "locked in place") + ", so it has nothing to push. " : "") +
+        "It pushes the thing it sits on the way it points, in the thing's own frame. 1× lifts its own weight and a half. Off the middle, it turns the thing too. " + (g.input != null ? "Wired: it fires while the signal is on." : "Wire a switch to it to fire it on demand; unwired, it fires whenever the world runs.");
+      rkn.style.flexBasis = "100%"; opSection(null).appendChild(rkn);
     }
     if (g.kind === "spot"){
       var spc = opSection("Colour");

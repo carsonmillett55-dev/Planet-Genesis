@@ -447,6 +447,24 @@ still open.
   them, so placing, emitting or firing it gives you the whole thing: an
   emitter that spawns drawn creatures.
 
+### Carson's list of 2026-09-12 — DONE the same day
+
+Fixes: slider ranges sized to what people do; the Mover's second click (any
+tool, and the box can start the choosing again); the Play-zoom slider no
+longer slides out from under the cursor; lights glow in daylight, reach with
+their size, light the shape at night, show while painted, and a **Spotlight**
+tool shines a cone; custom projectiles are a look, an Impact drawing and a
+hitbox — how they fly is set on the launcher or emitter; the emitter's box
+starts with what kind of thing it fires (object, bullet, projectile, ray);
+the projectile sensor fires on every Nth hit, for a named projectile, in a
+box round it or on painted spots, and can destroy its host.
+
+Additions: Ctrl+Z pauses Build first; **Rockets**; the **Missile** (a hole
+in soft material, a scorch on metal); things flung or spun too hard come
+apart, and nothing outruns the walls; the character is squashed between two
+things or inside one, in Play and in a running Build; the map's right button
+puts the character there.
+
 ### Editor conveniences — DONE 2026-09-12
 
 - **Play from here** — Play starting where you are working, not at the

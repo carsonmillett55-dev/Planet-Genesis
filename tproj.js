@@ -280,6 +280,46 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const psF = dataP.gadgets.filter(g => g.kind === 'projsensor')[0];
   ok('the level file carries the sensor\'s settings', psF && psF.destroy === true && psF.hits === 1 && psF.useSpots === false && psF.weak, psF && [psF.destroy, psF.hits, !!psF.weak]);
 
+  console.log('');
+  console.log('== the missile: a hole in soft material, a scorch on metal, nothing in Build ==');
+  await range();
+  await rect('wood', 1, X+100, Y-100, X+140, Y+100);   // a wooden post in front of the metal wall
+  await lockAll();
+  const bangs0 = await p.evaluate(() => window.__pg.bangs());
+  await emitterOn(X-340, Y-170, { fireKind: 'bullet', angle: 90, speed: 800, pgrav: 0, freq: 0.4, maxAlive: 4 });
+  await p.evaluate(id => { window.__pg.gadgetSet(id, {}); }, (await kinds('objemitter'))[0].id);
+  await p.evaluate(() => { const g = window.__pg.gadgets().filter(g => g.kind === 'objemitter')[0]; window.__pg.emitterUseMissile(g.id); });
+  ok('the emitter can fire missiles', (await G('objemitter')).ammoName === 'Missile');
+  // aimed at the wooden post's top part: it is at Y-100..Y+100 and the emitter fires at Y-170 — lower the aim a touch
+  await p.evaluate(id => window.__pg.gadgetSet(id, { angle: 100 }), (await G('objemitter')).id);
+  const woodArea0 = await p.evaluate(() => { const o = window.__pg.objects().filter(o => o.pieces[0].m === 'wood' && o.body.bounds.min.x > 400 && o.body.bounds.max.y > 1800 && o.body.bounds.max.y < 2100)[0]; return o ? Math.abs(window.__pg.stats().filter(s => s.id === o.id)[0].area) : null; });
+  await play(); await standAt(X-380, Y+60); await p.waitForTimeout(1400);
+  const bangs1 = await p.evaluate(() => window.__pg.bangs());
+  ok('a missile into the wooden post punches a hole', bangs1.holes > bangs0.holes, bangs1);
+  await build();
+  const bangsB = await p.evaluate(() => window.__pg.bangs());
+  ok('Build has the post whole again', (await p.evaluate(() => window.__pg.objects().filter(o => o.pieces[0].m === 'wood').length)) >= 3);
+  // now the metal wall: no hole, a scorch
+  await p.evaluate(() => { const o = window.__pg.objects().filter(o => o.pieces[0].m === 'wood' && o.body.bounds.min.x > 400 && o.body.bounds.max.y > 1800 && o.body.bounds.max.y < 2100)[0]; if (o){ window.__pg.select(o); window.__pg.deleteSel(); window.__pg.deselect(); } });
+  await p.evaluate(id => window.__pg.gadgetSet(id, { angle: 90 }), (await G('objemitter')).id);
+  await play(); await standAt(X-380, Y+60); await p.waitForTimeout(1400);
+  const bangs2 = await p.evaluate(() => window.__pg.bangs());
+  ok('a missile into the metal wall leaves a scorch and no hole', bangs2.scorches > bangs1.scorches && bangs2.holes === bangs1.holes && (await p.evaluate(() => window.__pg.scorches())) >= 1, { bangs1, bangs2 });
+  await build();
+  ok('and the scorch is gone with Play', (await p.evaluate(() => window.__pg.scorches())) === 0);
+  // the launcher fires missiles too
+  await range();
+  await lockAll();
+  const gunM = await place('gun', X-100, Y+40);
+  await p.evaluate(id => window.__pg.gadgetSet(id, { mode: 'missile' }), gunM.id);
+  await play(); await standAt(X-100, Y+60); await p.waitForTimeout(300);
+  const armedM = await p.evaluate(() => window.__pg.gun());
+  ok('the launcher arms you with missiles', !!armedM && armedM.mode === 'missile', armedM);
+  await p.evaluate(([x,y]) => window.__pg.fire(x,y), [X+320, Y-100]); await p.waitForTimeout(100);
+  const pfM = await p.evaluate(() => window.__pg.projFlight());
+  ok('and what it fires is a missile', pfM.length >= 1 && pfM[0].name === 'Missile', pfM);
+  await build();
+
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs : 'none');
   await b.close();
