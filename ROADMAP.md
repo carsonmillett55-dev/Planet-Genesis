@@ -432,17 +432,17 @@ Minigame keep their rules so they play right when players can join.
 
 **Still to do, in order** — see Part E for what needs a backend:
 
-1. **Local players first.** Several characters on one machine — gamepads
-   and a second set of keys — before anything online (a controller drives
-   the one character now, 2026-09-12): the same bodies,
-   inputs and cameras are what online play will drive later. The single
-   `player` and its thirty-odd globals become `players[]`; sensors, buttons,
-   creatures and the crush read "any player"; each player has their own
-   grab, gun, lives and character look.
-2. **The camera for a group**: follow the lead (the one furthest ahead, or
-   the first), the others pulled along — a player left off screen pops into
-   a bubble that floats to the lead and is popped with a press (Carson's
-   Mario mechanic); or a camera that frames everyone (Versus).
+1. **Local players first.** DONE 2026-09-12 — several characters on one
+   machine: the keyboard and the first pad are player one, every further
+   pad joins with Start as its own character (up to four), each with
+   their own grab, gun and footing; sensors, buttons, creatures, the fan,
+   the goal and the crush see all of them. Not yet: a second set of keys,
+   emotes and the launcher's ammo readout for pad players.
+2. **The camera for a group**: DONE 2026-09-12 for the platformer — the
+   camera follows player one, and a player left off the screen (or who
+   dies) goes into a bubble that floats back to them and pops (Carson's
+   Mario mechanic; jump hurries it). Still to do: a camera that frames
+   everyone, for Versus.
 3. **Versus rules**: several start points, knockouts counted per player,
    friendly fire for launchers, the winner named.
 4. **Online**: rooms, joining, the level sent to everyone — Part E.

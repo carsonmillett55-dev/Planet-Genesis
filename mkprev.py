@@ -10,7 +10,7 @@ s = re.sub(r'<link[^>]*fonts\.(googleapis|gstatic)\.com[^>]*>', '', s)
 # shipping file has no such switch: it is rewritten into the preview only.
 WORLD_LINE = 'var WORLD_W = 19200, WORLD_H = 9600;'
 assert WORLD_LINE in s, 'the world size line moved'
-s = s.replace('var pads = navigator.getGamepads ? navigator.getGamepads() : null;', 'var pads = window.__pgFakePad !== undefined ? [window.__pgFakePad] : (navigator.getGamepads ? navigator.getGamepads() : null);')   # the suites plant a pad
+s = s.replace('var pads = navigator.getGamepads ? navigator.getGamepads() : null;', 'var pads = window.__pgFakePads ? window.__pgFakePads : (window.__pgFakePad !== undefined ? [window.__pgFakePad] : (navigator.getGamepads ? navigator.getGamepads() : null));')   # the suites plant a pad, or several
 s = s.replace(WORLD_LINE, "var WORLD_W = +localStorage.getItem('pg_test_world_w') || 19200, WORLD_H = +localStorage.getItem('pg_test_world_h') || 9600;")
 HOOK = """
   window.__pg = {
@@ -40,6 +40,12 @@ HOOK = """
     saveThing: function(id, name){ var g = gadgetById(id); if (!g) return false; if (!mySkins[g.kind]) mySkins[g.kind] = []; mySkins[g.kind].push({ id: "s" + Date.now(), name: name, data: packDrawnThing(g) }); persistMySkins(); return true; },
     placeSaved: function(kind, entryId){ var e = (mySkins[kind] || []).find(function(x){ return x.id === entryId; }); if (!e) return false; placePreset = { kind: kind, entry: e }; currentTool = kind; canvas.dataset.tool = kind; return true; },
     playHere: function(){ playFromHere(); return mode; },
+    players: function(){ return players.map(function(P){ var b = P === me ? player : P.player; return { id: P.id, slot: P.slot, pad: P.pad, keyboard: P.keyboard, bound: P === me, x: b ? b.position.x : null, y: b ? b.position.y : null, bubble: P.bubble ? { x: P.bubble.x, y: P.bubble.y } : null, flying: P === me ? flying : P.flying, grounded: P === me ? grounded : P.grounded, armed: !!(P === me ? playerGun : P.playerGun), color: P === me ? charColor : P.charColor, scale: P === me ? charScale : P.charScale, carrying: !!(P === me ? carried : P.carried), hanging: !!(P === me ? grabConstraint : P.grabConstraint) }; }); },
+    fakePads: function(list){ window.__pgFakePads = list; },
+    addPlayer: function(pad){ var P = addPlayer(pad); return P ? P.id : null; },
+    removePlayer: function(i){ if (players[i]) removePlayer(players[i]); return players.length; },
+    playerTo2: function(i, x, y){ withPlayer(players[i], function(){ Body.setPosition(player, { x: x, y: y }); Body.setVelocity(player, { x: 0, y: 0 }); }); },
+    bubble: function(i){ withPlayer(players[i], function(){ bubbleUp(); }); return !!players[i].bubble; },
     padState: function(){ return { held: padHeld, seen: padSeen, aim: gunAim, lastShot: gunLastShot, now: performance.now(), mode: mode, armed: !!playerGun, input: { left: input.left, right: input.right, up: input.up, down: input.down, sprint: input.sprint } }; },
     fakePad: function(gp){ window.__pgFakePad = gp; },
     levelType: function(v){ if (v) worldSettings.levelType = v; return worldSettings.levelType; },
