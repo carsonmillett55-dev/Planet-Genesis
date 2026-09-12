@@ -141,7 +141,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   console.log('== it survives being used ==');
   await makeAndOpen('light');
   await p.evaluate(() => {
-    var sl = document.querySelector('#objPanel input[type=range]');
+    var sl = Array.from(document.querySelectorAll('#objPanel input[type=range]')).find(function(i){ return /Glow/.test(i.parentNode.textContent) || /Glow/.test(i.parentNode.parentNode.textContent); });   // the Glow slider, not Opacity above it
     sl.value = 4; sl.dispatchEvent(new Event('input', {bubbles:true}));
   });
   await p.waitForTimeout(200);

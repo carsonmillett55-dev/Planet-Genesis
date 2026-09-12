@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` | Playwright suites, 802 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` | Playwright suites, 813 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 802 checks + checkgeom, in order
+npm test                   # all 813 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -65,10 +65,10 @@ node tmover.js             # 22 — the Mover: two-click placing, once and bounc
 node tworld.js             # 22 — the Water sensor (touching, not a pool above; on Front), and the World changer's light and water, wired, latched, saved
 node tcreature.js          # 32 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, painted weak spot and danger, colour, a Back-layer creature, save/load
 node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
-node tstudio.js            # 61 — the studio: strokes, undo/redo, the tools, frames, playback, no rig; the brush ring, filled shapes, nudge and flip, the Settings card's keys; the character's size and drawn hitbox
+node tstudio.js            # 71 — the studio: strokes, undo/redo, the tools, frames, playback, no rig; the brush ring, filled shapes, nudge and flip, the Settings card's keys; the character's size and drawn hitbox
 node tfill.js              # 14 — the fill: a closed outline fills with material or water; open space, material, a gap and an island
 node tfan.js               # 9 — the Fan: lifts the player and a loose crate, hovers in reach, wired on/off, saved
-node tskins.js             # 69 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
+node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -1023,6 +1023,22 @@ outline shows while dragging (`ceShape`); symmetry mirrors it. Also
 scale it about its centre (`ceScaleFrame`) — all through
 `ceBeginChange`/`ceEndChange`, so each is one undo.
 
+**The bucket** (🪣 Fill, F): `ceBucketFill` floods a raster of the
+drawing (`CE_FILL_RES` 256 on the long side) out from the click over
+pixels of the seed's kind — empty (alpha under 150, so the fill tucks
+under a line's soft edge with no seam) or near the seed's colour — and
+traces the region's outline back into a filled shape: cell edges walked
+with the fill on the right (an outer ring clockwise, a hole the other
+way), straight runs merged, one Chaikin pass to take the stairs off
+diagonals; the biggest loop is the outline, the rest are holes. A filled
+shape may now carry holes — `{f:true, p, h:[ring…]}`, painted even-odd,
+and `drawingToPoly` builds the Poly with them — so a fill round an
+island leaves the island, and a click on a colour recolours that area.
+With the eraser it clears the area (`c:null`), and the shape tools can
+erase too now (`ceDoAction` no longer forces a colour for them). No
+brush ring in fill mode. Carson: "add the fill tool to the character,
+creature, material and particle editors" — one studio, so all of them.
+
 **The colour wheel is a labelled button**, not a bare swatch: `.cePickWrap`
 wraps the native colour input in "🎨 Colour wheel — any colour" with a
 conic-gradient ring, so it reads as the place to get any colour.
@@ -1089,6 +1105,18 @@ the shape's centroid, so the picture stays where it was drawn around the
 new body. Nothing drawn (or a sliver under 8px) is the rounded box it
 always was, its chamfer scaled with the size. `Body.setInertia(Infinity)`
 as before, so a drawn shape never tumbles.
+
+**With no hitbox drawn, the body is the drawing.** `buildPlayerBody`
+takes `charHit` if there is one, else the Idle frame itself (`charMode`
+not preset), through `charBodyPoly` — `drawingToPoly` cached by the
+drawing's revision, size and which drawing (a crouch rebuilds the body,
+and a hundred strokes are a hundred capsule unions) — so a character
+drawn as a diagonal stick is a stick to the world, not the box round
+it. Carson: "draw a massive diagonal line, the hitbox is huge". Nothing
+drawn at all is still the rounded box. And every hitbox step — the
+character's, a creature's, an object's — has **✨ Use my drawing as the
+hitbox** (`subject.useDrawingAsHitbox`): the Idle drawing copied across
+in the hitbox colour, one undo.
 
 **A compound player collides by its parts.** Matter reports a compound's
 pairs at the part level — `pair.bodyA` is the convex piece that touched,

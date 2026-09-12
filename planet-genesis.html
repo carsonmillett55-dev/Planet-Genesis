@@ -1647,14 +1647,20 @@
       c2d.globalCompositeOperation = s.c ? "source-over" : "destination-out";
       c2d.globalAlpha = s.a != null ? s.a : 1;
       if (s.f){
-        // a filled shape: the points are its outline
+        // a filled shape: the points are its outline, `h` any holes in it (a bucket fill round an island)
         if (pts.length < 6) continue;
         c2d.fillStyle = s.c || "#000";
         c2d.beginPath();
         c2d.moveTo(pts[0]*w, pts[1]*h);
         for (var q = 2; q < pts.length; q += 2) c2d.lineTo(pts[q]*w, pts[q+1]*h);
         c2d.closePath();
-        c2d.fill();
+        if (s.h) for (var hi = 0; hi < s.h.length; hi++){
+          var hr = s.h[hi]; if (!hr || hr.length < 6) continue;
+          c2d.moveTo(hr[0]*w, hr[1]*h);
+          for (var hq = 2; hq < hr.length; hq += 2) c2d.lineTo(hr[hq]*w, hr[hq+1]*h);
+          c2d.closePath();
+        }
+        c2d.fill(s.h && s.h.length ? "evenodd" : "nonzero");
         continue;
       }
       c2d.strokeStyle = s.c || "#000";
@@ -2895,11 +2901,17 @@
       var st = strokes[i], pts = st.p;
       if (!pts || pts.length < 2) continue;
       if (st.f){
-        // a filled shape is its own polygon, exactly
+        // a filled shape is its own polygon, exactly — holes and all
         if (pts.length < 6) continue;
-        var ring = [];
+        var ring = [], fpoly = [];
         for (var fq = 0; fq < pts.length; fq += 2) ring.push([(pts[fq] - 0.5) * w, (pts[fq+1] - 0.5) * h]);
-        var fshape = pgClean([[ring]], tol);
+        fpoly.push(ring);
+        if (st.h) for (var fh = 0; fh < st.h.length; fh++){
+          var hrr = st.h[fh], hring = []; if (!hrr || hrr.length < 6) continue;
+          for (var hq2 = 0; hq2 < hrr.length; hq2 += 2) hring.push([(hrr[hq2] - 0.5) * w, (hrr[hq2+1] - 0.5) * h]);
+          fpoly.push(hring);
+        }
+        var fshape = pgClean([fpoly], tol);
         if (!fshape.length) continue;
         acc = st.c ? (acc.length ? pgUnion(acc, fshape, tol) : fshape) : (acc.length ? pgDiff(acc, fshape, tol) : acc);
         continue;
@@ -5033,10 +5045,23 @@
      `setCrouch` checks with a probe body before swapping. */
   var CROUCH_K = 0.6, crouchK = 1, crouching = false, sliding = false, slideUntil = 0, slideDir = 0, slideV = 0;
   var SLIDE_MS = 480, SLIDE_DECAY = 0.988;
+  // the polygon a drawing makes, cached: a crouch rebuilds the body, and a
+  // drawing of a hundred strokes is a hundred capsule unions
+  var charBodyCache = { key: null, poly: [] };
+  function charBodyPoly(src, artW, artH){
+    if (!src || !drawingHasArt(src)) return [];
+    var key = (src._rev || 0) + ":" + src.length + ":" + artW + "x" + artH + ":" + (src === charHit ? "hit" : "art");
+    if (charBodyCache.key !== key){ charBodyCache.key = key; charBodyCache.poly = drawingToPoly(src, artW, artH, 1.0); }
+    return charBodyCache.poly;
+  }
   function buildPlayerBody(sp){
     var opts = { friction:0.02, frictionAir:0.01, restitution:0, density:0.006, label:"player", collisionFilter: playerFilter() };
     var artW = Math.round(CHAR_BASE_W * charScale), artH = Math.round(CHAR_BASE_H * charScale);
-    var poly = drawingHasArt(charHit) ? drawingToPoly(charHit, artW, artH, 1.0) : [];
+    // the drawn hitbox if there is one; otherwise the drawing itself — a
+    // character drawn as a stick is a stick to the world, not the box
+    // round it. Carson: "draw a massive diagonal line, the hitbox is huge"
+    var src = drawingHasArt(charHit) ? charHit : (charMode !== "preset" ? pickCharFrame("idle", 0) : null);
+    var poly = charBodyPoly(src, artW, artH);
     if (poly.length && crouchK !== 1) poly = pgClean(pgScale(poly, 1, crouchK, 0, artH/2), 1.4);   // toward the feet
     if (poly.length){
       // the biggest island only — a body has to be one piece
@@ -9121,8 +9146,8 @@
   var ceCursor = null;             // where the pointer is over the stage, in drawing fractions, for the brush ring
   /* The studio's keys, rebindable from its own Keys panel. Undo/redo and
      copy/paste stay on Ctrl as every program has them. */
-  var CE_KEY_DEFAULTS = { brush:"b", eraser:"e", line:"l", pick:"i", rect:"r", ellipse:"c", lasso:"k", symmetry:"x", onion:"o", guides:"g", smaller:"[", bigger:"]", play:"p", resetView:"0", flipH:"m", flipV:"v" };
-  var CE_KEY_LABELS = { brush:"Brush", eraser:"Eraser", line:"Line", pick:"Eyedropper", rect:"Filled box", ellipse:"Filled oval", lasso:"Lasso fill", symmetry:"Symmetry", onion:"Onion skin", guides:"Guides", smaller:"Smaller brush", bigger:"Bigger brush", play:"Play / pause", resetView:"Zoom to 1:1", flipH:"Mirror", flipV:"Flip upside down" };
+  var CE_KEY_DEFAULTS = { brush:"b", eraser:"e", line:"l", pick:"i", rect:"r", ellipse:"c", lasso:"k", fill:"f", symmetry:"x", onion:"o", guides:"g", smaller:"[", bigger:"]", play:"p", resetView:"0", flipH:"m", flipV:"v" };
+  var CE_KEY_LABELS = { brush:"Brush", eraser:"Eraser", line:"Line", pick:"Eyedropper", fill:"Fill (bucket)", rect:"Filled box", ellipse:"Filled oval", lasso:"Lasso fill", symmetry:"Symmetry", onion:"Onion skin", guides:"Guides", smaller:"Smaller brush", bigger:"Bigger brush", play:"Play / pause", resetView:"Zoom to 1:1", flipH:"Mirror", flipV:"Flip upside down" };
   var ceKeys = {};
   try { ceKeys = JSON.parse(localStorage.getItem("pg_ce_keys") || "{}"); } catch(e){ ceKeys = {}; }
   Object.keys(CE_KEY_DEFAULTS).forEach(function(k){ if (typeof ceKeys[k] !== "string") ceKeys[k] = CE_KEY_DEFAULTS[k]; });
@@ -9163,7 +9188,7 @@
       persist: function(){ persistCharSprites(); persistCharFrameCounts(); persistCharFps(); persistCharHit(); },
       hint: function(){
         if (pmEditState === "size") return "How big you are, in your level as Play shows it. Slide the height and watch.";
-        if (pmEditState === "hitbox") return "Draw your hitbox — the part of you that touches things. Leave it empty for the rounded box.";
+        if (pmEditState === "hitbox") return "Draw your hitbox — the part of you that touches things. Leave it empty and your drawing itself is the hitbox (or the rounded box, with nothing drawn).";
         return charMode === "simple" ? "One look for your character." : "A pose per state, as many frames as you like. Ctrl+Z undoes, Ctrl+Y redoes.";
       },
       modes: function(){ return [["simple","Simple"],["animated","Animated"]]; },
@@ -9238,6 +9263,7 @@
         if (drawingHasArt(charHit) && pmEditState !== "size"){ pctx.save(); pctx.globalAlpha = 0.5; pctx.drawImage(drawingCanvas(charHit, pw*2, ph*2), x0, y0, pw, ph); pctx.restore(); }
         pctx.restore();
       },
+      useDrawingAsHitbox: function(){ var idle = pickCharFrame("idle", 0); if (!idle) return false; charHit = idle.map(function(st){ var c = JSON.parse(JSON.stringify(st)); c.c = CHAR_STEP_HIT.color; return c; }); touchDrawing(charHit); return true; },
       onClose: function(){ persistCharHit(); respawnSameSpot(); }
     };
     return sub;
@@ -9362,6 +9388,7 @@
         if (!stepOf(pmEditState)) return firstStep;            // from any look state, on to the first step
         return i + 1 < ids.length ? ids[i + 1] : null;         // then step by step; null means done
       },
+      useDrawingAsHitbox: function(){ var idle = skinFrame(g.skin, "idle", 0, false); if (!idle || !drawingHasArt(idle)) return false; g.hitbox = idle.map(function(st){ var c = JSON.parse(JSON.stringify(st)); c.c = "#4FA9D6"; return c; }); touchDrawing(g.hitbox); return true; },
       extraRight: function(el){ ceSkinExtras(el, g); },
       onClose: function(){ if (host){ host.studioHold = false; } applyDrawnSteps(g); if (host && host.body && objects.indexOf(host) >= 0) refreshObjectPhysics(host); renderSelBar(); }
     };
@@ -9595,7 +9622,7 @@
       ceCtx.restore();
     }
     // the brush, where the pointer is: exactly what a dab would cover
-    if (ceCursor && ceTool !== "pick"){
+    if (ceCursor && ceTool !== "pick" && ceTool !== "fill"){
       var cx = v.x + ceCursor.x * v.w, cy = v.y + ceCursor.y * v.h;
       var r = Math.max(1.5, ceBrushW * v.h / 2);
       ceCtx.save();
@@ -9618,6 +9645,100 @@
     }
     ceRefreshPreview();
     ceRefreshFrameStrip();
+  }
+
+  /* -- the bucket --
+     A flood fill on a raster of the drawing (CE_FILL_RES on the long side),
+     out from the click over pixels of the same kind — empty, or near the
+     seed's colour — and its outline traced back into a filled shape: the
+     region's boundary walked cell edge by cell edge (filled cells on the
+     right, so an outer ring comes out clockwise and a hole the other way),
+     straight runs merged, one Chaikin pass to take the stairs off the
+     diagonals. The biggest loop is the outline, the rest are holes, and
+     the shape goes on as {f:true, p, h} — exact in the raster, in the
+     colour, or as an eraser with c:null. */
+  var CE_FILL_RES = 256;
+  function ceBucketFill(fx, fy){
+    var d = ceTargetDrawing(), asp = ceAspect();
+    var W = asp >= 1 ? CE_FILL_RES : Math.round(CE_FILL_RES * asp), H = asp >= 1 ? Math.round(CE_FILL_RES / asp) : CE_FILL_RES;
+    W = Math.max(8, W); H = Math.max(8, H);
+    var cv = drawingCanvas(d, W, H), px = cv.getContext("2d").getImageData(0, 0, W, H).data;
+    var sx = Math.min(W - 1, Math.max(0, Math.floor(fx * W))), sy = Math.min(H - 1, Math.max(0, Math.floor(fy * H)));
+    // "empty" reaches into a line's soft edge (up to ~60% cover), so the fill tucks under the outline with no seam
+    var si = (sy * W + sx) * 4, seedEmpty = px[si + 3] < 150, sr = px[si], sg = px[si + 1], sb = px[si + 2];
+    var same = function(i){
+      var a = px[i + 3];
+      if (seedEmpty) return a < 150;
+      if (a < 60) return false;
+      return Math.abs(px[i] - sr) + Math.abs(px[i + 1] - sg) + Math.abs(px[i + 2] - sb) < 90;
+    };
+    var mask = new Uint8Array(W * H), stack = [sy * W + sx], n = 0;
+    mask[sy * W + sx] = 1;
+    while (stack.length){
+      var c = stack.pop(), cx = c % W, cy = (c / W) | 0; n++;
+      var nb = [c - 1, c + 1, c - W, c + W], ok = [cx > 0, cx < W - 1, cy > 0, cy < H - 1];
+      for (var k = 0; k < 4; k++){ if (!ok[k]) continue; var q = nb[k]; if (mask[q] || !same(q * 4)) continue; mask[q] = 1; stack.push(q); }
+    }
+    if (n < 2){ showToast("Nothing to fill there."); return; }
+    // the edges of the filled region, directed with the fill on the right
+    var segs = {}, key = function(x, y){ return x + "," + y; };
+    var add = function(x0, y0, x1, y1){ var k0 = key(x0, y0); (segs[k0] = segs[k0] || []).push([x1, y1]); };
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++){
+      if (!mask[y * W + x]) continue;
+      if (y === 0 || !mask[(y - 1) * W + x]) add(x, y, x + 1, y);           // top: left to right
+      if (x === W - 1 || !mask[y * W + x + 1]) add(x + 1, y, x + 1, y + 1);   // right: down
+      if (y === H - 1 || !mask[(y + 1) * W + x]) add(x + 1, y + 1, x, y + 1); // bottom: right to left
+      if (x === 0 || !mask[y * W + x - 1]) add(x, y + 1, x, y);               // left: up
+    }
+    var loops = [], starts = Object.keys(segs);
+    for (var si2 = 0; si2 < starts.length; si2++){
+      var k0 = starts[si2];
+      while (segs[k0] && segs[k0].length){
+        var loop = [], cur = k0, guard = 0;
+        var pt0 = k0.split(",").map(Number); loop.push(pt0);
+        while (guard++ < W * H * 4){
+          var outs = segs[cur]; if (!outs || !outs.length) break;
+          var nx = outs.pop(); loop.push(nx);
+          cur = key(nx[0], nx[1]);
+          if (cur === k0) break;
+        }
+        if (loop.length > 3) loops.push(loop);
+      }
+    }
+    if (!loops.length){ showToast("Nothing to fill there."); return; }
+    var simplify = function(loop){
+      // drop the closing point, merge straight runs
+      if (loop.length > 1 && loop[0][0] === loop[loop.length - 1][0] && loop[0][1] === loop[loop.length - 1][1]) loop.pop();
+      var out = [];
+      for (var i = 0; i < loop.length; i++){
+        var a = loop[(i + loop.length - 1) % loop.length], b = loop[i], c2 = loop[(i + 1) % loop.length];
+        if ((b[0] - a[0]) * (c2[1] - b[1]) - (b[1] - a[1]) * (c2[0] - b[0]) === 0) continue;   // straight on
+        out.push(b);
+      }
+      // one Chaikin pass: the stairs on a diagonal become a slope
+      var sm = [];
+      for (var j = 0; j < out.length; j++){
+        var p0 = out[j], p1 = out[(j + 1) % out.length];
+        sm.push([p0[0] * 0.75 + p1[0] * 0.25, p0[1] * 0.75 + p1[1] * 0.25], [p0[0] * 0.25 + p1[0] * 0.75, p0[1] * 0.25 + p1[1] * 0.75]);
+      }
+      var flat = [];
+      for (var m = 0; m < sm.length; m++) flat.push(+(sm[m][0] / W).toFixed(4), +(sm[m][1] / H).toFixed(4));
+      return flat;
+    };
+    var area = function(loop){ var a = 0; for (var i = 0; i < loop.length; i++){ var p0 = loop[i], p1 = loop[(i + 1) % loop.length]; a += p0[0] * p1[1] - p1[0] * p0[1]; } return Math.abs(a); };
+    loops.sort(function(a, b){ return area(b) - area(a); });
+    var outer = simplify(loops[0]), holes = [];
+    for (var hi2 = 1; hi2 < loops.length; hi2++){ var hs = simplify(loops[hi2]); if (hs.length >= 6) holes.push(hs); }
+    var mc = ceSubject.isMask && ceSubject.isMask(pmEditState) ? ceSubject.maskColor(pmEditState) : null;
+    var col = mc && pmPaintColor !== null ? mc : pmPaintColor;
+    var shape = { c: col, w: 0, f: true, p: outer };
+    if (holes.length) shape.h = holes;
+    if (ceOpacity < 0.999 && col) shape.a = ceOpacity;
+    ceBeginChange();
+    d.push(shape);
+    if (ceSymmetry){ var mir = { c: col, w: 0, f: true, p: outer.map(function(v, i){ return i % 2 === 0 ? 1 - v : v; }) }; if (holes.length) mir.h = holes.map(function(hr){ return hr.map(function(v, i){ return i % 2 === 0 ? 1 - v : v; }); }); if (shape.a) mir.a = shape.a; d.push(mir); }
+    touchDrawing(d); ceEndChange(); cePersist(); ceRedraw();
+    if (col) ceRecordColour(col);
   }
 
   // -- painting --
@@ -9666,6 +9787,11 @@
       var c = cePickAt(e);
       if (c){ pmPaintColor = c; ceRecordColour(c); ceTool = "brush"; renderCharEditorPanels(); showToast("Picked " + c); }
       else showToast("Nothing there to pick.");
+      return;
+    }
+    if (ceTool === "fill"){
+      var nf = ceNorm(e);
+      if (nf.x >= 0 && nf.x <= 1 && nf.y >= 0 && nf.y <= 1) ceBucketFill(nf.x, nf.y);
       return;
     }
     ceCanvas.setPointerCapture(e.pointerId);
@@ -9928,7 +10054,7 @@
     var wantColour = function(){ if (pmPaintColor === null) pmPaintColor = ceRecent[0] || CHAR_PALETTE[0]; };
     if (act === "brush"){ ceTool = "brush"; wantColour(); }
     else if (act === "eraser"){ ceTool = "brush"; pmPaintColor = null; }
-    else if (act === "line" || act === "pick" || act === "rect" || act === "ellipse" || act === "lasso"){ ceTool = ceTool === act ? "brush" : act; if (act !== "pick") wantColour(); }
+    else if (act === "line" || act === "pick" || act === "rect" || act === "ellipse" || act === "lasso" || act === "fill"){ ceTool = ceTool === act ? "brush" : act; }   // the eraser stays if it was picked: an erased box, oval, lasso or bucket clears that area
     else if (act === "symmetry") ceSymmetry = !ceSymmetry;
     else if (act === "onion") ceOnion = !ceOnion;
     else if (act === "guides") ceGuides = !ceGuides;
@@ -10037,6 +10163,16 @@
       var mn = document.createElement("div"); mn.className = "noteText";
       mn.textContent = "One drawing. Paint the area; the eraser takes it back off.";
       ceLeftEl.appendChild(mn);
+      if (pmEditState === "hitbox" && ceSubject.useDrawingAsHitbox){
+        // the exact shape of what was drawn, in one click
+        var ub = ceBtn("✨ Use my drawing as the hitbox", "", function(){
+          ceBeginChange();
+          if (!ceSubject.useDrawingAsHitbox()){ cePending = null; showToast("Draw the look first — there is nothing to copy yet."); return; }
+          ceEndChange(); cePersist(); renderCharEditorPanels(); ceLayout();
+        }, "Copies your Idle drawing here, so the hitbox is exactly what you drew");
+        ub.style.alignSelf = "flex-start";
+        ceLeftEl.appendChild(ub);
+      }
     }
     if (!maskStep && !sizeStep){
     ceH4("Frames — " + arr.length, ceLeftEl);
@@ -10110,6 +10246,7 @@
     tl.appendChild(ceChip("╱ Line", ceTool === "line", function(){ ceTool = "brush"; ceDoAction("line"); }, "Straight lines" + ceKeyTag("line") + " — or hold Shift while brushing"));
     tl.appendChild(ceChip("◌ Eraser", pmPaintColor === null && ceTool === "brush", function(){ ceDoAction("eraser"); }, "Rub out" + ceKeyTag("eraser")));
     tl.appendChild(ceChip("✦ Pick", ceTool === "pick", function(){ ceTool = "brush"; ceDoAction("pick"); }, "Pick a colour off the drawing" + ceKeyTag("pick")));
+    tl.appendChild(ceChip("🪣 Fill", ceTool === "fill", function(){ ceTool = "brush"; ceDoAction("fill"); }, "Click an area and it fills with the colour — up to the lines round it" + ceKeyTag("fill") + "; with the eraser it clears the area"));
     tl.appendChild(ceChip("▰ Box", ceTool === "rect", function(){ ceTool = "brush"; ceDoAction("rect"); }, "Drag out a filled box" + ceKeyTag("rect") + " — Shift for a square"));
     tl.appendChild(ceChip("⬬ Oval", ceTool === "ellipse", function(){ ceTool = "brush"; ceDoAction("ellipse"); }, "Drag out a filled oval" + ceKeyTag("ellipse") + " — Shift for a circle"));
     tl.appendChild(ceChip("ᘒ Lasso", ceTool === "lasso", function(){ ceTool = "brush"; ceDoAction("lasso"); }, "Draw round an area and it fills" + ceKeyTag("lasso")));

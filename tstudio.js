@@ -180,6 +180,41 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await st('close');
 
   console.log('');
+  console.log('== the bucket: fill an outline, fill round an island, recolour, erase ==');
+  await st('open'); await p.waitForTimeout(150);
+  await st('go', 'idle', 0); await st('click', 'Clear');
+  // a ring drawn with the oval tool twice: a big filled oval, then a smaller one erased out of it — a hoop with a hole
+  await st('setColor', '#2B6CB0');
+  await p.keyboard.press('c'); await stroke(0.15, 0.2, 0.85, 0.8);
+  await p.keyboard.press('e'); await p.keyboard.press('c'); await stroke(0.3, 0.35, 0.7, 0.65);
+  await p.keyboard.press('b'); await st('setColor', '#E8567A');
+  ok('F picks the bucket', (await p.keyboard.press('f'), (await where()).tool === 'fill'), (await where()).tool);
+  const rF = await st('canvasRect');
+  await p.mouse.click(rF.x + rF.w * 0.5, rF.y + rF.h * 0.5); await p.waitForTimeout(150);      // inside the hoop's hole
+  let dF = await drawing();
+  const last = dF[dF.length - 1];
+  ok('a click inside the hole fills it: a filled shape, in the colour', dF.length === 3 && last.f === true && last.c === '#E8567A', last && { f: last.f, c: last.c, n: last.p.length });
+  ok('that stays inside the hoop: its outline reaches no further than the hole', last.p.filter((v, i) => i % 2 === 0).every(x => x > 0.27 && x < 0.73), last.p.filter((v, i) => i % 2 === 0).sort()[0]);
+  await p.keyboard.press('Control+z'); await p.waitForTimeout(100);
+  ok('and it is one undo', (await drawing()).length === 2);
+  // outside the hoop: the rest of the box, with the hoop as a hole in it
+  await p.mouse.click(rF.x + rF.w * 0.05, rF.y + rF.h * 0.05); await p.waitForTimeout(150);
+  dF = await drawing(); const outerFill = dF[dF.length - 1];
+  ok('a click outside fills the rest of the box, with the hoop cut out as a hole', outerFill.f === true && Array.isArray(outerFill.h) && outerFill.h.length >= 1, outerFill && { h: outerFill.h && outerFill.h.length });
+  await p.keyboard.press('Control+z'); await p.waitForTimeout(100);
+  // on the hoop itself: it recolours the hoop
+  await p.mouse.click(rF.x + rF.w * 0.5, rF.y + rF.h * 0.24); await p.waitForTimeout(150);
+  dF = await drawing(); const recol = dF[dF.length - 1];
+  ok('a click on the blue hoop paints the hoop pink, hole and all', recol.f === true && recol.c === '#E8567A' && Array.isArray(recol.h) && recol.h.length === 1, recol && { c: recol.c, h: recol.h && recol.h.length });
+  // the eraser bucket clears an area
+  await p.keyboard.press('e'); await p.keyboard.press('f');
+  await p.mouse.click(rF.x + rF.w * 0.5, rF.y + rF.h * 0.24); await p.waitForTimeout(150);
+  dF = await drawing(); const er = dF[dF.length - 1];
+  ok('with the eraser, the bucket clears the area it is clicked on', er.f === true && er.c === null, er && { c: er.c, f: er.f });
+  await p.keyboard.press('b');
+  await st('close');
+
+  console.log('');
   console.log('== the size: twice the old by default, any size, and a drawn hitbox ==');
   await p.evaluate(() => { localStorage.clear(); localStorage.setItem('pg_test_real_size', '1'); }); await p.reload(); await p.waitForTimeout(1100);   // the suites pin the old size; this one wants the real default
   const sz = await p.evaluate(() => window.__pg.playerSize());
@@ -212,7 +247,18 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('with a drawn hitbox the character still jumps off the floor', y1 < y0 - 30, { before: y0, after: y1 });
   await p.evaluate(() => window.__pg.setCharHit([])); await p.waitForTimeout(100);
   const sz3 = await p.evaluate(() => window.__pg.playerSize());
-  ok('with no hitbox drawn it is the rounded box again', sz3.w === 60 && sz3.h === 84 && sz3.parts === 1, sz3);
+  ok('with no hitbox drawn the body is the drawing itself — the diagonal stroke, not the box round it', sz3.w < 58 && sz3.h < 82 && sz3.parts >= 2, sz3);
+  await st('open'); await p.waitForTimeout(150); await st('go', 'idle', 0); await st('click', 'Clear'); await st('close'); await p.waitForTimeout(150);
+  const sz4 = await p.evaluate(() => window.__pg.playerSize());
+  ok('and with nothing drawn at all, the rounded box', sz4.w === 60 && sz4.h === 84 && sz4.parts === 1, sz4);
+  // "use my drawing" on the hitbox step copies the look across
+  await st('open'); await p.waitForTimeout(150); await st('go', 'idle', 0); await st('setColor', '#E8567A'); await stroke(0.3, 0.5, 0.7, 0.5);
+  await st('go', 'hitbox', 0); await st('click', '✨ Use my drawing as the hitbox'); await p.waitForTimeout(100);
+  const hitCopy = await drawing();
+  ok('Use my drawing puts the look on the hitbox step, in the hitbox colour', hitCopy.length === 1 && hitCopy[0].c === '#4FA9D6' && Math.abs(hitCopy[0].p[1] - 0.5) < 0.01, hitCopy);
+  await p.keyboard.press('Control+z'); await p.waitForTimeout(100);
+  ok('and is one undo', (await drawing()).length === 0);
+  await st('close');
   // the frame strip keeps its size however full the left column is
   await st('open'); await p.waitForTimeout(150); await st('click', 'Animated'); await st('go', 'idle', 0); await p.waitForTimeout(100);
   const frH = await p.evaluate(() => { const f = document.querySelector('.ceFrameStrip .fr'); return f ? f.getBoundingClientRect().height : 0; });

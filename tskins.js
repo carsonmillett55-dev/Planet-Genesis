@@ -229,6 +229,10 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   fo = (await stats()).filter(o => o.id === fc.obj)[0];
   ok('while it is drawn on it neither falls nor walks after the player', Math.abs(fo.pos.x - (X+100)) < 2 && Math.abs(fo.pos.y - (Y-60)) < 2, fo.pos);
   await st('go', 'hitbox', 0);
+  await st('click', '✨ Use my drawing as the hitbox'); await p.waitForTimeout(100);
+  const copied = await st('drawing');
+  ok('Use my drawing copies the look onto the hitbox step, in the hitbox colour', copied.length === 1 && copied[0].c === '#4FA9D6', copied);
+  await st('click', 'Clear');
   await stroke(0.5, 0.2, 0.5, 0.8);
   ok('a hitbox stroke lands on the step', (await st('drawing')).length === 1);
   await p.keyboard.press('Control+z'); await p.waitForTimeout(80);
