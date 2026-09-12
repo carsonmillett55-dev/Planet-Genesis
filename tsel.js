@@ -455,6 +455,25 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(([x,y]) => window.__pg.glueAt(x,y), [GX+300, Y+10]);                // then the sponge
   ok('two Mid things glued become one object', (await p.evaluate(() => window.__pg.objects().length)) === gN0w - 1 && (await p.evaluate(() => window.__pg.objects().some(o => o.pieces.length === 2))), { n: await p.evaluate(() => window.__pg.objects().length), gN0w, objs: await p.evaluate(() => window.__pg.objects().map(o => [o.id, o.pieces.map(pc => pc.m), o.layer, Math.round(o.body.position.x), Math.round(o.body.position.y)])), toast: await p.evaluate(() => document.getElementById('toast').textContent), cr2, GX, Y });
   await p.keyboard.press('Escape');
+  // a mover on the Mid thing carries the Back thing glued to it
+  await p.evaluate(() => { window.__pg.setMode('build'); window.__pg.paused(true); window.__pg.clear(); window.__pg.starter(); window.__pg.setLayer(1); window.__pg.deselect(); window.__pg.setStick(true); window.__pg.setPaintMode('rect'); window.__pg.setTool('move'); });
+  await p.waitForTimeout(300);
+  await gRect('wood', 0, GX-50, Y-100, GX+350, Y-40);
+  await gRect('metal', 1, GX+110, Y-30, GX+190, Y+50);
+  const mvBack = await p.evaluate(() => window.__pg.objects().filter(o => o.layer === 0)[0].id), mvCrate = await p.evaluate(() => window.__pg.objects().filter(o => o.pieces[0].m === 'metal')[0].id);
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('glue'); });
+  await p.evaluate(([x,y]) => window.__pg.glueAt(x,y), [GX+150, Y+10]);
+  await p.evaluate(() => window.__pg.setLayer(0));
+  await p.evaluate(([x,y]) => window.__pg.glueAt(x,y), [GX, Y-70]);
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('mover'); });
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [GX+150, Y+10]);
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [GX+350, Y+10]);   // 200 to the right
+  await p.evaluate(() => { const g = window.__pg.gadgets().filter(g => g.kind === 'mover')[0]; window.__pg.gadgetSet(g.id, { speed: 400 }); window.__pg.setTool('move'); });
+  const mv0 = await p.evaluate(ids => ids.map(id => { const o = window.__pg.objects().filter(o => o.id === id)[0]; return o.body.position.x; }), [mvBack, mvCrate]);
+  await p.evaluate(() => { window.__pg.paused(false); window.__pg.setMode('play'); }); await p.waitForTimeout(900);
+  const mv1 = await p.evaluate(() => { const b = window.__pg.objects().filter(o => o.layer === 0)[0], c = window.__pg.objects().filter(o => o.pieces[0].m === 'metal')[0]; return [b.body.position.x, c.body.position.x]; });
+  ok('a mover on the Mid thing carries the Back thing glued to it, by the same amount', mv1[1] - mv0[1] > 150 && Math.abs((mv1[0] - mv0[0]) - (mv1[1] - mv0[1])) < 4, { mv0, mv1 });
+  await p.evaluate(() => { window.__pg.setMode('build'); window.__pg.paused(true); }); await p.waitForTimeout(200);
   ok('Esc puts the glue down', (await p.evaluate(() => window.__pg.tool ? window.__pg.tool() : null)) !== 'glue' && !(await p.evaluate(() => document.getElementById('game').classList.contains('glueMode'))));
 
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');

@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1147 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1148 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1147 checks + checkgeom, in order
+npm test                   # all 1148 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -50,7 +50,7 @@ Or one suite at a time:
 
 ```
 node regress.js            # 45 — geometry, save/load, play mode, loop and save safety, two tabs and the autosave, map edges, the big map and an old level's move to its bottom
-node tsel.js               # 68 — selection, marquee, group transforms, resize, detach, the number row, the transforms as keys, dragging with physics on, the marquee by material; glue across layers and on one layer
+node tsel.js               # 69 — selection, marquee, group transforms, resize, detach, the number row, the transforms as keys, dragging with physics on, the marquee by material; glue across layers and on one layer
 node tlayer.js             # 20 — layer accuracy, ranked picking, the hover label, peek, the middle button hiding one thing
 node tmat.js               # 33 — materials, colours, glass, light, opacity, a drawn material of your own
 node tlight.js             # 29 — lighting, shadows, glow; the day glow, reach by size, the Spotlight's cone, wired, saved
@@ -2387,8 +2387,12 @@ frees one (a group of one is no group). Glue is a tool on the Editing
 page (`currentTool === "glue"`, sticky until Esc or another tool) and
 still Tab held. Carson: "it pulled the thing from the back into the
 front layer instead of making them two glued objects in separate
-layers". Not done: a mover or piston on one member does not carry the
-others.
+layers". **Mates follow whatever drives one of them**: `glueFollow`, an
+`afterUpdate` step, carries every mate that did not move itself by the
+shift and turn of one that did (`_glueLast`, where each glued thing was
+last step) — so a mover or a stiff piston on the Mid thing takes the
+scenery glued to it along, while a dragged group, whose members all
+moved, is left alone.
 
 ## Selection, and what Del means
 

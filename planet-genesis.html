@@ -6591,7 +6591,40 @@
       respawnPlayer("Squashed!");
     }
   }
-  onStep("afterUpdate", function(){ crushCheck(); });
+  onStep("afterUpdate", function(){ crushCheck(); glueFollow(); });
+  /* Glue mates follow whatever moves one of them by hand — a mover, a
+     stiff piston, a creature driven along — the way a dragged group
+     already moves together. After each step, a member that moved since
+     the last step carries every mate that did not move itself by the
+     same shift and turn about its own centre. `_glueLast` is where each
+     glued thing was last step. */
+  function glueFollow(){
+    var i, o, moved = [];
+    for (i = 0; i < objects.length; i++){
+      o = objects[i];
+      if (!o.glue || !o.body) continue;
+      var b = o.body, L = o._glueLast;
+      if (L && (Math.abs(b.position.x - L.x) > 0.01 || Math.abs(b.position.y - L.y) > 0.01 || Math.abs(b.angle - L.a) > 1e-6)) moved.push(o);
+    }
+    var carried = {};
+    moved.forEach(function(src){
+      var L = src._glueLast, b = src.body, dx = b.position.x - L.x, dy = b.position.y - L.y, da = b.angle - L.a, ca = Math.cos(da), sa = Math.sin(da);
+      glueMates(src).forEach(function(m){
+        if (m === src || !m.body || carried[m.id] || moved.indexOf(m) >= 0) return;
+        var mb = m.body, rx = mb.position.x - L.x, ry = mb.position.y - L.y;
+        var nx = b.position.x + rx * ca - ry * sa, ny = b.position.y + rx * sa + ry * ca;
+        Body.setPosition(mb, { x: nx, y: ny });
+        if (da) Body.setAngle(mb, mb.angle + da);
+        Body.setVelocity(mb, { x: 0, y: 0 });
+        carried[m.id] = true;
+      });
+    });
+    for (i = 0; i < objects.length; i++){
+      o = objects[i];
+      if (!o.glue || !o.body){ if (o._glueLast) o._glueLast = null; continue; }
+      o._glueLast = { x: o.body.position.x, y: o.body.position.y, a: o.body.angle };
+    }
+  }
   // A breath of invulnerability after respawning, so landing back on
   // top of whatever killed you can't put you straight into a loop.
   var hazardSafeUntil = 0;
