@@ -276,7 +276,11 @@ Each is a new authoring mode. They share a pattern already proven twice in this
 codebase (the character creator, the level editor): **draw it, name it, save
 it, reuse it.**
 
-### Custom drawn materials
+### Custom drawn materials — DONE 2026-09-12
+
+Built: Build → Materials → My Materials → New. Draw one square tile in the studio, name it, and it is a material: the tile repeats across whatever you paint, turning with the object. Its own grip, bounce, weight, tile size, grabbable, deadly, floats — changing them changes what is already built. Saved inside any level that uses it, so it travels with the level.
+
+(The original note:)
 
 Carried over from the earlier near-term list, and the closest thing to a
 started feature: **the save schema already reserves `u:<id>` keys.** Needs a

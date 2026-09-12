@@ -1521,11 +1521,87 @@
   function matTint(key){ var c = (key||"").indexOf(":"); return c > 0 ? (parseInt(key.slice(c+1), 10) || 0) : 0; }
   function matKey(base, tint){ return tint ? (base + ":" + tint) : base; }
   var _matCache = {};
+  /* ---- Custom materials ---------------------------------------------
+     A material you drew: a square tile (a studio drawing) that repeats
+     across whatever is painted with it, and its own grip, bounce, weight,
+     grabbable, deadly, floats. Ids are "u_<n>" — no colon, so the tint
+     parser leaves them alone. `customMats` is everything this session
+     knows (this device's own, and any a loaded level carried); `myMats`
+     is the ones on this device's palette. A level file embeds the
+     definitions of the ones it uses (`materials`), registered before its
+     objects unpack, since an unknown material is dropped on load. */
+  var customMats = {}, myMats = [];
+  try { (JSON.parse(localStorage.getItem("pg_my_mats") || "[]") || []).forEach(function(d){ if (d && d.id) { customMats[d.id] = normalizeCustomMat(d); myMats.push(d.id); } }); } catch(e){ myMats = []; }
+  function normalizeCustomMat(d){
+    return { id: String(d.id), name: String(d.name || "My material").slice(0, 30),
+             tile: normalizeDrawing(d.tile, 10, 10), tilePx: Math.max(16, Math.min(400, +d.tilePx || 64)),
+             friction: Math.max(0, Math.min(1.5, +d.friction != null && isFinite(+d.friction) ? +d.friction : 0.8)),
+             restitution: Math.max(0, Math.min(1.2, +d.restitution != null && isFinite(+d.restitution) ? +d.restitution : 0.1)),
+             density: Math.max(0.0005, Math.min(0.05, +d.density != null && isFinite(+d.density) ? +d.density : 0.006)),
+             grabbable: !!d.grabbable, hazard: !!d.hazard, floats: !!d.floats };
+  }
+  function packCustomMat(d){ return { id: d.id, name: d.name, tile: d.tile, tilePx: d.tilePx, friction: d.friction, restitution: d.restitution, density: d.density, grabbable: d.grabbable, hazard: d.hazard, floats: d.floats }; }
+  function persistMyMats(){ try { localStorage.setItem("pg_my_mats", JSON.stringify(myMats.map(function(id){ return customMats[id]; }).filter(Boolean).map(packCustomMat))); } catch(e){ showToast("Couldn't save — storage is full."); } }
+  function registerCustomMat(d){
+    var def = normalizeCustomMat(d);
+    customMats[def.id] = def;
+    delete _matCache[def.id];
+    def._pattern = null; def._rec = null;
+    return def;
+  }
+  // the average colour of the tile, for the bevel and ink round a shape of it
+  function customMatColour(def){
+    var cv = drawingCanvas(def.tile, 32, 32), px = cv.getContext("2d").getImageData(0, 0, 32, 32).data, r = 0, g = 0, b = 0, n = 0;
+    for (var i = 0; i < px.length; i += 4){ if (px[i + 3] < 40) continue; r += px[i]; g += px[i + 1]; b += px[i + 2]; n++; }
+    if (!n) return "#A89F91";
+    var hx = function(v){ return ("0" + Math.round(v / n).toString(16)).slice(-2); };
+    return "#" + hx(r) + hx(g) + hx(b);
+  }
+  function customMatRec(id){
+    var def = customMats[id];
+    if (!def) return null;
+    if (def._rec) return def._rec;
+    var col = customMatColour(def);
+    def._rec = { label: def.name, color: col, dark: shadeHex(col, -0.36), friction: def.friction, restitution: def.restitution, density: def.density,
+                 grabbable: def.grabbable, hazard: def.hazard, floatForce: def.floats ? 2.1 : 0, custom: true, id: def.id, tile: def.tile, tilePx: def.tilePx };
+    return def._rec;
+  }
+  // the tile as a repeating pattern, in whatever frame the caller is drawing in
+  var _patCtx = null;
+  function customMatPattern(rec){
+    var def = customMats[rec.id];
+    if (!def) return null;
+    var key = (def.tile._rev || 0) + ":" + def.tilePx;
+    if (def._pattern && def._patKey === key) return def._pattern;
+    if (!_patCtx) _patCtx = document.createElement("canvas").getContext("2d");
+    var px = Math.max(16, Math.min(512, Math.round(def.tilePx * 2)));
+    var cv = drawingCanvas(def.tile, px, px);
+    // the pattern's own transform scales the raster to the tile's world size
+    var pat = _patCtx.createPattern(cv, "repeat");
+    if (pat && pat.setTransform && typeof DOMMatrix !== "undefined") pat.setTransform(new DOMMatrix([def.tilePx / px, 0, 0, def.tilePx / px, 0, 0]));
+    def._pattern = pat; def._patKey = key;
+    return pat;
+  }
+  // every object painted with this material re-reads it (a new tile, new props)
+  function customMatChanged(id){
+    var def = customMats[id]; if (!def) return;
+    def._rec = null; def._pattern = null; delete _matCache[id];
+    objects.forEach(function(o){
+      if (!o.pieces.some(function(pc){ return matBase(pc.m) === id; })) return;
+      o.geomRev = (o.geomRev || 0) + 1; o._paths = null;
+      refreshObjectPhysics(o);
+    });
+  }
+  function usedCustomMats(){
+    var out = {};
+    objects.forEach(function(o){ o.pieces.forEach(function(pc){ var b = matBase(pc.m); if (customMats[b]) out[b] = packCustomMat(customMats[b]); }); });
+    return out;
+  }
   function matOf(key){
     if (!key || typeof key !== "string") return null;
     if (_matCache.hasOwnProperty(key)) return _matCache[key];
     var base = matBase(key), tint = matTint(key);
-    var b = MATERIALS[base];
+    var b = MATERIALS[base] || customMatRec(base);
     if (!b){ _matCache[key] = null; return null; }
     if (!tint || tint < 1 || tint > MAT_COLORS.length){ _matCache[key] = b; return b; }
     var col = MAT_COLORS[tint-1], rec = {}, k;
@@ -2865,7 +2941,8 @@
     creature: [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"move", label:"Moving", emoji:"🏃" }, { id:"attack", label:"Attack", emoji:"💢" }, { id:"die", label:"Death", emoji:"💀" }, { id:"action", label:"Action", emoji:"⚡" }],
     anim:     [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"action", label:"Action", emoji:"⚡" }],
     emitter:  [{ id:"particle", label:"Particle", emoji:"✨" }],
-    sticker:  [{ id:"sticker", label:"Sticker", emoji:"🏷️" }]
+    sticker:  [{ id:"sticker", label:"Sticker", emoji:"🏷️" }],
+    material: [{ id:"tile", label:"Tile", emoji:"🧱" }]
   };
   /* The drawn steps after the look: the hitbox (physics), then for a
      creature its weak spot and its danger. Each is one drawing in the
@@ -2875,9 +2952,9 @@
   var SKIN_STEPS = {
     creature: [{ id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" }, { id:"weakD", label:"Weak spot", emoji:"🎯", mask:true, color:"#F2B705" }, { id:"dangerD", label:"Danger", emoji:"🔥", mask:true, color:"#E4574B" }],
     anim:     [{ id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" }],
-    eye: [], emitter: [], sticker: []
+    eye: [], emitter: [], sticker: [], material: []
   };
-  var SKIN_TITLE = { eye:"🐾 Creature", creature:"🐉 Custom creature", anim:"🎨 Custom object", emitter:"✨ Particle", sticker:"🏷️ Sticker" };
+  var SKIN_TITLE = { eye:"🐾 Creature", creature:"🐉 Custom creature", anim:"🎨 Custom object", emitter:"✨ Particle", sticker:"🏷️ Sticker", material:"🧱 Material" };
   var DRAWN_DEFAULT_SIZE = 120;   // the box a fresh drawn thing starts in, world px
   function newSkin(kind){
     var st = {}, fps = {};
@@ -6518,7 +6595,7 @@
     for (var i = 0; i < obj.pieces.length; i++){
       var pc = obj.pieces[i], mat = matOf(pc.m) || MATERIALS.wood;
       g.regions.push({ m: pc.m, color: mat.color, dark: mat.dark, warn: !!mat.warn,
-                       glass: !!mat.glass, glow: !!mat.emitter,
+                       glass: !!mat.glass, glow: !!mat.emitter, custom: mat.custom ? mat : null,
                        path: mpPath(pc.poly), box: pgBounds(pc.poly) });
     }
     g.box = objBoundsLocal(obj);
@@ -6598,6 +6675,12 @@
       c.globalAlpha = alpha * (reg.glass ? 0.4 : 1);
       c.fillStyle = reg.color;
       c.fill(reg.path);
+      if (reg.custom){
+        // a drawn material: its tile repeated across the region, in the
+        // object's own frame so it turns with the object
+        var pat = customMatPattern(reg.custom);
+        if (pat){ c.fillStyle = pat; c.fill(reg.path); }
+      }
       if (reg.glass) paintGlassSheen(c, reg, alpha);
       if (reg.glow){
         c.save();
@@ -8874,6 +8957,27 @@
     });
     el.appendChild(grid);
 
+    // the materials you drew
+    var mh = document.createElement("h3"); mh.textContent = "My Materials"; el.appendChild(mh);
+    var mgrid = document.createElement("div"); mgrid.className = "catalogGrid";
+    myMats.forEach(function(id){
+      var rec = matOf(id); if (!rec) return;
+      var chip = document.createElement("div"); chip.className = "chip" + (currentTool === id ? " active" : "");
+      var cv = document.createElement("canvas"); cv.width = 48; cv.height = 48; cv.className = "swatch";
+      cv.getContext("2d").drawImage(drawingCanvas(customMats[id].tile, 96, 96), 0, 0, 48, 48);
+      var lab = document.createElement("label"); lab.textContent = rec.label;
+      chip.appendChild(cv); chip.appendChild(lab);
+      chip.addEventListener("click", function(){ currentTool = id; canvas.dataset.tool = "wood"; renderPersonalMenu(); });
+      mgrid.appendChild(chip);
+    });
+    var newChip = document.createElement("div"); newChip.className = "chip";
+    newChip.innerHTML = '<div class="swatch" style="background:var(--paper);display:flex;align-items:center;justify-content:center;font-size:1rem">✏️</div><label>New</label>';
+    newChip.title = "Draw a new material: a tile that repeats across whatever you paint with it";
+    newChip.addEventListener("click", function(){ openMaterialDraft(); });
+    mgrid.appendChild(newChip);
+    el.appendChild(mgrid);
+    if (!myMats.length){ var mn0 = document.createElement("div"); mn0.className = "noteText"; mn0.textContent = "Draw a tile and it becomes a material of your own — with its own grip, bounce and weight."; el.appendChild(mn0); }
+
     if (isMaterialTool()){
       var isErase = false, isVac = false;
       var isFluid = !!matOf(currentTool).isFluid;
@@ -8885,7 +8989,8 @@
          different materials while you build — they sit beside each other
          and cut each other rather than merging — which is what lets you
          draw detail into a shape and still be able to pull it back out. */
-      if (!isErase && !isFluid){
+      if (matOf(currentTool).custom) renderCustomMatSettings(el, customMats[matOf(currentTool).id]);
+      if (!isErase && !isFluid && !matOf(currentTool).custom){
         var colLabel = document.createElement("div"); colLabel.className = "noteText";
         colLabel.textContent = "Colour — the same material in a different colour counts as a different material";
         el.appendChild(colLabel);
@@ -9083,6 +9188,54 @@
       });
       row.appendChild(thumb); row.appendChild(nm); row.appendChild(placeBtn); row.appendChild(delBtn);
       el.appendChild(row);
+    });
+  }
+  /* A drawn material's own settings, on the Materials page while it is the brush. */
+  function renderCustomMatSettings(el, def){
+    if (!def) return;
+    var h = document.createElement("h3"); h.textContent = def.name; el.appendChild(h);
+    var row = document.createElement("div"); row.className = "segRow";
+    var eb = document.createElement("button"); eb.textContent = "🎨 Edit the tile"; eb.addEventListener("click", function(){ openMaterialDraft(def); });
+    var fb = document.createElement("button"); fb.textContent = "✕ Forget"; fb.addEventListener("click", function(){ myMats = myMats.filter(function(x){ return x !== def.id; }); persistMyMats(); currentTool = "wood"; canvas.dataset.tool = "wood"; renderPersonalMenu(); showToast("Forgotten from your palette — anything already built with it keeps it."); });
+    row.appendChild(eb); row.appendChild(fb); el.appendChild(row);
+    var changed = function(){ customMatChanged(def.id); persistMyMats(); };
+    el.appendChild(sliderRow("Tile size", def.tilePx, 16, 400, 2, function(v){ def.tilePx = v; changed(); }, function(v){ return Math.round(v) + "px"; }));
+    el.appendChild(sliderRow("Grip", def.friction, 0, 1.5, 0.02, function(v){ def.friction = v; changed(); }, function(v){ return v < 0.06 ? "ice" : (v < 0.4 ? "slick" : (v < 0.85 ? "grippy" : "very grippy")); }));
+    el.appendChild(sliderRow("Bounce", def.restitution, 0, 1.2, 0.02, function(v){ def.restitution = v; changed(); }, function(v){ return Math.round(v * 100) + "%"; }));
+    el.appendChild(sliderRow("Weight", def.density, 0.0005, 0.05, 0.0005, function(v){ def.density = v; changed(); }, function(v){ return v < 0.002 ? "feather" : (v < 0.005 ? "light" : (v < 0.012 ? "medium" : (v < 0.025 ? "heavy" : "lead"))); }));
+    var tg = document.createElement("div"); tg.className = "segRow";
+    [["grabbable", "🤚 Grabbable"], ["hazard", "⚡ Deadly"], ["floats", "🎈 Floats"]].forEach(function(o){
+      var b = document.createElement("button"); b.textContent = o[1]; b.className = def[o[0]] ? "active" : "";
+      b.addEventListener("click", function(){ def[o[0]] = !def[o[0]]; changed(); sfx("click"); renderPersonalMenu(); });
+      tg.appendChild(b);
+    });
+    el.appendChild(tg);
+    var note = document.createElement("div"); note.className = "noteText";
+    note.textContent = "The tile repeats across whatever you paint. Anything already built with it changes too. It is saved inside any level that uses it.";
+    el.appendChild(note);
+  }
+  /* Draw a material's tile in the studio: a fresh one is named and added
+     to the palette when the studio closes; an existing one is re-tiled. */
+  function openMaterialDraft(def){
+    var draft = { id: def ? def.id : "draft", kind: "material", obj: null, art: null, skin: { states: { tile: [def ? def.tile : blankDrawing()] }, fps: { tile: 1 } }, draft: !def, matDef: def || null, layer: buildLayer, pos: { x: 0, y: 0 } };
+    pmEditState = "tile"; pmEditFrame = 0;
+    ceOpenWith(ceSkinSubject(draft));
+    ceZoom = 0.7;   // zoomed out a touch, so the faint neighbours round the tile are in view
+  }
+  function finishMaterialDraft(draft){
+    var tile = draft.skin.states.tile[0];
+    if (draft.matDef){
+      draft.matDef.tile = tile; touchDrawing(tile); customMatChanged(draft.matDef.id); persistMyMats(); renderPersonalMenu();
+      return;
+    }
+    if (!drawingHasArt(tile)){ showToast("Nothing drawn — no material made."); return; }
+    askName("Name your material", "Material " + (myMats.length + 1), function(name){
+      var id = "u_" + Date.now().toString(36);
+      var def = registerCustomMat({ id: id, name: name || "My material", tile: tile, tilePx: 64, friction: 0.8, restitution: 0.1, density: 0.006 });
+      myMats.push(id); persistMyMats();
+      currentTool = id; canvas.dataset.tool = "wood";
+      showToast("'" + def.name + "' is your brush now — paint with it.");
+      if (pmOpen) renderPersonalMenu();
     });
   }
   /* Stickers, LBP's: draw one, and it goes in My Stickers; pick one and
@@ -9482,6 +9635,7 @@
       hint: function(){
         if (kind === "emitter") return "Draw one particle. Several frames play over its life.";
         if (kind === "sticker") return "Draw the sticker. Anything left blank is see-through. Done keeps it in My Stickers and puts it in your hand.";
+        if (kind === "material") return "Draw one tile. It repeats edge to edge across whatever you paint with it — the faint copies round the edge show how it joins up.";
         if (pmEditState === "size") return "How big it is on the level. Set the width and height, then draw it in that space.";
         var d = stepOf(pmEditState);
         if (d){
@@ -9493,8 +9647,18 @@
         if (kind === "anim") return "Draw the object: Idle loops; a wire plays the Action. Then draw its hitbox.";
         return "Idle, Moving, and an Action a wire can play. The faint shape is the body — your drawing goes over it.";
       },
-      previewLabel: kind === "emitter" ? "One particle" : (kind === "sticker" ? "The sticker" : "On the level"),
+      previewLabel: kind === "emitter" ? "One particle" : (kind === "sticker" ? "The sticker" : (kind === "material" ? "Tiled" : "On the level")),
       backdrop: function(c2, w, h){
+        if (kind === "material"){
+          // the eight neighbours, faint: what the tile joins onto
+          var tile = g.skin.states.tile[0];
+          if (!drawingHasArt(tile)) return;
+          var cv = drawingCanvas(tile, Math.min(1024, Math.round(w)), Math.min(1024, Math.round(h)));
+          c2.save(); c2.globalAlpha = 0.28;
+          for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++){ if (!dx && !dy) continue; c2.drawImage(cv, dx * w, dy * h, w, h); }
+          c2.restore();
+          return;
+        }
         if (kind === "emitter") return;
         var d = stepOf(pmEditState);
         if (d){
@@ -9523,7 +9687,7 @@
       },
       useDrawingAsHitbox: function(){ var idle = skinFrame(g.skin, "idle", 0, false); if (!idle || !drawingHasArt(idle)) return false; g.hitbox = idle.map(function(st){ var c = JSON.parse(JSON.stringify(st)); c.c = "#4FA9D6"; return c; }); touchDrawing(g.hitbox); return true; },
       extraRight: function(el){ ceSkinExtras(el, g); },
-      onClose: function(){ if (g.draft){ finishStickerDraft(g); return; } if (host){ host.studioHold = false; } applyDrawnSteps(g); if (host && host.body && objects.indexOf(host) >= 0) refreshObjectPhysics(host); renderSelBar(); }
+      onClose: function(){ if (kind === "material"){ finishMaterialDraft(g); return; } if (g.draft){ finishStickerDraft(g); return; } if (host){ host.studioHold = false; } applyDrawnSteps(g); if (host && host.body && objects.indexOf(host) >= 0) refreshObjectPhysics(host); renderSelBar(); }
     };
     return sub;
   }
@@ -9574,6 +9738,7 @@
   try { mySkins = JSON.parse(localStorage.getItem("pg_my_skins") || "{}"); } catch(e){ mySkins = {}; }
   function persistMySkins(){ try { localStorage.setItem("pg_my_skins", JSON.stringify(mySkins, function(k, v){ return k === "skin" ? undefined : v; })); } catch(e){ showToast("Couldn't save — storage is full."); } }   // `skin` is a live unpacked copy, never stored twice
   function ceSkinExtras(el, g){
+    if (g.kind === "material") return;   // a material's palette is the Materials page
     var kind = g.kind, label = kind === "eye" || kind === "creature" ? "My Creatures" : (kind === "anim" ? "My Objects" : (kind === "sticker" ? "My Stickers" : "My Particles"));
     ceH4(label, el);
     el.appendChild(ceBtn("💾 Save this drawing", "", function(){
@@ -9602,7 +9767,7 @@
     // walk off after the player, and fall, while its picture was painted
     if (g.obj && g.obj.body && (g.kind === "creature" || g.kind === "anim")){ g.obj.studioHold = true; refreshObjectPhysics(g.obj); }
     var freshDrawn = (g.kind === "creature" || g.kind === "anim") && g.art && g.obj && !skinHasArt(g.skin);
-    if (step) pmEditState = step; else pmEditState = freshDrawn ? "size" : (g.kind === "sticker" ? "sticker" : (g.kind === "emitter" ? "particle" : "idle"));   // a fresh creature or object starts with its size
+    if (step) pmEditState = step; else pmEditState = freshDrawn ? "size" : (g.kind === "sticker" ? "sticker" : (g.kind === "material" ? "tile" : (g.kind === "emitter" ? "particle" : "idle")));   // a fresh creature or object starts with its size
     pmEditFrame = 0;
     ceOpenWith(ceSkinSubject(g));
   }
@@ -13662,7 +13827,8 @@
       bubbles: bubbles.map(function(b){ return { x:b.x, y:b.y }; }),
       objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps, links: linkSnaps,
       water: packWaterSparse(), waterCell: WATER_CELL, worldW: WORLD_W, worldH: WORLD_H,
-      world: packWorldSettings()
+      world: packWorldSettings(),
+      materials: usedCustomMats()
     };
   }
   /* A level built on a smaller map is placed at the bottom-left of this
@@ -13696,6 +13862,10 @@
     var version = +data.version || 0;
     var fileW = +data.worldW || OLD_WORLD_W, fileH = +data.worldH || OLD_WORLD_H;
     migrateWorldSize(data);
+    // the drawn materials it uses, before its objects need them
+    if (data.materials && typeof data.materials === "object"){
+      Object.keys(data.materials).forEach(function(id){ if (/^u_[A-Za-z0-9]+$/.test(id) && !customMats[id]) registerCustomMat(data.materials[id]); });
+    }
     if ((version === 2 || version === 3 || version === 4) && Array.isArray(data.objects)){
       beginBulk();
       loadBudget = MAX_LEVEL_CORNERS;

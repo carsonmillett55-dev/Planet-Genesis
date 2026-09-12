@@ -151,6 +151,41 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(d => window.__pg.load(d), saved); await p.waitForTimeout(200);
   ok('and it comes back', (await stats()).filter(o => o.alpha < 1).length === 2, (await stats()).map(o => o.alpha));
 
+  console.log('');
+  console.log('== a material of your own: a drawn tile with its own grip, bounce and weight ==');
+  await p.evaluate(() => { localStorage.removeItem('pg_my_mats'); window.__pg.clear(); window.__pg.starter(); window.__pg.setStick(true); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
+  await p.waitForTimeout(150);
+  const stU = (cmd, a, b2) => p.evaluate(([c, x, y]) => window.__pg.studio(c, x, y), [cmd, a, b2]);
+  ok('New material opens the studio on a square tile', await p.evaluate(() => window.__pg.matDraft()) && (await stU('where')).state === 'tile', await stU('where'));
+  await p.waitForTimeout(150);
+  const rU = await stU('canvasRect');
+  await stU('setColor', '#3E8E41');
+  await p.mouse.move(rU.x + rU.w * 0.1, rU.y + rU.h * 0.5); await p.mouse.down(); await p.mouse.move(rU.x + rU.w * 0.9, rU.y + rU.h * 0.5, { steps: 6 }); await p.mouse.up(); await p.waitForTimeout(80);
+  await stU('close'); await p.waitForTimeout(200);
+  ok('closing asks for a name', !(await p.evaluate(() => document.getElementById('nameOverlay').hidden)));
+  await p.evaluate(() => { document.getElementById('nameInput').value = 'Moss'; document.getElementById('nameOk').click(); }); await p.waitForTimeout(200);
+  const mm = await p.evaluate(() => window.__pg.myMats());
+  ok('and it is in My Materials', mm.length === 1 && mm[0].name === 'Moss' && /^u_/.test(mm[0].id), mm);
+  ok('and is the brush now', (await p.evaluate(() => window.__pg.tool())) === mm[0].id);
+  ok('its colour is the tile\'s own', /^#[0-9a-f]{6}$/i.test(await p.evaluate(id => window.__pg.matColour(id), mm[0].id)) && (await p.evaluate(id => window.__pg.matColour(id), mm[0].id)).toLowerCase() === '#3e8e41', await p.evaluate(id => window.__pg.matColour(id), mm[0].id));
+  await drag([[X, Y],[X+200, Y+80]]);
+  const made = (await stats()).filter(o => o.pos.y < 2300)[0];
+  ok('painting with it makes an object of it', made && made.pieces[0].indexOf(mm[0].id + ':') === 0, made && made.pieces);
+  const fr0 = await p.evaluate(id => window.__pg.objects().find(o => o.id === id).body.friction, made.id);
+  await p.evaluate(id => window.__pg.matSet(id, { friction: 0.02, hazard: true }), mm[0].id);
+  const fr1 = await p.evaluate(id => window.__pg.objects().find(o => o.id === id).body.friction, made.id);
+  ok('its grip is its own, and changing it changes what is already built', Math.abs(fr0 - 0.8) < 0.01 && Math.abs(fr1 - 0.02) < 0.01, { before: fr0, after: fr1 });
+  const svM = await p.evaluate(() => window.__pg.serialize('mat'));
+  ok('the level file carries the material itself', svM.materials && svM.materials[mm[0].id] && svM.materials[mm[0].id].tile.length === 1 && svM.materials[mm[0].id].hazard === true, svM.materials && Object.keys(svM.materials));
+  // another device, or this one after forgetting it: the level still has it
+  await p.evaluate(id => window.__pg.matForget(id), mm[0].id);
+  await p.reload(); await p.waitForTimeout(1100);
+  ok('forgotten and reloaded, the registry no longer knows it', !(await p.evaluate(id => window.__pg.matKnown(id), mm[0].id)));
+  await p.evaluate(d => window.__pg.load(d), svM); await p.waitForTimeout(300);
+  const backM = (await p.evaluate(() => window.__pg.stats())).filter(o => o.pos.y < 2300)[0];
+  ok('loading the level brings the material back with it, on its object', backM && backM.pieces[0].indexOf(mm[0].id + ':') === 0 && (await p.evaluate(id => window.__pg.matKnown(id), mm[0].id)), backM && backM.pieces);
+  ok('with the grip it was saved with', Math.abs((await p.evaluate(id => window.__pg.objects().find(o => o.id === id).body.friction, backM.id)) - 0.02) < 0.01);
+
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join('\n') : 'none');
   await b.close();

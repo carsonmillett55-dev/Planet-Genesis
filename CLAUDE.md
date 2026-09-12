@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` | Playwright suites, 827 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` | Playwright suites, 838 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 827 checks + checkgeom, in order
+npm test                   # all 838 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -52,7 +52,7 @@ Or one suite at a time:
 node regress.js            # 45 — geometry, save/load, play mode, loop and save safety, two tabs and the autosave, map edges, the big map and an old level's move to its bottom
 node tsel.js               # 52 — selection, marquee, group transforms, resize, detach, the number row, the transforms as keys, dragging with physics on
 node tlayer.js             # 17 — layer accuracy, ranked picking, the hover label, peek
-node tmat.js               # 22 — materials, colours, glass, light, opacity
+node tmat.js               # 33 — materials, colours, glass, light, opacity, a drawn material of your own
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 31 — the personal menu's sections, the Tools bag's four pages, the number keys, the gradient
@@ -284,6 +284,51 @@ something not moving. A static body with no `_original` is left alone.
 
 The buoyancy safety rail (2.5× own weight) scales with it, or a
 feather-light block could not float.
+
+## Custom materials
+
+A material you drew — the roadmap's custom drawn materials, and the
+"material editor" Carson asked the fill tool into. `customMats` (id →
+def: `name`, `tile` — a square studio drawing — `tilePx`, `friction`,
+`restitution`, `density`, `grabbable`, `hazard`, `floats`) is everything
+the session knows; `myMats` is the ids on this device's palette
+(`pg_my_mats`). Ids are `u_<n>` — **no colon**, so `matBase`/`matTint`
+leave them alone (the save schema's old `u:<id>` reservation would not
+have survived the tint parser). `matOf` falls through `MATERIALS[base]`
+to `customMatRec(base)`, a record shaped like a built-in material
+(`custom:true`, `id`, `tile`, `tilePx`; `color` is the tile's average,
+`dark` shaded from it; `floatForce` 2.1 when it floats), so every reader
+of `mat.friction`, `.hazard`, `.grabbable`, `.density` and `.floatForce`
+works unchanged.
+
+**Drawn**: `objectPaths` keeps the record on the region (`custom`) and
+`paintObjectPasses` fills the region with the average colour and then
+with the tile as a repeating pattern (`customMatPattern`: the tile
+rasterised at 2×, a `CanvasPattern` with a `DOMMatrix` scaling it to
+`tilePx` world px, cached per tile revision) — in the object's own frame,
+so the tile turns with the object; the bitmap cache bakes it like any
+fill. `customMatChanged(id)` drops the record and pattern, bumps
+`geomRev` on every object painted with it and refreshes its physics,
+so a slider on the Materials page changes what is already built.
+
+**Made**: the Materials page's **My Materials** grid (a tile thumbnail
+per material, and New) → `openMaterialDraft` opens the studio on a
+`material` subject (one square `tile` state, the backdrop drawing the
+eight neighbours faint, the view zoomed to 0.7 so they show); closing a
+fresh one asks for a name (`finishMaterialDraft`) and registers it, on
+the palette, as the brush. With one as the brush the page shows its
+settings (`renderCustomMatSettings`: Edit the tile, Forget, Tile size,
+Grip, Bounce, Weight, Grabbable / Deadly / Floats) instead of the colour
+row (a tile has its own colours; `MATERIALS[baseId]` would be undefined
+there anyway).
+
+**Saved inside the level**: `serializeLevel` embeds `materials`
+(`usedCustomMats`, the packed defs of every custom material any piece
+uses) and `loadLevelData` registers them **before** the objects unpack —
+`unpackObject` drops a piece whose material is unknown. Forgetting one
+takes it off the palette only. My Objects is device-local like the
+palette, so a saved object made of a forgotten material would lose those
+pieces on a later load — a known gap.
 
 ## Opacity
 
