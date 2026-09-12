@@ -277,9 +277,11 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('you walk along it', pp1.x > pp0.x + 60, { from: pp0.x, to: pp1.x });
   ok('the wall stops you', pp1.x < X+300, { x: pp1.x, wall: X+300 });
   ok('and you stay on the ground while walking', Math.abs(pp1.y - yBefore) < 6, { before: yBefore, after: pp1.y });
-  await p.keyboard.press('Space'); await p.waitForTimeout(250);
-  const ppJ = await p.evaluate(() => window.__pg.playerPos());
-  await p.waitForTimeout(900);
+  await p.keyboard.press('Space');
+  // the highest point seen over the arc, rather than one reading at 250ms: under load a frame stall can hide the peak
+  let topY = 1e9; for (let i = 0; i < 12; i++){ await p.waitForTimeout(50); const q = await p.evaluate(() => window.__pg.playerPos()); if (q.y < topY) topY = q.y; }
+  const ppJ = { y: topY };
+  await p.waitForTimeout(600);
   const ppL = await p.evaluate(() => window.__pg.playerPos());
   ok('Space jumps', ppJ.y < yBefore - 20, { up: ppJ.y, ground: yBefore });
   ok('and you land again', Math.abs(ppL.y - yBefore) < 6, { landed: ppL.y, ground: yBefore });

@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1026 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1048 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1026 checks + checkgeom, in order
+npm test                   # all 1048 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -74,7 +74,7 @@ node tproj.js              # 23 — the launcher (bullets, shots that run out, a
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node tui.js                # 67 — Play from here, the minimap, level pictures, the tips, the device's room, backgrounds
-node tgame.js              # 49 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load
+node tgame.js              # 71 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -617,6 +617,38 @@ All four `canReceive`; speech, destroyer and sound have no output
 `explode`, `blast`, `sound`, `pitch`, `volume`, `every`, and `mode`;
 `addGadget` clamps and defaults every one, so a bad `sound` is the
 chime and a bad `mode` is AND. Tips for each. `tgame.js`.
+
+## A saved object is the thing and its logic
+
+LBP saves an object with everything on it; so does My Objects now. A
+record is `{ id, name, pieces, gadgets, wires }` (`buildSavedObject`,
+the tail of `saveObjectToMyObjects`): the pieces by material centred on
+the group's centroid `c` as before, and `packGroupGadgets(group, c)` —
+every gadget on an object in the group as its level snapshot
+(`packGadgetSnap`, the one packer both the level file and snapshots now
+use), with `o` dropped and its spot, painted areas and art box taken
+to the world off the host and moved by `-c`, so they are in the saved
+object's own unturned frame; the wires among those gadgets by index,
+and a wire to anything outside the group dropped. `attachSavedGadgets
+(saved, obj, frame)` is the other way: the gadgets put onto an object
+just made from the record at `frame` (`{a, x, y}`, the spawn's), every
+spot, area and art box turned by `a` and taken into the new body's
+frame (`maskToLocal`, `toBodyLocal`), then the wires, then one
+`refreshObjectPhysics` so a ghost or a drawn creature's inertia is
+applied. Three callers: `stampObject` (placing from My Objects),
+`emitObjectFrom` (an object emitter — a drawn creature comes out a
+creature, chasing) and the launcher's object mode. An emitter's or a
+launcher's capture (`captureSavedObject` → `normalizeEmit`) carries
+`gadgets` and `wires` beside `pieces`, and `packEmit` writes them to
+the level file, so a level fires whole things without My Objects. The
+My Objects row shows ⚙ on a record that carries logic.
+
+**Snapshots leave out what an emitter fired**, as the level file does:
+`snapshotFull` skips `o.emitted` objects and the gadgets riding them,
+and both builders index wires against the gadget list they actually
+wrote (`liveGadgets`) — before this a Play entered from a running
+Build kept every emitted copy for good, and a level saved while
+running could cross its wires.
 
 ## The object emitter
 

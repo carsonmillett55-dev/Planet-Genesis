@@ -439,6 +439,9 @@ still open.
 - **Sound** — wired: one of sixteen level sounds when the signal comes on,
   pitch and volume, again every so often while on.
 - **Gate** — AND, OR, XOR, NOT and a toggle, in one chip.
+- **A saved object keeps its logic** — the gadgets on it and the wires among
+  them, so placing, emitting or firing it gives you the whole thing: an
+  emitter that spawns drawn creatures.
 
 ### Editor conveniences — DONE 2026-09-12
 

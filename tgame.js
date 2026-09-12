@@ -226,6 +226,112 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('the gate keeps its mode', s4 && s4.mode === 'xor', s4 && s4.mode);
   ok('a bad sound name loads as the chime', await p.evaluate(d => { d.gadgets.forEach(g => { if (g.kind === 'sound') g.sound = 'nope'; if (g.kind === 'gate') g.mode = 'maybe'; }); window.__pg.load(d); const gs = window.__pg.gadgets(); return gs.filter(g => g.kind === 'sound')[0].sound === 'chime' && gs.filter(g => g.kind === 'gate')[0].mode === 'and'; }, data));
 
+  console.log('== a saved object keeps its gadgets and their wires; placed, emitted or fired, they come too ==');
+  await fresh();
+  await p.evaluate(() => { localStorage.removeItem('pg_my_objects'); });
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);   // floor
+  await rect('metal', 1, X-60, Y-20, X+60, Y+100);     // the thing to save: a crate with a sensor wired to a speech bubble and a tag
+  await lockAll();
+  const crate = await p.evaluate(() => window.__pg.objects().filter(o => o.pieces[0].m === 'metal')[0].id);
+  const cs = await place('sensor', X-30, Y+40), csp = await place('speech', X+30, Y+20), ctag = await place('tag', X, Y+80);
+  await set(csp.id, 'text', 'I came with the crate');
+  await set(ctag.id, 'color', 3);
+  await wire(cs.id, csp.id);
+  // and a wire OUT to something not on the crate, which must not be kept
+  const outside = await place('sound', X-300, Y+120);
+  await wire(cs.id, outside.id);
+  await p.evaluate(id => { const o = window.__pg.objects().filter(o => o.id === id)[0]; window.__pg.select(o); window.__pg.saveSelectedAs('Wired crate'); }, crate);
+  await p.waitForTimeout(200);
+  let saved = await p.evaluate(() => window.__pg.savedObjectsFull());
+  const sv = saved.filter(s => s.name === 'Wired crate')[0];
+  ok('the saved object carries its three gadgets', sv && sv.gadgets.length === 3 && sv.gadgets.map(g => g.kind).sort().join() === 'sensor,speech,tag', sv && sv.gadgets.map(g => g.kind));
+  ok('with their settings', sv && sv.gadgets.filter(g => g.kind === 'speech')[0].text === 'I came with the crate' && sv.gadgets.filter(g => g.kind === 'tag')[0].color === 3);
+  ok('placed relative to the object, not the map', sv && sv.gadgets.every(g => Math.abs(g.x) < 100 && Math.abs(g.y) < 100), sv && sv.gadgets.map(g => [g.x, g.y]));
+  ok('and the wire between them, not the one leading out', sv && sv.wires.length === 1, sv && sv.wires);
+  // place a copy
+  const nG = (await gadgets()).length, nO = await objs();
+  await p.evaluate(([id, x, y]) => window.__pg.stamp(id, x, y), [sv.id, X+250, Y+40]);
+  await p.waitForTimeout(200);
+  ok('placing it makes the object and its gadgets', (await objs()) === nO + 1 && (await gadgets()).length === nG + 3, [(await objs()) - nO, (await gadgets()).length - nG]);
+  const copySpeech = (await kinds('speech')).slice(-1)[0], copySensor = (await kinds('sensor')).slice(-1)[0];
+  ok('the copy sits on the new object, its gadgets in the same places on it', copySpeech.obj !== null && copySpeech.obj === copySensor.obj && Math.abs((copySpeech.x - copySensor.x) - 60) < 3 && Math.abs((copySpeech.y - copySensor.y) + 20) < 3, [copySpeech.x - copySensor.x, copySpeech.y - copySensor.y]);
+  const ws2 = await p.evaluate(() => window.__pg.wires());
+  ok('wired the same: the copy has its sensor wired to its bubble', ws2.some(w => w.from === copySensor.id && w.to === copySpeech.id) && ws2.length === 3, ws2);
+  await lockAll();
+  await play();
+  await standAt(X+150, Y+60);   // beside the copy, within its sensor's reach
+  const cps = (await kinds('speech')).filter(g => g.text === 'I came with the crate');
+  ok('walk up to the copy and it speaks — the wire came with it', cps.length === 2 && cps.some(g => g.showing === true), cps.map(g => g.showing));
+  await build();
+  // an emitter fires the whole thing
+  await fresh();
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);
+  await rect('wood', 1, X-380, Y-200, X-300, Y-140);   // a pedestal for the emitter
+  await lockAll();
+  const em = await place('objemitter', X-340, Y-170);
+  await p.evaluate(([id, name]) => { const g = window.__pg.gadgets().filter(g => g.kind === 'objemitter')[0]; window.__pg.emitterUse(g.id, name); }, [em.id, 'Wired crate']);
+  const emG = await byId(em.id);
+  ok('the emitter captures the object with its gadgets', !!emG && emG.emitName === 'Wired crate', emG && emG.emitName);
+  await set(em.id, 'freq', 0.3); await set(em.id, 'maxAlive', 2);
+  const nBase = await objs();   // the starter floor, the floor, the pedestal
+  await play(); await p.waitForTimeout(900);
+  const fired = await kinds('speech');
+  ok('what it fires comes out with its speech bubble and sensor', fired.length >= 1 && (await kinds('sensor')).length >= 1 && fired.every(g => g.obj !== null), fired.length);
+  const level = await p.evaluate(() => window.__pg.serialize('emitted'));
+  ok('the level file leaves the fired copies out, gadgets included', level.gadgets.filter(g => g.kind === 'speech').length === 0 && level.objects.length === nBase, [level.gadgets.length, level.objects.length, nBase]);
+  ok('but the emitter keeps the whole object to fire', level.gadgets.filter(g => g.kind === 'objemitter')[0].emit.gadgets.length === 3);
+  await build();
+  ok('Build has none of the fired copies', (await kinds('speech')).length === 0 && (await objs()) === nBase);
+  // a Play entered from a running Build does not keep what was fired
+  await p.evaluate(() => window.__pg.paused(false)); await p.waitForTimeout(900);
+  ok('unpaused Build fires them too', (await kinds('speech')).length >= 1);
+  await p.evaluate(() => window.__pg.setMode('play')); await p.waitForTimeout(200);
+  await build();
+  ok('and coming back from Play, the fired copies are gone rather than kept', (await kinds('speech')).length === 0 && (await objs()) === nBase, [(await kinds('speech')).length, await objs()]);
+  // save and load keep the emitter's capture
+  const data2 = await p.evaluate(() => window.__pg.serialize('emitter with logic'));
+  await fresh();
+  await p.evaluate(d => window.__pg.load(d), data2); await p.waitForTimeout(200);
+  const em2 = (await kinds('objemitter'))[0];
+  ok('a loaded level\'s emitter still fires the whole thing', !!em2 && em2.emitName === 'Wired crate' && (await p.evaluate(() => { const g = window.__pg.gadgets().filter(g => g.kind === 'objemitter')[0]; return window.__pg.emitState ? window.__pg.emitState(g.id) : null; })) !== undefined);
+  await play(); await p.waitForTimeout(700);
+  ok('…gadgets and all', (await kinds('speech')).length >= 1);
+  await build();
+
+  console.log('== a drawn creature saved as an object comes out of an emitter as a creature ==');
+  await fresh();
+  const st = (cmd, a, b2) => p.evaluate(([c, x, y]) => window.__pg.studio(c, x, y), [cmd, a, b2]);
+  const stroke = async (x0, y0, x1, y1) => { const r = await st('canvasRect'); await p.mouse.move(r.x + r.w * x0, r.y + r.h * y0); await p.mouse.down(); await p.mouse.move(r.x + r.w * x1, r.y + r.h * y1, { steps: 8 }); await p.mouse.up(); await p.waitForTimeout(60); };
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('creature'); });
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X, Y+40]); await p.waitForTimeout(200);
+  await st('go', 'idle', 0); await st('setColor', '#C89BD9'); await stroke(0.2, 0.3, 0.8, 0.7);
+  await st('go', 'hitbox', 0); await stroke(0.5, 0.25, 0.5, 0.75);
+  await st('go', 'dangerD', 0); await stroke(0.5, 0.6, 0.5, 0.75);
+  await st('close'); await p.waitForTimeout(200);
+  const cr0 = (await kinds('creature'))[0];
+  ok('a drawn creature stands on the level', !!cr0 && cr0.hasSkin && cr0.hitStrokes === 1 && cr0.dangerArea > 20, cr0 && { skin: cr0.hasSkin, hit: cr0.hitStrokes, danger: cr0.dangerArea });
+  await p.evaluate(id => { const o = window.__pg.objects().filter(o => o.id === id)[0]; window.__pg.select(o); window.__pg.saveSelectedAs('Blob'); window.__pg.deselect(); }, cr0.obj);
+  const svc = (await p.evaluate(() => window.__pg.savedObjectsFull())).filter(s => s.name === 'Blob')[0];
+  ok('saved with its creature gadget, art box and painted danger', !!svc && svc.gadgets.length === 1 && svc.gadgets[0].kind === 'creature' && svc.gadgets[0].hasArt, svc && svc.gadgets);
+  await rect('wood', 1, X-380, Y-200, X-300, Y-140);
+  await lockAll();
+  const em3 = await place('objemitter', X-340, Y-170);
+  await p.evaluate(id => window.__pg.emitterUse(id, 'Blob'), em3.id);
+  await set(em3.id, 'freq', 0.3); await set(em3.id, 'maxAlive', 1); await set(em3.id, 'speed', 0);
+  await play(); await standAt(X+300, Y+60); await p.waitForTimeout(800);
+  const crs = await kinds('creature');
+  const born = crs.filter(g => g.obj !== cr0.obj);
+  ok('the emitter fires a creature: gadget, skin, hitbox, danger, art box', born.length >= 1 && born.every(g => g.hasSkin && g.dangerArea > 20 && g.art && g.art.w > 100), born.map(g => ({ skin: g.hasSkin, danger: g.dangerArea, art: g.art })));
+  const bornObj = born[0] && await p.evaluate(id => { const o = window.__pg.objects().filter(o => o.id === id)[0]; return o ? { emitted: !!o.emitted, m: o.pieces[0].m, w: Math.round(o.body.bounds.max.x - o.body.bounds.min.x), h: Math.round(o.body.bounds.max.y - o.body.bounds.min.y), x: o.body.position.x } : null; }, born[0].obj);
+  ok('its body is the drawn hitbox, narrow and tall, and it is marked as fired', bornObj && bornObj.emitted && bornObj.w < bornObj.h && bornObj.w < 60, bornObj);
+  const x0 = bornObj.x;
+  await p.waitForTimeout(700);
+  const x1 = await p.evaluate(id => { const o = window.__pg.objects().filter(o => o.id === id)[0]; return o ? o.body.position.x : null; }, born[0].obj);
+  ok('and it chases the player like the one it was saved from', x1 !== null && x1 > x0 + 20, { x0, x1 });
+  await build();
+
   ok('no page errors', errs.length === 0, errs);
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   await b.close();

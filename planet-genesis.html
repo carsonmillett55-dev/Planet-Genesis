@@ -3301,7 +3301,7 @@
          no more than `maxAlive` at once; `maxTotal` in all (0: no end).
          `pulse`: one per signal instead of a stream while on. Unwired, it
          streams all the time the world runs. */
-      g.emit = extra.emit && Array.isArray(extra.emit.pieces) ? { name: String(extra.emit.name || "object").slice(0, 30), pieces: extra.emit.pieces } : null;
+      g.emit = normalizeEmit(extra.emit);
       g.freq = extra.freq != null ? Math.max(0.1, Math.min(60, +extra.freq)) : 2;
       g.life = extra.life != null ? Math.max(0, Math.min(600, +extra.life)) : 8;
       g.maxAlive = extra.maxAlive != null ? Math.max(1, Math.min(60, +extra.maxAlive | 0)) : 5;
@@ -3319,7 +3319,7 @@
          captured in `ammoDef`), object (saved pieces in `emit`), ray. */
       g.mode = extra.mode === "ray" || extra.mode === "custom" || extra.mode === "object" ? extra.mode : "bullet";
       g.ammoDef = extra.ammo ? normalizeProjDef(extra.ammo) : null;
-      g.emit = extra.emit && Array.isArray(extra.emit.pieces) ? { name: String(extra.emit.name || "object").slice(0, 30), pieces: extra.emit.pieces } : null;
+      g.emit = normalizeEmit(extra.emit);
       g.speed = extra.speed != null ? Math.max(50, Math.min(3000, +extra.speed)) : 900;
       g.rate = extra.rate != null ? Math.max(0.5, Math.min(20, +extra.rate)) : 4;
       g.ammo = extra.ammo_n != null ? Math.max(0, Math.min(999, +extra.ammo_n | 0)) : 0;
@@ -3919,8 +3919,9 @@
     } else if (playerGun.mode === "object" && playerGun.obj){
       var pieces = [];
       playerGun.obj.pieces.forEach(function(pc){ if (!matOf(pc.m) || matOf(pc.m).isFluid) return; var poly = pgClean(pgUnpack(pc.g), GEOM_TOL); if (poly.length) pieces.push({ m: pc.m, poly: poly }); });
-      var ob = pieces.length ? spawnObjectFromPieces(pieces, MID_LAYER, { a: 0, x: muzzle.x + Math.cos(ang) * 30, y: muzzle.y + Math.sin(ang) * 30 }, false) : null;
-      if (ob){ ob.emitted = { by: "gun", at: now }; refreshObjectPhysics(ob); var vv = playerGun.speed / STEPS_PER_SEC; Body.setVelocity(ob.body, { x: Math.cos(ang) * vv, y: Math.sin(ang) * vv }); }
+      var obAt = { a: 0, x: muzzle.x + Math.cos(ang) * 30, y: muzzle.y + Math.sin(ang) * 30 };
+      var ob = pieces.length ? spawnObjectFromPieces(pieces, MID_LAYER, obAt, false) : null;
+      if (ob){ ob.emitted = { by: "gun", at: now }; refreshObjectPhysics(ob); attachSavedGadgets(playerGun.obj, ob, obAt); var vv = playerGun.speed / STEPS_PER_SEC; Body.setVelocity(ob.body, { x: Math.cos(ang) * vv, y: Math.sin(ang) * vv }); }
       sfx("shape");
     } else {
       var def = playerGun.mode === "custom" && playerGun.def ? playerGun.def : BULLET_DEF;
@@ -4001,6 +4002,7 @@
     if (!obj) return null;
     obj.emitted = { by: g.id, at: performance.now() };
     refreshObjectPhysics(obj);
+    attachSavedGadgets(g.emit, obj, { a: ha, x: g.pos.x, y: g.pos.y });   // a creature comes out a creature
     if (!obj.body.isStatic){
       var a = ha + (g.angle - 90) * Math.PI / 180, v = g.speed / STEPS_PER_SEC;
       Body.setVelocity(obj.body, { x: Math.cos(a) * v, y: Math.sin(a) * v });
@@ -6674,21 +6676,12 @@
     pieces.forEach(function(p){ loadBudget -= pgVertexCount(p.poly); });
     return spawnObjectFromPieces(pieces, os.layer, { a:0, x:0, y:0 }, !!os.forcedStatic);
   }
-  function snapshotFull(){
-    var objIndex = {};
-    var objSnaps = objects.map(function(o, i){
-      objIndex[o.id] = i;
-      return packObject(o);
-    });
-    var boltSnaps = bolts.map(function(b){
-      var wp = boltWorldPoint(b);
-      return { a: objIndex[b.objA.id], b: objIndex[b.objB.id], x:wp.x, y:wp.y, tight:b.tight, mode:b.mode,
-               layer:b.layer, tightness:b.tightness, speed:b.speed, kind:b.kind, dir:b.dir,
-               strength:b.strength, angle:b.angle, period:b.period, rest:b.rest, visible:b.visible, limit:b.limit, minA:b.minA, maxA:b.maxA };
-    });
-    var gadgetSnaps = gadgets.map(function(g){
-      var wp = gadgetWorld(g);
-      return { kind:g.kind, o:g.obj ? objIndex[g.obj.id] : null, x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
+  /* One gadget's snapshot — the shape both the level file and an in-session
+     snapshot carry, and what a saved object keeps for each gadget on it.
+     `o` is the host's index in whatever object list the caller built. */
+  function packGadgetSnap(g, objIndex){
+    var wp = gadgetWorld(g);
+    return { kind:g.kind, o:g.obj ? objIndex[g.obj.id] : null, x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
                sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
                zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdMode:g.holdMode, holdForever:g.holdMode === "forever", once:g.once, shake:g.shake, freeze:g.freeze,
                sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
@@ -6703,9 +6696,28 @@
                rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin,
                width: g.width, reach: g.reach, strength: g.strength, rot: g.rot, flipX: g.flipX,
                label: g.label, analog: g.analog, touching: g.touching, playerOnly: g.playerOnly, requireTag: g.requireTag, tagColor: g.tagColor, target: g.target, mode: g.mode,
-               emit: g.emit ? { name: g.emit.name, pieces: g.emit.pieces } : undefined, freq: g.freq, life: g.life, maxAlive: g.maxAlive, maxTotal: g.maxTotal, pulse: g.pulse,
+               emit: g.emit ? packEmit(g.emit) : undefined, freq: g.freq, life: g.life, maxAlive: g.maxAlive, maxTotal: g.maxTotal, pulse: g.pulse,
                ammo: g.ammoDef ? packProjDef(g.ammoDef) : undefined, ammo_n: g.ammo,
                text: g.text, once: g.once, explode: g.explode, blast: g.blast, sound: g.sound, pitch: g.pitch, volume: g.volume, every: g.every };
+  }
+  function packEmit(e){ return { name: e.name, pieces: e.pieces, gadgets: e.gadgets && e.gadgets.length ? e.gadgets : undefined, wires: e.wires && e.wires.length ? e.wires : undefined }; }
+  function normalizeEmit(e){
+    if (!e || !Array.isArray(e.pieces)) return null;
+    return { name: String(e.name || "object").slice(0, 30), pieces: e.pieces, gadgets: Array.isArray(e.gadgets) ? e.gadgets : [], wires: Array.isArray(e.wires) ? e.wires : [] };
+  }
+  function snapshotFull(){
+    // what an emitter fired is not the level: left out here as the level file leaves it out, or a Play entered from a running Build would keep it
+    var objIndex = {}, objSnaps = [];
+    objects.forEach(function(o){ if (o.emitted) return; objIndex[o.id] = objSnaps.length; objSnaps.push(packObject(o)); });
+    var liveGadgets = gadgets.filter(function(g){ return !(g.obj && g.obj.emitted); });
+    var boltSnaps = bolts.map(function(b){
+      var wp = boltWorldPoint(b);
+      return { a: objIndex[b.objA.id], b: objIndex[b.objB.id], x:wp.x, y:wp.y, tight:b.tight, mode:b.mode,
+               layer:b.layer, tightness:b.tightness, speed:b.speed, kind:b.kind, dir:b.dir,
+               strength:b.strength, angle:b.angle, period:b.period, rest:b.rest, visible:b.visible, limit:b.limit, minA:b.minA, maxA:b.maxA };
+    });
+    var gadgetSnaps = liveGadgets.map(function(g){
+      return packGadgetSnap(g, objIndex);
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -6714,7 +6726,7 @@
                len:l.len, length:l.length, visible:l.visible };
     });
     var lIdx = {}; links.forEach(function(l, i){ lIdx[l.id] = i; });
-    var gIdx = {}; gadgets.forEach(function(g, i){ gIdx[g.id] = i; });
+    var gIdx = {}; liveGadgets.forEach(function(g, i){ gIdx[g.id] = i; });
     var bIdx = {}; bolts.forEach(function(b, i){ bIdx[b.id] = i; });
     var wireSnaps = wires.map(function(w){
       return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to], toLink: lIdx[w.to], port: w.port || undefined };
@@ -9516,6 +9528,18 @@
   function saveObjectToMyObjects(obj){
     var group = selList();
     if (group.length < 2) group = [obj];
+    var rec = buildSavedObject(group);
+    askName("Name this object", "My Object", function(name){
+      rec.id = "u" + Date.now(); rec.name = name;
+      savedObjects.push(rec);
+      persistSavedObjects();
+      showToast("Saved '"+name+"' to My Objects");
+      if (pmOpen) renderPersonalMenu();
+    });
+  }
+  /* The record a group of objects saves as: the pieces by material, centred
+     on the group; the gadgets on them and the wires among those. */
+  function buildSavedObject(group){
     var world = [];
     group.forEach(function(o){
       o.pieces.forEach(function(pc){
@@ -9529,12 +9553,58 @@
     var all = pgUnionMany(world.map(function(w){ return w.poly; }), GEOM_TOL);
     var c = all.length ? pgCentroid(all) : { x:0, y:0 };
     var snap = world.map(function(w){ return { m: w.m, g: pgPack(pgTranslate(w.poly, -c.x, -c.y)) }; });
-    askName("Name this object", "My Object", function(name){
-      savedObjects.push({ id:"u"+Date.now(), name:name, pieces:snap });
-      persistSavedObjects();
-      showToast("Saved '"+name+"' to My Objects");
-      if (pmOpen) renderPersonalMenu();
+    var logic = packGroupGadgets(group, c);
+    return { pieces: snap, gadgets: logic.gadgets, wires: logic.wires };
+  }
+  /* The gadgets on a group of objects, packed for a saved object: each as
+     its level snapshot, but placed relative to the saved object's centre
+     `c` in its own unturned frame — the spot, the painted areas and the
+     art box all taken to the world off the host and moved by -c. The
+     wires among them by index; a wire to anything outside the group is
+     not the object's and is dropped. A saved object is what LBP saves:
+     the thing and its logic. */
+  function packGroupGadgets(group, c){
+    var gs = gadgets.filter(function(g){ return g.obj && group.indexOf(g.obj) >= 0 && g.obj.body; });
+    var idx = {}; gs.forEach(function(g, i){ idx[g.id] = i; });
+    var packed = gs.map(function(g){
+      var d = packGadgetSnap(g, {}), bd = g.obj.body, wp = gadgetWorld(g);
+      delete d.o;
+      d.x = wp.x - c.x; d.y = wp.y - c.y;
+      if (g.weak) d.weak = pgPack(pgTranslate(maskToWorld(bd, g.weak), -c.x, -c.y));
+      if (g.danger) d.danger = pgPack(pgTranslate(maskToWorld(bd, g.danger), -c.x, -c.y));
+      if (g.art){ var ac = toWorldPoint(bd, { x: g.art.x + g.art.w/2, y: g.art.y + g.art.h/2 }); d.art = { x: ac.x - c.x - g.art.w/2, y: ac.y - c.y - g.art.h/2, w: g.art.w, h: g.art.h, a: (g.art.a || 0) + bd.angle }; }
+      return d;
     });
+    var ws = wires.filter(function(w){ return idx[w.from] != null && idx[w.to] != null; }).map(function(w){ return { from: idx[w.from], to: idx[w.to], port: w.port || undefined }; });
+    return { gadgets: packed, wires: ws };
+  }
+  /* The other way: a saved object's gadgets put onto the object just made
+     from it, at `frame` (the angle and spot it was spawned at), then its
+     wires. Every spot, area and art box turns with the frame. */
+  function attachSavedGadgets(saved, obj, frame){
+    if (!saved || !Array.isArray(saved.gadgets) || !saved.gadgets.length || !obj || !obj.body) return [];
+    var a = frame ? (+frame.a || 0) : 0, ox = frame ? (+frame.x || 0) : 0, oy = frame ? (+frame.y || 0) : 0, cs = Math.cos(a), sn = Math.sin(a), bd = obj.body;
+    var turn = function(x, y){ return { x: ox + x * cs - y * sn, y: oy + x * sn + y * cs }; };
+    var made = [];
+    saved.gadgets.forEach(function(gs){
+      if (!gs || GADGET_KINDS.indexOf(gs.kind) < 0){ made.push(null); return; }
+      var d = {}; for (var k in gs) d[k] = gs[k];
+      var wp = turn(+gs.x || 0, +gs.y || 0);
+      if (gs.weak){ var wm = pgUnpack(gs.weak, MAX_OBJ_CORNERS); d.weak = wm.length ? pgPack(maskToLocal(bd, pgTransform(wm, a, ox, oy))) : null; }
+      if (gs.danger){ var dm = pgUnpack(gs.danger, MAX_OBJ_CORNERS); d.danger = dm.length ? pgPack(maskToLocal(bd, pgTransform(dm, a, ox, oy))) : null; }
+      if (gs.art && isFinite(+gs.art.w) && isFinite(+gs.art.h)){
+        var acw = turn(+gs.art.x + gs.art.w/2, +gs.art.y + gs.art.h/2), lc = toBodyLocal(bd, acw);
+        d.art = { x: lc.x - gs.art.w/2, y: lc.y - gs.art.h/2, w: +gs.art.w, h: +gs.art.h, a: (+gs.art.a || 0) + a };
+      }
+      var g = addGadget(gs.kind, obj, wp, d);
+      made.push(g);
+    });
+    (Array.isArray(saved.wires) ? saved.wires : []).forEach(function(w){
+      var src = made[w.from], tgt = made[w.to];
+      if (src && tgt && gadgetHasOutput(src) && canReceive(tgt)) addWire(src, tgt, w.port);
+    });
+    if (made.some(function(g){ return g; })) refreshObjectPhysics(obj);
+    return made;
   }
   function savedObjectMaterial(s){
     if (s.pieces && s.pieces[0]) return s.pieces[0].m;
@@ -9543,6 +9613,13 @@
   }
   // Objects saved before the geometry rework are still circle lists;
   // they migrate on the way out, exactly like an old level does.
+  /* What an emitter or a launcher keeps of a saved object: the pieces
+     (an old circle-list object migrated on the way), and its gadgets and
+     wires as saved, so what is fired is the whole thing. */
+  function captureSavedObject(sv){
+    return normalizeEmit({ name: sv.name, pieces: savedObjectPieces(sv).map(function(pc){ return { m: pc.m, g: pgPack(pc.poly) }; }),
+                           gadgets: Array.isArray(sv.gadgets) ? JSON.parse(JSON.stringify(sv.gadgets)) : [], wires: Array.isArray(sv.wires) ? JSON.parse(JSON.stringify(sv.wires)) : [] });
+  }
   function savedObjectPieces(s){
     if (s.pieces){
       var out = [];
@@ -9578,6 +9655,7 @@
     if (!pieces.length){ sfx("deny"); return; }
     var obj = spawnObjectFromPieces(pieces, buildLayer, { a:0, x:pt.x, y:pt.y }, false);
     if (!obj){ sfx("deny"); return; }
+    attachSavedGadgets(saved, obj, { a:0, x:pt.x, y:pt.y });
     sfx("place");
     showToast("Placed '"+saved.name+"'");
     selected = obj;
@@ -10110,6 +10188,7 @@
       var row = document.createElement("div"); row.className = "myObjRow";
       var thumb = document.createElement("div"); thumb.className = "thumb";
       thumb.style.background = (matOf(savedObjectMaterial(s)) || MATERIALS.wood).color;
+      if (s.gadgets && s.gadgets.length){ thumb.textContent = "⚙"; thumb.title = s.gadgets.length + " gadget" + (s.gadgets.length === 1 ? "" : "s") + " on it"; thumb.style.display = "flex"; thumb.style.alignItems = "center"; thumb.style.justifyContent = "center"; thumb.style.fontSize = ".8rem"; }
       var nm = document.createElement("div"); nm.className = "nm"; nm.textContent = s.name;
       var placeBtn = document.createElement("button"); placeBtn.className = "btn tiny"; placeBtn.textContent = "Place";
       placeBtn.addEventListener("click", function(){
@@ -13241,7 +13320,7 @@
         opBtn(gm, "🚀 " + pd.name, "A projectile you drew", function(){ pushUndo("changing a launcher"); g.mode = "custom"; g.ammoDef = normalizeProjDef(pd.data); renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "custom" && g.ammoDef && g.ammoDef.name === pd.name ? " on" : ""));
       });
       savedObjects.forEach(function(sv){
-        opBtn(gm, "📦 " + sv.name, "Fires copies of this object", function(){ pushUndo("changing a launcher"); g.mode = "object"; g.emit = { name: sv.name, pieces: savedObjectPieces(sv).map(function(pc){ return { m: pc.m, g: pgPack(pc.poly) }; }) }; renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "object" && g.emit && g.emit.name === sv.name ? " on" : ""));
+        opBtn(gm, "📦 " + sv.name, "Fires copies of this object", function(){ pushUndo("changing a launcher"); g.mode = "object"; g.emit = captureSavedObject(sv); renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "object" && g.emit && g.emit.name === sv.name ? " on" : ""));
       });
       if (!(mySkins.projectile || []).length){ var gn0 = document.createElement("div"); gn0.className = "noteText"; gn0.textContent = "Draw your own projectiles under Build → My Projectiles and they appear here."; gn0.style.flexBasis = "100%"; gm.appendChild(gn0); }
       var gs = opSection("How");
@@ -13265,8 +13344,7 @@
       savedObjects.forEach(function(sv){
         opBtn(eo, "📤 " + sv.name, "Fire copies of this", function(){
           pushUndo("changing an emitter");
-          var snap = savedObjectPieces(sv).map(function(pc){ return { m: pc.m, g: pgPack(pc.poly) }; });
-          g.emit = { name: sv.name, pieces: snap }; g.ammoDef = null; renderSelBar(); sfx("tick");
+          g.emit = captureSavedObject(sv); g.ammoDef = null; renderSelBar(); sfx("tick");
         }, "wide" + (!g.ammoDef && g.emit && g.emit.name === sv.name ? " on" : ""));
       });
       opBtn(eo, "• Bullet", "Fire the plain bullet", function(){ pushUndo("changing an emitter"); g.ammoDef = normalizeProjDef(BULLET_DEF); g.emit = null; renderSelBar(); sfx("tick"); }, "wide" + (g.ammoDef && g.ammoDef.name === "Bullet" ? " on" : ""));
@@ -15236,26 +15314,9 @@
     var objIndex = {};
     var objSnaps = [];
     objects.forEach(function(o){ if (o.emitted) return; objIndex[o.id] = objSnaps.length; objSnaps.push(packObject(o)); });   // what an emitter fired is not the level
-    var gadgetSnaps = gadgets.filter(function(g){ return !(g.obj && g.obj.emitted); }).map(function(g){
-      var wp = gadgetWorld(g);
-      return { kind:g.kind, o:g.obj ? objIndex[g.obj.id] : null, x:wp.x, y:wp.y, layer:g.layer, radius:g.radius, size:g.size,
-               sticky:g.sticky, springs:g.springs, on:g.on, visible:g.visible, scale:g.scale,
-               zoom:g.zoom, tracking:g.tracking, speed:g.speed, hold:g.hold, holdMode:g.holdMode, holdForever:g.holdMode === "forever", once:g.once, shake:g.shake, freeze:g.freeze,
-               sweep: g.sweep ? { dx:g.sweep.dx, dy:g.sweep.dy, zoom:g.sweep.zoom, secs:g.sweep.secs } : null,
-               zone: g.zone ? { dx:g.zone.dx, dy:g.zone.dy, w:g.zone.w, h:g.zone.h } : null, view: g.view ? { dx:g.view.dx, dy:g.view.dy } : null,
-               line: g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce: g.bounce,
-               setLight: g.setLight, light: g.light, setWater: g.setWater, water: g.water, secs: g.secs, latch: g.latch,
-               range: g.range, fly: g.fly, deadly: g.weakMode !== "none", weakMode: g.weakMode, color: g.color,
-               weak: g.weak ? pgPack(g.weak) : null, danger: g.danger ? pgPack(g.danger) : null,
-               skin: g.skin ? packSkin(g.skin) : null, actionMode: g.actionMode, ghost: g.ghost,
-               hitbox: g.hitbox && g.hitbox.length ? g.hitbox : null, weakD: g.weakD && g.weakD.length ? g.weakD : null, dangerD: g.dangerD && g.dangerD.length ? g.dangerD : null,
-               art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h, a:g.art.a || 0 } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
-               rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin,
-               width: g.width, reach: g.reach, strength: g.strength, rot: g.rot, flipX: g.flipX,
-               label: g.label, analog: g.analog, touching: g.touching, playerOnly: g.playerOnly, requireTag: g.requireTag, tagColor: g.tagColor, target: g.target, mode: g.mode,
-               emit: g.emit ? { name: g.emit.name, pieces: g.emit.pieces } : undefined, freq: g.freq, life: g.life, maxAlive: g.maxAlive, maxTotal: g.maxTotal, pulse: g.pulse,
-               ammo: g.ammoDef ? packProjDef(g.ammoDef) : undefined, ammo_n: g.ammo,
-               text: g.text, once: g.once, explode: g.explode, blast: g.blast, sound: g.sound, pitch: g.pitch, volume: g.volume, every: g.every };
+    var liveGadgets = gadgets.filter(function(g){ return !(g.obj && g.obj.emitted); });
+    var gadgetSnaps = liveGadgets.map(function(g){
+      return packGadgetSnap(g, objIndex);
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -15264,7 +15325,7 @@
                len:l.len, length:l.length, visible:l.visible };
     });
     var lIdx = {}; links.forEach(function(l, i){ lIdx[l.id] = i; });
-    var gIdx = {}; gadgets.forEach(function(g, i){ gIdx[g.id] = i; });
+    var gIdx = {}; liveGadgets.forEach(function(g, i){ gIdx[g.id] = i; });
     var bIdx = {}; bolts.forEach(function(b, i){ bIdx[b.id] = i; });
     var wireSnaps = wires.map(function(w){
       return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to], toLink: lIdx[w.to], port: w.port || undefined };
