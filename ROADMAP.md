@@ -232,6 +232,8 @@ implement it, including connected systems, rather than approximating.
 | **Emitters** | DONE 2026-09-12. The Object emitter fires copies of a saved object: every so often, each living a while, so many at once, flung at a speed and angle; wired, a stream or one per signal. |
 | **Tags, tag sensors** | DONE 2026-09-12, LBP2's: a colour and label; a sensor hears its colour within reach, on/off or by closeness. |
 | **Impact sensors** | DONE 2026-09-12: a pulse on a hit or on while touching; the player only; a tag required. |
+| **Projectiles** | DONE 2026-09-12: the Launcher powerup (bullets, a drawn projectile, a saved object, a ray), drawn projectiles with hitboxes in My Projectiles, emitters firing them, the projectile sensor. |
+| **Save tabs** | DONE 2026-09-12: My Creatures, My Projectiles, My Particles, drawn objects on My Objects — placed ready-made. |
 | **Timers, counters** | DONE 2026-09-12, LBP2's: up / up-and-down / down, a target, a reset wire; a counter of rising edges with a reset. |
 | **Creature eye** | DONE 2026-09-11, to the spec below. |
 | **Camera** | DONE 2026-09-11. LBP2's Game Camera: zone, zoom, tracking, speed; wired, the switch decides. Plus the Movie Camera's hold time (or hold for good), shake, controls off, and a glide to a second spot and zoom — Carson's "easier than keyframing". Play has its own fixed zoom, set in World. **Still to do: tilt** (a camera roll; a rendering change — the frame transform, its inverse for the mouse, the light buffer and overlays all have to agree). |

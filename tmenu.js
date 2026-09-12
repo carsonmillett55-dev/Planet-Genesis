@@ -41,8 +41,8 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
 
   console.log('\n== pages inside a section ==');
   await clickSection('Build'); await p.waitForTimeout(300);
-  ok('Build holds Materials, My Objects and Stickers',
-     JSON.stringify(await pageNames()) === JSON.stringify(['Materials','My Objects','Stickers']), await pageNames());
+  ok('Build holds Materials, My Objects, My Creatures, My Projectiles, My Particles and Stickers',
+     JSON.stringify(await pageNames()) === JSON.stringify(['Materials','My Objects','My Creatures','My Projectiles','My Particles','Stickers']), await pageNames());
   ok('it opens on Materials', /Materials/.test(await p.evaluate(() => document.getElementById('pmBody').innerText)));
   await clickPage('My Objects'); await p.waitForTimeout(300);
   ok('switching page changes the body', !/painting on/.test(await p.evaluate(() => document.getElementById('pmBody').innerText)));

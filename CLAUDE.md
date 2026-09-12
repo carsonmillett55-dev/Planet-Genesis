@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` | Playwright suites, 887 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` | Playwright suites, 910 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 887 checks + checkgeom, in order
+npm test                   # all 910 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -70,6 +70,7 @@ node tfill.js              # 14 — the fill: a closed outline fills with materi
 node tfan.js               # 9 — the Fan: lifts the player and a loose crate, hovers in reach, wired on/off, saved
 node tstickers.js          # 15 — stickers: drawn, kept, stuck on a thing (never on nothing), riding, picked by their picture, size/turn/flip, saved
 node tlogic.js             # 43 — tags and tag sensors, impact sensors, timers, counters, the reset wire, the object emitter
+node tproj.js              # 23 — the launcher (bullets, shots that run out, a ray, a saved object), the projectile sensor, a drawn projectile that hurts a creature, an emitter firing bullets, the save tabs
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
@@ -496,6 +497,8 @@ Each gadget has an **output**, 0 or 1:
 | **timer** | its time reached the target: counts up while on, up and down, or down from full; a reset wire | target, mode |
 | **counter** | the signal's rising edges reached the target; a reset wire | target |
 | **objemitter** | fires copies of a saved object — see The object emitter | emit, freq, life, maxAlive, maxTotal, speed, angle, spin, pulse |
+| **gun** | the launcher powerup: touch it and you are armed — bullets, a drawn projectile, a saved object, or a ray — see Projectiles | mode, ammo (def), emit, speed, rate, ammo_n |
+| **projsensor** | a projectile or a ray hit its host (a pulse) | — |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
 
@@ -582,6 +585,65 @@ fired is not the level**: `serializeLevel` leaves emitted objects (and
 gadgets riding them) out, entering Play's snapshot never sees them, and
 pausing Build takes them all back (`clearEmitted`). A guide in Build
 shows the first second of flight.
+
+## Projectiles, the launcher, the projectile sensor
+
+**A projectile** is a drawn thing that flies (`normalizeProjDef`): a
+look (`skin`, one Idle state — drawn nose to the right), a drawn
+`hitbox`, an `art` size, and how it flies — `speed`, `grav` (0 none to 1
+all of gravity), `life` seconds, `breaks` on the first thing it hits,
+`hurts` creatures it hits. `BULLET_DEF` is the built-in one; My
+Projectiles (`mySkins.projectile`, drawn in the studio from Build → My
+Projectiles → Draw a new projectile, the `projectile` subject: Size and
+how-it-flies first, then the look, then the hitbox; `finishProjectileDraft`
+names and keeps it) are the drawn ones. A launcher or an object emitter
+**captures** one (`ammoDef`, saved as `ammo`), so a level carries what
+is fired.
+
+**In flight** (`spawnProjectile`): an object of `drawnbody` with an
+`anim` gadget drawn from the definition, shaped by its hitbox
+(`applyDrawnSteps`), `frictionAir` 0, infinite inertia, turned to its
+velocity every step so it flies nose first, part of gravity cancelled
+by force each step (`grav`), `o.projectile = { born, life, grav, breaks,
+hurts, owner, ownerObj }` and `o.emitted` so it is never the level. A
+`collisionStart` pair with a solid → `projectileHit`: never the player
+who fired it, never another projectile, not the thing it was fired
+from in its first 250ms; then `hit` (gone next step, if it breaks),
+`creaturePop` on a creature or eye's host in Play (if it hurts), and a
+160ms pulse on every **projectile sensor** on what it hit.
+
+**The launcher** (`kind:"gun"`, Gameplay, no host — it floats where it
+is put): LBP's powerup. In Play, touching it (`armPlayer`) arms you:
+`playerGun` = its mode (bullet / custom — a drawn projectile / object —
+saved pieces, like an emitter's / ray), speed, `rate` shots a second,
+`ammo` shots (0: no end). The Play cursor becomes a crosshair with the
+line of the shot; the left button fires (`gunFire`) from just past the
+player's edge toward the cursor, held to keep firing at the rate.
+**A ray** is instant: `Query.ray` to the first solid, the beam walked to
+its edge by bisection with `Query.point`, a creature there popped, a
+projectile sensor there pulsed, a beam drawn for 140ms (`gunBeams`).
+Player-fired projectiles share `CARRY_GROUP`, so they never hit the
+player. `drawGunHud` names the ammo and counts the shots. Entering
+Play disarms.
+
+**An object emitter can fire projectiles** (`ammoDef` instead of
+`emit`): spawned from the emitter's spot walked out of its host along
+the line of fire (`Query.point`) and a half-size further, `ownerObj`
+the host, so a bullet is not born inside the pedestal it sits on.
+
+## The save tabs
+
+Build → **My Creatures / My Projectiles / My Particles** (drawn objects on
+My Objects, above the built ones): `renderMyThingsTab`, a thumbnail
+grid from `mySkins[kind]`. **A saved drawn thing carries the whole of
+it** (`packDrawnThing`: the skin, and for a creature or object the
+hitbox, art size, ghost, action mode, weak spot, danger, facing, range,
+speed, fly; for particles their settings) — an older entry that is only
+a skin still loads (`savedThingSkin`, `applySavedThing`). **Place** puts
+it in hand (`placePreset`, the kind's own tool) and the next placement
+arrives ready-made: `placeGadgetAt` applies the saved thing and runs
+`applyDrawnSteps` instead of opening the studio. Picking any other tool
+drops the preset.
 
 ## Links: pistons and rope
 
@@ -1640,7 +1702,7 @@ whole structure:
 - **Select** — an action, not a page. It is a tool you pick up and use on the
   level, not something you read, so picking it selects the move tool and
   closes the menu.
-- **Build** — what you make the world from. Materials, My Objects, Stickers.
+- **Build** — what you make the world from. Materials, My Objects, My Creatures, My Projectiles, My Particles, Stickers.
 - **Tools** — four pages, LBP2's own groupings (`TOOL_PAGES`): **Editing**
   (Move & Select, Erase, Vacuum — with the eraser's size when one is in
   hand), **Connectors** (the bolts, piston, rope), **Logic** (the sensors,
