@@ -40,6 +40,7 @@ HOOK = """
     saveThing: function(id, name){ var g = gadgetById(id); if (!g) return false; if (!mySkins[g.kind]) mySkins[g.kind] = []; mySkins[g.kind].push({ id: "s" + Date.now(), name: name, data: packDrawnThing(g) }); persistMySkins(); return true; },
     placeSaved: function(kind, entryId){ var e = (mySkins[kind] || []).find(function(x){ return x.id === entryId; }); if (!e) return false; placePreset = { kind: kind, entry: e }; currentTool = kind; canvas.dataset.tool = kind; return true; },
     playHere: function(){ playFromHere(); return mode; },
+    players: function(){ return players.map(function(P){ var b = P === me ? player : P.player; return { id: P.id, slot: P.slot, pad: P.pad, keyboard: P.keyboard, bound: P === me, x: b ? b.position.x : null, y: b ? b.position.y : null, bubble: !!P.bubble, flying: P === me ? flying : P.flying }; }); },
     padState: function(){ return { held: padHeld, seen: padSeen, aim: gunAim, lastShot: gunLastShot, now: performance.now(), mode: mode, armed: !!playerGun, input: { left: input.left, right: input.right, up: input.up, down: input.down, sprint: input.sprint } }; },
     fakePad: function(gp){ window.__pgFakePad = gp; },
     levelType: function(v){ if (v) worldSettings.levelType = v; return worldSettings.levelType; },

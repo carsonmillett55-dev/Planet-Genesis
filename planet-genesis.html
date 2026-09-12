@@ -5994,6 +5994,163 @@
   }
   applyCharSize();
   var player = null;
+  /* ---- Players. Everything the character IS lives in a set of globals —
+     its body, its input, its footing, its grab, its gun, its look — which
+     every system reads directly, three hundred times over. Rather than
+     thread a player through all of that, each player is a struct of those
+     same fields (`makePlayerShell`), and exactly one is BOUND at a time:
+     `bindFrom(P)` copies its fields into the globals, `unbindTo(P)` copies
+     them back. With one player nothing moves. With several,
+     `forEachPlayer(fn)` binds each in turn round `fn`, so a step or a draw
+     written for "the player" runs for every player. `me` is the bound one.
+     The first stage of local players (Carson: "a level that can support
+     4 people, the camera follows one person and the others get dragged
+     along"). ---- */
+  var players = [], me = null, PLAYER_MAX = 4;
+  function makePlayerShell(slot){
+    return { slot: slot, pad: null, keyboard: slot === 0, bubble: null, id: "p" + slot,
+             player: null, grounded: false, groundedNext: false, facing: 1, grabConstraint: null, grabHeld: false, grabMouse: false, grabProbe: null, grabProbeReach: -1,
+             carried: null, carryR: 90, carryDir: { x: 1, y: 0 }, playerWet: false, flying: false, groundBody: null, groundBodyNext: null, lastFallSpeed: 0, lastGroundedAt: -1e9,
+             airJumps: 0, groundMat: null, groundMatNext: null, hazardSafeUntil: 0,
+             input: { left:false, right:false, up:false, down:false, jumpQueued:false, jumpBufferUntil:0, sprint:false }, lastSpaceTime: 0,
+             padHeld: { left: false, right: false, up: false, down: false, sprint: false, grab: false, fire: false }, padPrev: {}, padAim: null, padSeen: false,
+             keyHeld: { left: false, right: false, up: false, down: false, sprint: false, grab: false }, gunAim: null, playerGun: null, gunHeld: false, gunLastShot: 0, crushSteps: 0,
+             crouchK: 1, crouching: false, sliding: false, slideUntil: 0, slideDir: 0, slideV: 0, standTry: 0, activeEmote: null, emoteUntil: 0,
+             charScale: 2, charColor: CHAR_COLORS[0], charMode: "preset", charSprites: null, charFrameCounts: null, charFps: null, charHit: null, PW: 0, PH: 0, charArt: null };
+  }
+  function bindFrom(P){
+    player = P.player;
+    grounded = P.grounded;
+    groundedNext = P.groundedNext;
+    facing = P.facing;
+    grabConstraint = P.grabConstraint;
+    grabHeld = P.grabHeld;
+    grabMouse = P.grabMouse;
+    grabProbe = P.grabProbe;
+    grabProbeReach = P.grabProbeReach;
+    carried = P.carried;
+    carryR = P.carryR;
+    carryDir = P.carryDir;
+    playerWet = P.playerWet;
+    flying = P.flying;
+    groundBody = P.groundBody;
+    groundBodyNext = P.groundBodyNext;
+    lastFallSpeed = P.lastFallSpeed;
+    lastGroundedAt = P.lastGroundedAt;
+    airJumps = P.airJumps;
+    groundMat = P.groundMat;
+    groundMatNext = P.groundMatNext;
+    hazardSafeUntil = P.hazardSafeUntil;
+    input = P.input;
+    lastSpaceTime = P.lastSpaceTime;
+    padHeld = P.padHeld;
+    padPrev = P.padPrev;
+    padAim = P.padAim;
+    padSeen = P.padSeen;
+    keyHeld = P.keyHeld;
+    gunAim = P.gunAim;
+    playerGun = P.playerGun;
+    gunHeld = P.gunHeld;
+    gunLastShot = P.gunLastShot;
+    crushSteps = P.crushSteps;
+    crouchK = P.crouchK;
+    crouching = P.crouching;
+    sliding = P.sliding;
+    slideUntil = P.slideUntil;
+    slideDir = P.slideDir;
+    slideV = P.slideV;
+    standTry = P.standTry;
+    activeEmote = P.activeEmote;
+    emoteUntil = P.emoteUntil;
+    charScale = P.charScale;
+    charColor = P.charColor;
+    charMode = P.charMode;
+    charSprites = P.charSprites;
+    charFrameCounts = P.charFrameCounts;
+    charFps = P.charFps;
+    charHit = P.charHit;
+    PW = P.PW;
+    PH = P.PH;
+    charArt = P.charArt;
+    me = P;
+  }
+  function unbindTo(P){
+    P.player = player;
+    P.grounded = grounded;
+    P.groundedNext = groundedNext;
+    P.facing = facing;
+    P.grabConstraint = grabConstraint;
+    P.grabHeld = grabHeld;
+    P.grabMouse = grabMouse;
+    P.grabProbe = grabProbe;
+    P.grabProbeReach = grabProbeReach;
+    P.carried = carried;
+    P.carryR = carryR;
+    P.carryDir = carryDir;
+    P.playerWet = playerWet;
+    P.flying = flying;
+    P.groundBody = groundBody;
+    P.groundBodyNext = groundBodyNext;
+    P.lastFallSpeed = lastFallSpeed;
+    P.lastGroundedAt = lastGroundedAt;
+    P.airJumps = airJumps;
+    P.groundMat = groundMat;
+    P.groundMatNext = groundMatNext;
+    P.hazardSafeUntil = hazardSafeUntil;
+    P.input = input;
+    P.lastSpaceTime = lastSpaceTime;
+    P.padHeld = padHeld;
+    P.padPrev = padPrev;
+    P.padAim = padAim;
+    P.padSeen = padSeen;
+    P.keyHeld = keyHeld;
+    P.gunAim = gunAim;
+    P.playerGun = playerGun;
+    P.gunHeld = gunHeld;
+    P.gunLastShot = gunLastShot;
+    P.crushSteps = crushSteps;
+    P.crouchK = crouchK;
+    P.crouching = crouching;
+    P.sliding = sliding;
+    P.slideUntil = slideUntil;
+    P.slideDir = slideDir;
+    P.slideV = slideV;
+    P.standTry = standTry;
+    P.activeEmote = activeEmote;
+    P.emoteUntil = emoteUntil;
+    P.charScale = charScale;
+    P.charColor = charColor;
+    P.charMode = charMode;
+    P.charSprites = charSprites;
+    P.charFrameCounts = charFrameCounts;
+    P.charFps = charFps;
+    P.charHit = charHit;
+    P.PW = PW;
+    P.PH = PH;
+    P.charArt = charArt;
+  }
+  function forEachPlayer(fn){
+    var cur = me;
+    for (var i = 0; i < players.length; i++){
+      var P = players[i];
+      if (P !== cur){ if (cur) unbindTo(cur); bindFrom(P); }
+      fn(P, i);
+      if (P !== cur){ unbindTo(P); if (cur) bindFrom(cur); }
+    }
+  }
+  /* The first player is the globals as they stand at boot: adopted into
+     a shell once every one of them has been declared. */
+  function initPlayers(){
+    var P1 = makePlayerShell(0);
+    unbindTo(P1);
+    players = [P1]; me = P1;
+  }
+  function playerOf(body){
+    if (!body) return null;
+    var b = body.parent || body;
+    for (var i = 0; i < players.length; i++) if (players[i].player === b || (players[i] === me && player === b)) return players[i];
+    return null;
+  }
   var charColor = localStorage.getItem("pg_char_color") || CHAR_COLORS[0];
   var grounded = false;
   var facing = 1;
@@ -6515,7 +6672,7 @@
   // A drawn hitbox makes the player a compound body, and Matter reports a
   // compound's collisions at the PART level: pair.bodyA is the convex piece
   // that touched, whose .parent is the player. A plain box is its own part.
-  function isPlayerPart(b){ return !!b && (b === player || b.parent === player); }
+  function isPlayerPart(b){ if (!b) return false; if (b === player || b.parent === player) return true; if (players.length < 2) return false; var pb = b.parent || b; for (var i = 0; i < players.length; i++){ var P = players[i]; if (P !== me && P.player === pb) return true; } return false; }
   // Both events: a pair's first step is a collisionStart, not a
   // collisionActive, so a body swapped in mid-step (a crouch) would read
   // as airborne for one step and cancel the slide it was made for.
@@ -17115,6 +17272,7 @@
   }
   setInterval(autosaveNow, AUTOSAVE_MS);
 
+  initPlayers();
   (function restoreAutosave(){
     /* Pick the level identity back up before anything can save, so a reload
        carries on editing the same document instead of forking a copy. */
