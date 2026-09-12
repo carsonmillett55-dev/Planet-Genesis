@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` | Playwright suites, 813 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` | Playwright suites, 827 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 813 checks + checkgeom, in order
+npm test                   # all 827 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -68,6 +68,7 @@ node twater.js             # 15 — the eraser by layer, the vacuum, water dryin
 node tstudio.js            # 71 — the studio: strokes, undo/redo, the tools, frames, playback, no rig; the brush ring, filled shapes, nudge and flip, the Settings card's keys; the character's size and drawn hitbox
 node tfill.js              # 14 — the fill: a closed outline fills with material or water; open space, material, a gap and an island
 node tfan.js               # 9 — the Fan: lifts the player and a loose crate, hovers in reach, wired on/off, saved
+node tstickers.js          # 14 — stickers: drawn, kept, stuck on a thing or the background, riding, picked by their picture, size/turn/flip, saved
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
@@ -442,6 +443,7 @@ Each gadget has an **output**, 0 or 1:
 | **creature** | a Custom creature: drawn look, hitbox, weak spot and danger; chases, faces, bites, dies — see Drawn things | skin, hitbox, weakD, dangerD, art, range, speed, fly, ghost, drawnFacing, actionMode |
 | **emitter** | throws out drawn particles while on (unwired: always) — see Skins | skin, rate, pspeed, angle, spread, grav, life, psize, spin |
 | **fan** | blows a column of air up from itself — up in its host's frame — that lifts the player and anything loose; wired, while the signal is on, else always | width, reach, strength |
+| **sticker** | a drawing stuck onto a thing or the background, riding with it — see Stickers | skin, size, rot, flipX |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
 
@@ -1320,6 +1322,38 @@ the last 40%. Nothing comes out until a particle is drawn; wired, it
 emits only while the signal is on; paused Build emits nothing. A
 particle whose emitter is gone is dropped.
 
+## Stickers
+
+LBP's decals, drawn by hand — Carson: "custom stickers, like LBP but you
+can draw them". A sticker is a gadget, `kind:"sticker"`, with a one-state
+`skin` (`SKIN_STATES.sticker`), a `size` (a square, px), a turn `rot`
+(radians) and `flipX`, on any layer, on an object or on nothing
+(`gadgetNeedsHost` false) — it rides with what it is stuck to like any
+gadget, and drags off onto something else or onto the background with
+the Move tool. **Build → Stickers**: "Draw a new sticker" opens the
+studio on a draft (`openStickerDraft`, a host-less skin subject);
+closing with something drawn asks for a name and keeps it in
+`mySkins.sticker` (My Stickers; the studio's own save/load list too),
+and puts it in hand (`stickerPick`, the `sticker` tool). A click sticks a
+*copy* of the drawing there (`placeGadgetAt`: on the object under the
+cursor on the build layer, else the background), at `stickerSize`
+(remembered, `pg_sticker_size`, and the page's "Size when placed"
+slider) and the last turn used; the ghost at the cursor shows it. The
+box has Size, Turn, Flip, "Edit the drawing" (this one's own copy) and
+"Another like it".
+
+**Drawn as the picture, no marker** (`drawStickerHere`, from
+`drawGadgets` in the sticker's frame): turned, flipped, the drawing over
+its square, faded with its layer; selected in Build, a dashed frame.
+**Stuck to a thing, it is trimmed to the thing's shape** (a clip to the
+host's `objectPaths` regions, back in the host's frame), as LBP trims a
+sticker to the material it is on. **Picked by its picture**: `gadgetAt`
+tries every marker first, then the stickers topmost-first through
+`stickerHit`, the point taken into the sticker's own turned square.
+Resize scales `size`; a flip mirrors `flipX` and negates `rot`. Saved
+with `skin`, `size`, `rot`, `flipX`; `persistMySkins` drops the live
+`skin` copies it unpacks for thumbnails. `tstickers.js`.
+
 ## The Fan
 
 Carson's Fan: "it just blows a bit of air up that pushes the player
@@ -1484,7 +1518,7 @@ whole structure:
 - **Select** — an action, not a page. It is a tool you pick up and use on the
   level, not something you read, so picking it selects the move tool and
   closes the menu.
-- **Build** — what you make the world from. Materials, My Objects.
+- **Build** — what you make the world from. Materials, My Objects, Stickers.
 - **Tools** — four pages, LBP2's own groupings (`TOOL_PAGES`): **Editing**
   (Move & Select, Erase, Vacuum — with the eraser's size when one is in
   hand), **Connectors** (the bolts, piston, rope), **Logic** (the sensors,

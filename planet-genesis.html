@@ -1139,6 +1139,13 @@
   .kbRow .key.listening{ background:var(--yellow); border-color:var(--yellow-dark); }
   .noteText{ font-size:.72rem; color:var(--ink); opacity:.8; line-height:1.4; }
   .myObjRow{ display:flex; align-items:center; gap:.5rem; background:var(--stitch); border-radius:10px; padding:.3rem .5rem; }
+  .stickerGrid{ display:flex; flex-wrap:wrap; gap:.4rem; }
+  .stickerCell{ position:relative; width:5.2rem; display:flex; flex-direction:column; align-items:center; gap:.2rem; padding:.35rem; border-radius:10px; cursor:pointer;
+    border:2px solid var(--paper-edge); background:var(--stitch); color:var(--ink); font-family:'Patrick Hand',cursive; font-size:.75rem; }
+  .stickerCell.active{ border-color:var(--yellow-dark); background:var(--yellow); }
+  .stickerCell canvas{ width:3.6rem; height:3.6rem; background:#fff repeating-conic-gradient(#00000010 0% 25%, transparent 0% 50%) 0/12px 12px; border-radius:6px; }
+  .stickerCell .nm{ max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .stickerCell .del{ position:absolute; top:-.3rem; right:-.3rem; }
   .myObjRow .thumb{ width:1.6rem; height:1.6rem; border-radius:6px; background:var(--purple); border:2px solid var(--ink); }
   .myObjRow .nm{ flex:1; font-family:'Patrick Hand',cursive; font-size:.9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
@@ -2843,7 +2850,7 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan"];
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker"];
 
   /* ---- Skins: drawn, animated looks on things -----------------------
      A creature, an animated object or a particle carries a SKIN: a set of
@@ -2857,7 +2864,8 @@
     eye:      [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"move", label:"Moving", emoji:"🏃" }, { id:"action", label:"Action", emoji:"⚡" }],
     creature: [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"move", label:"Moving", emoji:"🏃" }, { id:"attack", label:"Attack", emoji:"💢" }, { id:"die", label:"Death", emoji:"💀" }, { id:"action", label:"Action", emoji:"⚡" }],
     anim:     [{ id:"idle", label:"Idle", emoji:"🙂" }, { id:"action", label:"Action", emoji:"⚡" }],
-    emitter:  [{ id:"particle", label:"Particle", emoji:"✨" }]
+    emitter:  [{ id:"particle", label:"Particle", emoji:"✨" }],
+    sticker:  [{ id:"sticker", label:"Sticker", emoji:"🏷️" }]
   };
   /* The drawn steps after the look: the hitbox (physics), then for a
      creature its weak spot and its danger. Each is one drawing in the
@@ -2867,9 +2875,9 @@
   var SKIN_STEPS = {
     creature: [{ id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" }, { id:"weakD", label:"Weak spot", emoji:"🎯", mask:true, color:"#F2B705" }, { id:"dangerD", label:"Danger", emoji:"🔥", mask:true, color:"#E4574B" }],
     anim:     [{ id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" }],
-    eye: [], emitter: []
+    eye: [], emitter: [], sticker: []
   };
-  var SKIN_TITLE = { eye:"🐾 Creature", creature:"🐉 Custom creature", anim:"🎨 Custom object", emitter:"✨ Particle" };
+  var SKIN_TITLE = { eye:"🐾 Creature", creature:"🐉 Custom creature", anim:"🎨 Custom object", emitter:"✨ Particle", sticker:"🏷️ Sticker" };
   var DRAWN_DEFAULT_SIZE = 120;   // the box a fresh drawn thing starts in, world px
   function newSkin(kind){
     var st = {}, fps = {};
@@ -2991,9 +2999,12 @@
     if (matOf(currentTool) && matOf(currentTool).isMask){ currentTool = "move"; canvas.dataset.tool = "move"; }
     renderSelBar();
   }
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan" };
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
+  // the sticker in hand: a saved drawing to place copies of; the size and turn it goes on at
+  var stickerPick = null, stickerSize = parseFloat(localStorage.getItem("pg_sticker_size") || "120") || 120, stickerRot = 0;
+  function persistSticker(){ try { localStorage.setItem("pg_sticker_size", String(stickerSize)); } catch(e){} }
   var gadgets = [], gadgetCounter = 1;
   var wires = [];                 // { from: gadget id, to: bolt or gadget id }
   var selectedGadget = null;
@@ -3005,7 +3016,7 @@
   /* A camera is the one gadget that does not need a host: put it in empty
      air and it stays there, on the layer it was placed. Everything else
      sits on an object. */
-  function gadgetNeedsHost(kind){ return kind !== "camera" && kind !== "anim" && kind !== "creature"; }
+  function gadgetNeedsHost(kind){ return kind !== "camera" && kind !== "anim" && kind !== "creature" && kind !== "sticker"; }
   function addGadget(kind, obj, pt, extra){
     if (GADGET_KINDS.indexOf(kind) < 0) return null;
     if (!obj || !obj.body){ if (gadgetNeedsHost(kind)) return null; obj = null; }
@@ -3078,6 +3089,17 @@
         g.homeAngle = null; g.face = 1; g.look = { x: 1, y: 0 };
         g.dying = false; g.dieT0 = 0; g.attackT0 = 0;
       }
+    }
+    if (kind === "sticker"){
+      /* A sticker, LittleBigPlanet's decal: a drawing stuck onto whatever
+         it was placed on — any object, any layer, or the background —
+         that rides with it. Its own size, turn and flip; a copy of the
+         drawing it was placed from, so each can be edited on its own. */
+      g.skin = extra.skin ? normalizeSkin(extra.skin, "sticker") : newSkin("sticker");
+      g.size = extra.size != null ? Math.max(12, Math.min(2000, +extra.size)) : stickerSize;
+      g.rot = extra.rot != null && isFinite(+extra.rot) ? +extra.rot : stickerRot;
+      g.flipX = !!extra.flipX;
+      g.visible = extra.visible != null ? !!extra.visible : true;
     }
     if (kind === "fan"){
       /* Carson's Fan: it blows a column of air straight up from itself
@@ -3177,14 +3199,23 @@
     wires = wires.filter(function(w){ return w.from !== g.id && w.to !== g.id; });
     if (selectedGadget === g) selectedGadget = null;
   }
+  function stickerHit(g, x, y){
+    var p = gadgetWorld(g), a = (g.obj && g.obj.body ? g.obj.body.angle : 0) + (g.rot || 0);
+    var dx = x - p.x, dy = y - p.y, lx = dx * Math.cos(-a) - dy * Math.sin(-a), ly = dx * Math.sin(-a) + dy * Math.cos(-a);
+    return Math.abs(lx) <= g.size / 2 && Math.abs(ly) <= g.size / 2;
+  }
   function gadgetAt(x, y, maxD){
     maxD = maxD || 18;
     var best = null, bestD = maxD;
     gadgets.forEach(function(g){
+      if (g.kind === "sticker") return;   // a sticker is picked by its picture, below, after every marker has had its chance
       var d = dist(gadgetWorld(g), { x:x, y:y });
       if (d < bestD){ bestD = d; best = g; }
     });
-    return best;
+    if (best) return best;
+    // stickers, the topmost (last placed) first
+    for (var i = gadgets.length - 1; i >= 0; i--){ var g2 = gadgets[i]; if (g2.kind === "sticker" && stickerHit(g2, x, y)) return g2; }
+    return null;
   }
   function reanchorGadgets(obj){
     gadgets.forEach(function(g){ if (g.obj === obj && obj.body) g.local = toBodyLocal(obj.body, g.pos); });
@@ -3204,8 +3235,9 @@
       g.pos = mapPt(g.pos);
       if (k && k !== 1){
         g.scale = Math.max(0.25, Math.min(6, (g.scale || 1) * k));
-        if (g.kind === "button") g.size = Math.max(12, g.size * k);
+        if (g.kind === "button" || g.kind === "sticker") g.size = Math.max(12, g.size * k);
       }
+      if ((!k || k === 1) && g.kind === "sticker"){ var pr0 = mapPt({ x: g.pos.x + 10, y: g.pos.y }); if (pr0.x < g.pos.x){ g.flipX = !g.flipX; g.rot = -(g.rot || 0); } }   // a flip mirrors it
       if (tip) g.line = { dx: tip.x - g.pos.x, dy: tip.y - g.pos.y };
       if ((g.kind === "eye" || g.kind === "creature" || g.kind === "anim") && g.obj.body){   // the painted areas go through the same map
         var bd = g.obj.body, viaMap = function(mp){ return maskToLocal(bd, pgMap(maskToWorld(bd, mp), function(x, y){ var q = mapPt({ x:x, y:y }); return [q.x, q.y]; })); };
@@ -5971,7 +6003,7 @@
                hitbox: g.hitbox && g.hitbox.length ? g.hitbox : null, weakD: g.weakD && g.weakD.length ? g.weakD : null, dangerD: g.dangerD && g.dangerD.length ? g.dangerD : null,
                art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h, a:g.art.a || 0 } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
                rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin,
-               width: g.width, reach: g.reach, strength: g.strength };
+               width: g.width, reach: g.reach, strength: g.strength, rot: g.rot, flipX: g.flipX };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -7180,6 +7212,40 @@
   /* Gadgets draw with their layer. In Build, a sensor's reach and every wire
      are shown too; in Play only the gadget itself, and only if it is
      visible. */
+  /* A sticker, in the frame of its spot (the host's turn already applied):
+     turned by its own angle, flipped if flipped, the drawing over a
+     square `size` across. Selected in Build, a dashed frame round it. */
+  function drawStickerHere(g, selected){
+    var fr = skinFrame(g.skin, "sticker", 0, false);
+    ctx.save();
+    if (g.obj && g.obj.body && g.local){
+      // stuck to a thing, it is trimmed to the thing's shape, as LBP trims a
+      // sticker to the material it is on: clip to the host's regions, back
+      // in the host's frame (this frame is the host's, moved to the sticker)
+      var hp = objectPaths(g.obj);
+      if (hp.regions.length){
+        var clipP = new Path2D();
+        for (var ri = 0; ri < hp.regions.length; ri++) clipP.addPath(hp.regions[ri].path);
+        ctx.translate(-g.local.x, -g.local.y); ctx.clip(clipP); ctx.translate(g.local.x, g.local.y);
+      }
+    }
+    ctx.rotate(g.rot || 0);
+    if (g.flipX) ctx.scale(-1, 1);
+    var sz = g.size || 120;
+    if (fr){
+      var cv = drawingCanvas(fr, Math.min(2048, Math.max(32, sz * 2)), Math.min(2048, Math.max(32, sz * 2)));
+      ctx.globalAlpha = layerDepth(g.layer).a;
+      ctx.drawImage(cv, -sz/2, -sz/2, sz, sz);
+      ctx.globalAlpha = 1;
+    }
+    if (selected || (!fr && mode === "build")){
+      ctx.beginPath(); ctx.rect(-sz/2, -sz/2, sz, sz);
+      ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#F2B705";
+      ctx.setLineDash([6/camScale, 4/camScale]); ctx.lineDashOffset = -performance.now()/70/camScale;
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
   function drawGadgets(layer){
     gadgets.forEach(function(g){
       if (g.layer !== layer) return;
@@ -7332,6 +7398,11 @@
           }
         }
         ctx.restore();
+      }
+      if (g.kind === "sticker"){
+        drawStickerHere(g, g === selectedGadget && mode === "build");
+        ctx.restore();
+        return;
       }
       if (g === selectedGadget && mode === "build"){
         ctx.beginPath(); ctx.arc(0, 0, 19, 0, Math.PI*2);
@@ -7821,6 +7892,14 @@
         ctx.lineWidth = 2/camScale; ctx.strokeStyle = "#5F9E5A"; ctx.setLineDash([6/camScale, 5/camScale]); ctx.globalAlpha = 0.8; ctx.stroke(); ctx.setLineDash([]);
         ctx.globalAlpha = 0.5; drawGadgetGlyph({ kind: currentTool, out: 0, size: 64 }, 0.6);
         ctx.restore();
+        showCustom = true;
+      } else if (currentTool === "sticker"){
+        // the sticker itself, faint, at the size and turn it will go on at
+        if (stickerPick){
+          ctx.save(); ctx.translate(mouseWorld.x, mouseWorld.y);
+          drawStickerHere({ skin: stickerPick.skin || (stickerPick.skin = normalizeSkin(stickerPick.data, "sticker")), size: stickerSize, rot: stickerRot, flipX: false, layer: buildLayer }, true);
+          ctx.restore();
+        }
         showCustom = true;
       } else if (isGadgetTool()){
         var host = objectUnderOn(mouseWorld.x, mouseWorld.y, buildLayer, 6) || !gadgetNeedsHost(GADGET_TOOL_KIND[currentTool]);
@@ -9006,6 +9085,59 @@
       el.appendChild(row);
     });
   }
+  /* Stickers, LBP's: draw one, and it goes in My Stickers; pick one and
+     click on anything to stick a copy there. */
+  function renderStickersTab(el){
+    var h = document.createElement("h3"); h.textContent = "Stickers"; el.appendChild(h);
+    var note = document.createElement("div"); note.className = "noteText";
+    note.textContent = "Draw a sticker, then click on anything in your level to stick it there — on any layer, or on the background. It rides with what it is stuck to. Right-click a placed one for its size, turn and flip.";
+    el.appendChild(note);
+    var newBtn = document.createElement("button"); newBtn.className = "btn small"; newBtn.textContent = "✏️ Draw a new sticker";
+    newBtn.addEventListener("click", function(){ openStickerDraft(); });
+    el.appendChild(newBtn);
+    var list = mySkins.sticker || [];
+    if (!list.length){
+      var e = document.createElement("div"); e.className = "empty-note"; e.textContent = "No stickers yet — draw one.";
+      el.appendChild(e);
+    }
+    var grid = document.createElement("div"); grid.className = "stickerGrid";
+    list.forEach(function(st){
+      var cell = document.createElement("button"); cell.className = "stickerCell" + (stickerPick && stickerPick.id === st.id ? " active" : "");
+      cell.title = st.name;
+      var cv = document.createElement("canvas"); cv.width = 64; cv.height = 64;
+      var sk = st.skin || (st.skin = normalizeSkin(st.data, "sticker")), fr = skinFrame(sk, "sticker", 0, false);
+      if (fr) cv.getContext("2d").drawImage(drawingCanvas(fr, 128, 128), 0, 0, 64, 64);
+      var nm = document.createElement("div"); nm.className = "nm"; nm.textContent = st.name;
+      cell.appendChild(cv); cell.appendChild(nm);
+      cell.addEventListener("click", function(){
+        stickerPick = st; pickTool("sticker", "Sticker"); closePersonalMenu();
+        showToast("Click on anything to stick '" + st.name + "' there. Right-click it after for size and turn.");
+      });
+      var del = document.createElement("button"); del.className = "btn tiny red del"; del.textContent = "✕"; del.title = "Forget this sticker";
+      del.addEventListener("click", function(ev){ ev.stopPropagation(); mySkins.sticker = list.filter(function(x){ return x.id !== st.id; }); if (stickerPick && stickerPick.id === st.id) stickerPick = null; persistMySkins(); renderPersonalMenu(); });
+      cell.appendChild(del);
+      grid.appendChild(cell);
+    });
+    el.appendChild(grid);
+    el.appendChild(sliderRow("Size when placed", stickerSize, 12, 800, 4, function(v){ stickerSize = v; persistSticker(); }, function(v){ return Math.round(v) + "px"; }));
+  }
+  // a fresh sticker drawn in the studio: when it closes with something drawn, it is named and kept, and is the one in hand
+  function openStickerDraft(){
+    var draft = { id: "draft", kind: "sticker", obj: null, art: null, skin: newSkin("sticker"), draft: true, size: stickerSize, rot: 0, flipX: false, layer: buildLayer, pos: { x: 0, y: 0 } };
+    pmEditState = "sticker"; pmEditFrame = 0;
+    ceOpenWith(ceSkinSubject(draft));
+  }
+  function finishStickerDraft(draft){
+    if (!skinHasArt(draft.skin)){ showToast("Nothing drawn — no sticker made."); return; }
+    askName("Name your sticker", "Sticker " + ((mySkins.sticker || []).length + 1), function(name){
+      if (!name) name = "Sticker";
+      if (!mySkins.sticker) mySkins.sticker = [];
+      var entry = { id: "s" + Date.now(), name: name, data: packSkin(draft.skin) };
+      mySkins.sticker.push(entry); persistMySkins();
+      stickerPick = entry; pickTool("sticker", "Sticker"); closePersonalMenu();
+      showToast("'" + name + "' is in hand — click on anything to stick it there.");
+    });
+  }
   function renderWorldSettingsTab(el){
     var h = document.createElement("h3"); h.textContent = "World Settings"; el.appendChild(h);
     el.appendChild(sliderRow("Gravity", worldSettings.gravity, 0.2, 2.5, 0.05, function(v){ worldSettings.gravity=v; applyWorldSettings(); }, function(v){ return v.toFixed(2)+"x"; }));
@@ -9349,6 +9481,7 @@
       persist: function(){},
       hint: function(){
         if (kind === "emitter") return "Draw one particle. Several frames play over its life.";
+        if (kind === "sticker") return "Draw the sticker. Anything left blank is see-through. Done keeps it in My Stickers and puts it in your hand.";
         if (pmEditState === "size") return "How big it is on the level. Set the width and height, then draw it in that space.";
         var d = stepOf(pmEditState);
         if (d){
@@ -9360,7 +9493,7 @@
         if (kind === "anim") return "Draw the object: Idle loops; a wire plays the Action. Then draw its hitbox.";
         return "Idle, Moving, and an Action a wire can play. The faint shape is the body — your drawing goes over it.";
       },
-      previewLabel: kind === "emitter" ? "One particle" : "On the level",
+      previewLabel: kind === "emitter" ? "One particle" : (kind === "sticker" ? "The sticker" : "On the level"),
       backdrop: function(c2, w, h){
         if (kind === "emitter") return;
         var d = stepOf(pmEditState);
@@ -9390,7 +9523,7 @@
       },
       useDrawingAsHitbox: function(){ var idle = skinFrame(g.skin, "idle", 0, false); if (!idle || !drawingHasArt(idle)) return false; g.hitbox = idle.map(function(st){ var c = JSON.parse(JSON.stringify(st)); c.c = "#4FA9D6"; return c; }); touchDrawing(g.hitbox); return true; },
       extraRight: function(el){ ceSkinExtras(el, g); },
-      onClose: function(){ if (host){ host.studioHold = false; } applyDrawnSteps(g); if (host && host.body && objects.indexOf(host) >= 0) refreshObjectPhysics(host); renderSelBar(); }
+      onClose: function(){ if (g.draft){ finishStickerDraft(g); return; } if (host){ host.studioHold = false; } applyDrawnSteps(g); if (host && host.body && objects.indexOf(host) >= 0) refreshObjectPhysics(host); renderSelBar(); }
     };
     return sub;
   }
@@ -9439,9 +9572,9 @@
   }
   var mySkins = {};
   try { mySkins = JSON.parse(localStorage.getItem("pg_my_skins") || "{}"); } catch(e){ mySkins = {}; }
-  function persistMySkins(){ try { localStorage.setItem("pg_my_skins", JSON.stringify(mySkins)); } catch(e){ showToast("Couldn't save — storage is full."); } }
+  function persistMySkins(){ try { localStorage.setItem("pg_my_skins", JSON.stringify(mySkins, function(k, v){ return k === "skin" ? undefined : v; })); } catch(e){ showToast("Couldn't save — storage is full."); } }   // `skin` is a live unpacked copy, never stored twice
   function ceSkinExtras(el, g){
-    var kind = g.kind, label = kind === "eye" || kind === "creature" ? "My Creatures" : (kind === "anim" ? "My Objects" : "My Particles");
+    var kind = g.kind, label = kind === "eye" || kind === "creature" ? "My Creatures" : (kind === "anim" ? "My Objects" : (kind === "sticker" ? "My Stickers" : "My Particles"));
     ceH4(label, el);
     el.appendChild(ceBtn("💾 Save this drawing", "", function(){
       askName("Name it", "", function(name){
@@ -9469,7 +9602,7 @@
     // walk off after the player, and fall, while its picture was painted
     if (g.obj && g.obj.body && (g.kind === "creature" || g.kind === "anim")){ g.obj.studioHold = true; refreshObjectPhysics(g.obj); }
     var freshDrawn = (g.kind === "creature" || g.kind === "anim") && g.art && g.obj && !skinHasArt(g.skin);
-    if (step) pmEditState = step; else pmEditState = freshDrawn ? "size" : "idle";   // a fresh creature or object starts with its size
+    if (step) pmEditState = step; else pmEditState = freshDrawn ? "size" : (g.kind === "sticker" ? "sticker" : (g.kind === "emitter" ? "particle" : "idle"));   // a fresh creature or object starts with its size
     pmEditFrame = 0;
     ceOpenWith(ceSkinSubject(g));
   }
@@ -10515,7 +10648,8 @@
       run:function(){ pickTool("move", "Select"); closePersonalMenu(); } },
     { id:"build", icon:"🎒", label:"Build", pages:[
       { id:"materials", label:"Materials", render:renderMaterialsTab },
-      { id:"myobjects", label:"My Objects", render:renderMyObjectsTab }
+      { id:"myobjects", label:"My Objects", render:renderMyObjectsTab },
+      { id:"stickers", label:"Stickers", render:renderStickersTab }
     ]},
     { id:"toolsbag", icon:"🧰", label:"Tools", pages:[
       { id:"editing", label:"Editing", render:function(el){ renderToolsTab(el, "editing"); } },
@@ -10600,6 +10734,16 @@
       selectGadget(dm); renderSelBar();
       showToast("✨ Mover set — right-click it for speed and bounce. Drag the knob to change where it goes.");
       sfx("glue");
+      return;
+    }
+    if (kind === "sticker"){
+      if (!stickerPick){ showToast("Pick a sticker first — Build → Stickers."); sfx("deny"); return; }
+      var sHost = objectUnderOn(pt.x, pt.y, buildLayer, 6);   // on the thing under the cursor, or the background
+      pushUndo("placing a sticker");
+      var gS = addGadget("sticker", sHost, pt, { skin: stickerPick.data, size: stickerSize, rot: stickerRot });
+      selectGadget(gS);
+      sfx("bolt");
+      puff(pt.x, pt.y, 6, { color:"#F2B705", speed:1.4, g:0.05 });
       return;
     }
     if (kind === "anim" || kind === "creature"){
@@ -11668,6 +11812,20 @@
         (g.weak ? "The weak spot kills it" + (g.skin && skinStateHasArt(g.skin, "die") ? " — its Death plays first" : "") + ". " : "No weak spot drawn: it cannot be killed. ") +
         (g.danger ? "The danger hurts the player" + (g.skin && skinStateHasArt(g.skin, "attack") ? " and its Attack plays" : "") + "." : "No danger drawn: it is harmless.");
       cn.style.flexBasis = "100%"; opSection(null).appendChild(cn);
+    }
+    if (g.kind === "sticker"){
+      var sb = opSection("Sticker");
+      opBtn(sb, "🎨 Edit the drawing", "This sticker's own copy of the drawing", function(){ openSkinStudio(g); }, "wide on");
+      slider(sb, "Size", g.size, 12, 2000, 2, function(v){ g.size = v; stickerSize = v; persistSticker(); }, function(v){ return Math.round(v) + "px"; }, "changing a sticker");
+      slider(sb, "Turn", (g.rot || 0) * 180 / Math.PI, -180, 180, 1, function(v){ g.rot = v * Math.PI / 180; stickerRot = g.rot; }, function(v){ return Math.round(v) + "°"; }, "changing a sticker");
+      opBtn(sb, g.flipX ? "⇄ Flipped" : "⇄ Flip", "Mirror it", function(){ pushUndo("flipping a sticker"); g.flipX = !g.flipX; renderSelBar(); sfx("tick"); }, "wide" + (g.flipX ? " on" : ""));
+      opBtn(sb, "📋 Another like it", "Put a copy of this sticker in your hand", function(){
+        var entry = { id: "s" + Date.now(), name: "Sticker", data: packSkin(g.skin), skin: g.skin };
+        stickerPick = entry; stickerSize = g.size; stickerRot = g.rot || 0; pickTool("sticker", "Sticker"); showToast("Click to stick another one.");
+      }, "wide");
+      var sn = document.createElement("div"); sn.className = "noteText";
+      sn.textContent = g.obj ? "Stuck to " + (g.obj.pieces[0] && matOf(g.obj.pieces[0].m) ? matOf(g.obj.pieces[0].m).label.toLowerCase() : "an object") + " — drag it off onto something else, or onto nothing to stick it to the background." : "On the background — drag it onto something and it rides with it.";
+      sn.style.flexBasis = "100%"; opSection(null).appendChild(sn);
     }
     if (g.kind === "fan"){
       var fb = opSection("The air");
@@ -13479,7 +13637,7 @@
                hitbox: g.hitbox && g.hitbox.length ? g.hitbox : null, weakD: g.weakD && g.weakD.length ? g.weakD : null, dangerD: g.dangerD && g.dangerD.length ? g.dangerD : null,
                art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h, a:g.art.a || 0 } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
                rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin,
-               width: g.width, reach: g.reach, strength: g.strength };
+               width: g.width, reach: g.reach, strength: g.strength, rot: g.rot, flipX: g.flipX };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);

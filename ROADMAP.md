@@ -328,6 +328,13 @@ Piano, drums, guitar, bass.
 
 Create and save custom level backgrounds in a paint mode. Eventually sellable.
 
+### Stickers — DONE 2026-09-11
+
+LBP's stickers, but drawn: Build → Stickers, draw one, click to stick a copy on
+anything — any layer, or the background — where it rides with the thing and is
+trimmed to its shape. Size, turn, flip; picked by its picture; My Stickers keeps
+them on this device.
+
 ### Custom particles — DONE 2026-09-11
 
 Author your own particle effects.
