@@ -176,6 +176,48 @@ const lum = c => 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2];
     var o = window.__pg.objects(); return o.map(function(q){ return q.glow; }).filter(function(g){ return g === 6; }).length; });
   ok('glow survives save and load', round >= 2, round);
 
+  console.log('\n== lights glow by day, reach with their size, and a spotlight shines a cone ==');
+  await p.evaluate(() => { window.__pg.setMode('build'); window.__pg.paused(true); window.__pg.clear(); window.__pg.starter(); window.__pg.setLayer(1); window.__pg.deselect(); window.__pg.setStick(true); window.__pg.worldLight(1); });
+  await p.waitForTimeout(200);
+  await use('light', 1, 'rect');
+  await drag([[X-300, Y-40],[X-100, Y]]);          // a big strip
+  await drag([[X+200, Y-12],[X+212, Y]]);          // a small dab
+  await p.evaluate(() => { window.__pg.setTool('move'); window.__pg.deselect(); });
+  await p.mouse.move(1200, 730); await p.waitForTimeout(400);
+  const dayNear = await sample(X-200, Y+40), dayFar = await sample(X-200, Y+300);
+  ok('by day a light still glows around itself', lum(dayNear) > lum(dayFar) + 6, { dayNear, dayFar });
+  const glows = await p.evaluate(() => window.__pg.objects().map(o => window.__pg.glowOf(o.id)).filter(Boolean));
+  ok('a bigger light reaches further', glows.length === 2 && Math.max(glows[0].reach, glows[1].reach) > Math.min(glows[0].reach, glows[1].reach) * 1.3, glows);
+  await p.evaluate(() => window.__pg.worldLight(0.05)); await p.waitForTimeout(400);
+  const bigLit = await sample(X-200, Y+120), smallLit = await sample(X+206, Y+120);
+  ok('at night the big one lights further than the small one', lum(bigLit) > lum(smallLit) + 8, { bigLit, smallLit });
+  // a spotlight on the floor, pointing up and to the right
+  await use('wood', 1, 'rect');
+  await drag([[X-300, Y+200],[X+300, Y+240]]);
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('spot'); });
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X, Y+220]);
+  const spot = (await p.evaluate(() => window.__pg.gadgets())).filter(g => g.kind === 'spot')[0];
+  ok('a spotlight is placed, pointing right by default, 60° wide, reaching 600', !!spot && spot.obj !== null && spot.cone === 60 && spot.reach === 600, spot && { cone: spot.cone, reach: spot.reach });
+  await p.evaluate(id => window.__pg.gadgetSet(id, { angle: 0, cone: 40, reach: 500, color: '#80D8FF' }), spot.id);   // straight up, narrow
+  await p.evaluate(() => { window.__pg.setTool('move'); window.__pg.deselect(); });
+  await p.mouse.move(1200, 730); await p.waitForTimeout(400);
+  const inCone = await sample(X, Y+40), offCone = await sample(X+250, Y+150);
+  ok('inside the cone is lit, beside it is dark', lum(inCone) > lum(offCone) * 1.6, { inCone, offCone });
+  ok('and it is lit blue', inCone[2] > inCone[0] + 10, inCone);
+  const spots = await p.evaluate(() => window.__pg.spots());
+  ok('the cone points straight up in the host\'s frame', spots.length === 1 && Math.abs(Math.cos(spots[0].dir)) < 0.05 && Math.sin(spots[0].dir) < 0, spots);
+  // wired to a sensor that is off, it is dark
+  await p.evaluate(() => { window.__pg.setTool('sensor'); });
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X-250, Y+220]);
+  await p.evaluate(([a, b2]) => window.__pg.wire(a, b2), [(await p.evaluate(() => window.__pg.gadgets())).filter(g => g.kind === 'sensor')[0].id, spot.id]);
+  await p.evaluate(() => { window.__pg.setTool('move'); window.__pg.deselect(); window.__pg.paused(false); window.__pg.playerTo(3000, 200); });
+  await p.mouse.move(1200, 730); await p.waitForTimeout(500);
+  const wiredOff = await sample(X, Y+40);
+  ok('wired to a sensor that is off, the beam is off', lum(wiredOff) < lum(inCone) * 0.6 && (await p.evaluate(() => window.__pg.spots())).length === 0, { wiredOff, inCone });
+  await p.evaluate(() => window.__pg.paused(true));
+  const roundS = await p.evaluate(() => { var d = window.__pg.serialize('s'); window.__pg.load(d); return window.__pg.gadgets().filter(g => g.kind === 'spot')[0]; });
+  ok('a spotlight survives save and load with its beam', roundS && roundS.cone === 40 && roundS.reach === 500 && roundS.color === '#80D8FF', roundS && [roundS.cone, roundS.reach, roundS.color]);
+
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join('\n') : 'none');
   await b.close();

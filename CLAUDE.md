@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1084 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1093 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1084 checks + checkgeom, in order
+npm test                   # all 1093 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -53,7 +53,7 @@ node regress.js            # 45 — geometry, save/load, play mode, loop and sav
 node tsel.js               # 54 — selection, marquee, group transforms, resize, detach, the number row, the transforms as keys, dragging with physics on, the marquee by material
 node tlayer.js             # 20 — layer accuracy, ranked picking, the hover label, peek, the middle button hiding one thing
 node tmat.js               # 33 — materials, colours, glass, light, opacity, a drawn material of your own
-node tlight.js             # 20 — lighting, shadows, glow
+node tlight.js             # 29 — lighting, shadows, glow; the day glow, reach by size, the Spotlight's cone, wired, saved
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 31 — the personal menu's sections, the Tools bag's four pages, the number keys, the gradient
 node tbolt.js              # 57 — bolts: through the layers, four kinds, limits, the box, the ghost, moving, typed rpm, painting onto a bolted wall, save/load
@@ -218,8 +218,42 @@ intended and matches LBP.
 - Shadows are quads projected from back-facing edges. The interior normal of a
   positively wound ring is `(-dy, dx)`. Each quad's winding is normalised, or
   overlapping quads cancel under nonzero fill.
-- Glow range is 10%–1200% (`GLOW_MIN = 0.1`, `GLOW_MAX = 12`), radius is
-  `L.r + 100 * glow` — **linear**, not squared.
+- Glow range is 10%–1200% (`GLOW_MIN = 0.1`, `GLOW_MAX = 12`). **A
+  light's reach grows with its size**: `lightReach(halfSize, glow)` =
+  `(80 + 0.4 × half) × glow`, so a huge lamp throws a huge light (a
+  1000px strip reaches 280px at glow 1, 3400 at max) and a small one
+  is what it was.
+- **Lights glow in every light, daylight included**, as a shape-hugging
+  halo: `objectGlow(obj)` fills the light pieces and blurs them by the
+  reach (`shadowBlur`, drawn twice plus a tighter pass) into a canvas
+  cached on the object by `geomRev` and `glow` (capped at 1024px a side,
+  scaled down past that; dropped with the bitmap), and `drawLightGlows
+  (layer)` — after each `drawLayer`, before its bolts — blits it
+  additively (`lighter`) in the object's frame at an alpha that rises
+  as the world darkens. Before this `drawLighting` returned at once in
+  daylight and a lamp was invisible except as its own colour; Carson's
+  "you can't even really see the light".
+- **At night the burn and the cast follow the shape.** Each light
+  object is one entry (not one per ring): in the scratch, a soft
+  radial throw out to the reach, and over it the same halo canvas
+  turned with the body — so a strip lights a strip-shaped room —
+  then the shadows cut out of that as before. The colour cast's alpha
+  (`tint`) is down to `0.42 × (1 − light) + 0.06`: it adds light rather
+  than painting over the scene.
+- **Painting a light shows its light**: `drawStrokePreview` draws a
+  light material's stroke path additively with a `shadowBlur` of its
+  reach, so the colour reads mid-stroke, not only on release.
+- **The Spotlight** (`kind:"spot"`, Gameplay, host required): a cone
+  from its spot, `angle` degrees round from straight up in the host's
+  frame (so it turns with the host, as the fan does), `cone` wide,
+  `reach` long, `color` (a palette of light colours and any colour),
+  `bright`; wired, while the signal is on, else always. `spotLights()`
+  lists the ones that are on; `drawSpotGlows` draws each cone
+  additively by day (no shadows in that pass — it is a cheap wedge);
+  `drawLighting` adds them to `lights` with `cone`, clips the scratch
+  to the wedge and fills a radial gradient scaled by `bright`, and the
+  shadows cut it as they cut any light. The cone is outlined in Build
+  while selected or with the tool in hand.
 
 ## The object box
 

@@ -39,6 +39,9 @@ HOOK = """
     saveThing: function(id, name){ var g = gadgetById(id); if (!g) return false; if (!mySkins[g.kind]) mySkins[g.kind] = []; mySkins[g.kind].push({ id: "s" + Date.now(), name: name, data: packDrawnThing(g) }); persistMySkins(); return true; },
     placeSaved: function(kind, entryId){ var e = (mySkins[kind] || []).find(function(x){ return x.id === entryId; }); if (!e) return false; placePreset = { kind: kind, entry: e }; currentTool = kind; canvas.dataset.tool = kind; return true; },
     playHere: function(){ playFromHere(); return mode; },
+    glowOf: function(id){ var o = objects.filter(function(x){ return x.id === id; })[0]; if (!o) return null; var g = objectGlow(o); return g ? { w: g.box.w, h: g.box.h, reach: g.reach, px: g.cv.width * g.cv.height } : null; },
+    spots: function(){ return spotLights().map(function(s){ return { x: s.x, y: s.y, dir: s.dir, half: s.half, reach: s.reach, color: s.color, on: true }; }); },
+    lightAt: function(sx, sy){ var d = ctx.getImageData(Math.round(sx * dpr), Math.round(sy * dpr), 1, 1).data; return { r: d[0], g: d[1], b: d[2], lum: (d[0] * 0.3 + d[1] * 0.59 + d[2] * 0.11) }; },
     moverDraft: function(){ return moverDraft ? moverDraft.id : null; },
     removeGadget: function(id){ var g = gadgetById(id); if (!g) return false; removeGadget(g); clearSelection(); return true; },
     moverChoose: function(id){ var g = gadgetById(id); if (!g) return false; moverDraft = g; return true; },
@@ -160,7 +163,7 @@ HOOK = """
       label: g.label, analog: g.analog, touching: g.touching, playerOnly: g.playerOnly, requireTag: g.requireTag, tagColor: g.tagColor, target: g.target, mode: g.mode, count: g.count, time: g.time, level: g.level, inputReset: g.inputReset,
       emitName: g.emit ? g.emit.name : null, freq: g.freq, maxAlive: g.maxAlive, maxTotal: g.maxTotal, pulse: g.pulse, total: g.total,
       ammoName: g.ammoDef ? g.ammoDef.name : null, ammo: g.ammo, hitUntil: g.hitUntil,
-      text: g.text, showing: g.showing, said: g.said, explode: g.explode, blast: g.blast, sound: g.sound, pitch: g.pitch, every: g.every, state: g.state, inN: g.inN, inOn: g.inOn,
+      text: g.text, showing: g.showing, said: g.said, explode: g.explode, blast: g.blast, sound: g.sound, pitch: g.pitch, every: g.every, state: g.state, inN: g.inN, inOn: g.inOn, cone: g.cone, bright: g.bright,
       hasSkin: !!(g.skin && skinHasArt(g.skin)), actionMode: g.actionMode, ghost: g.ghost, face: g.face, rate: g.rate, pspeed: g.pspeed, life: g.life, psize: g.psize,
       alpha: g.alpha, drawnFacing: g.drawnFacing, dying: g.dying, art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h } : null, hitStrokes: g.hitbox ? g.hitbox.length : 0 }; }); },
     skinStudioAt: function(id, step){ var g = gadgetById(id); if (!g) return false; openSkinStudio(g, step); return !charEditorOverlay.hidden; },
@@ -253,7 +256,7 @@ HOOK = """
     brush: function(){ return { shape: paintShape, r: paintRadius(), mode: paintMode, layer: buildLayer }; },
     bounds: function(id){ var o = objects.filter(function(q){ return q.id===id; })[0]; if(!o) return null;
       var b=o.body.bounds; return {x:+b.min.x.toFixed(2),y:+b.min.y.toFixed(2),x2:+b.max.x.toFixed(2),y2:+b.max.y.toFixed(2)}; },
-    worldLight: function(v){ if (v != null) worldSettings.light = v; return worldSettings.light; },
+    worldLight: function(v){ if (v != null){ worldSettings.light = v; if (!activeChanger()) worldLiveReset(); } return worldSettings.light; },
     matOf: matOf, matKey: matKey,
     setSolidLight: function(v){ var o = selList()[0] || objects[objects.length-1];
       o.lightSolid = !!v; rebuildFromPieces(o); if (objects.indexOf(o)>=0) refreshObjectPhysics(o); return o.id; },

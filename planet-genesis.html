@@ -1722,6 +1722,7 @@
     "tool:objemitter": ["Object emitter", "Fires copies of something you saved — pick which in its box — at a rate, up to a limit. Wire a switch to it to fire on demand. To save something, right-click it: Save as object."],
     "tool:gun":        ["Launcher", "A pickup: walk into it in Play and the cursor becomes a gun. Click to fire. Its box picks what it shoots — a bullet, a ray, a projectile you drew, or something you saved."],
     "tool:fan":        ["Fan", "Blows upward and lifts the player. Its size and strength are in its box, and a wire switches it on and off."],
+    "tool:spot":       ["Spotlight", "Put it on something and it shines a cone of light the way it points — turn the thing to aim it, or set the direction, width and reach in its box. Wire a switch to it to turn it on and off. Best with World Light turned down."],
     "tool:speech":     ["Speech bubble", "Put it on something and type what it says. It speaks while the player is within reach — or, wired, while the signal is on. A sign, a talking creature, a hint."],
     "tool:destroyer":  ["Destroyer", "Put it on something and wire a switch, a sensor or a timer to it: the moment the signal comes on, that thing is gone — with a bang, if you like. A bridge that falls, a wall that blows open. Play only."],
     "tool:sound":      ["Sound", "Put it on something and wire it: it plays its sound when the signal comes on. Pick the sound, its pitch and how loud in its box."],
@@ -3109,7 +3110,7 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter","gun","projsensor","speech","destroyer","sound","gate"];
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter","gun","projsensor","speech","destroyer","sound","gate","spot"];
   // LBP's tag colours, and the names the box shows for them
   var TAG_COLORS = ["#E4574B","#E8891D","#F2B705","#5F9E5A","#2A7B8C","#8E5BB5","#E85A9E","#F6ECD9"];
   var TAG_NAMES = ["red","orange","yellow","green","blue","purple","pink","white"];
@@ -3289,8 +3290,8 @@
     if (matOf(currentTool) && matOf(currentTool).isMask){ currentTool = "move"; canvas.dataset.tool = "move"; }
     renderSelBar();
   }
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter", gun:"Launcher", projsensor:"Projectile sensor", speech:"Speech bubble", destroyer:"Destroyer", sound:"Sound", gate:"Gate" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter", gun:"gun", projsensor:"projsensor", speech:"speech", destroyer:"destroyer", sound:"sound", gate:"gate" };
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter", gun:"Launcher", projsensor:"Projectile sensor", speech:"Speech bubble", destroyer:"Destroyer", sound:"Sound", gate:"Gate", spot:"Spotlight" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter", gun:"gun", projsensor:"projsensor", speech:"speech", destroyer:"destroyer", sound:"sound", gate:"gate", spot:"spot" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   // the sticker in hand: a saved drawing to place copies of; the size and turn it goes on at
   var stickerPick = null, stickerSize = parseFloat(localStorage.getItem("pg_sticker_size") || "120") || 120, stickerRot = 0;
@@ -3465,6 +3466,19 @@
          and is on from then until reset. */
       g.target = extra.target != null ? Math.max(1, Math.min(9999, +extra.target | 0)) : 3;
       g.count = 0; g.wasOn = false; g.inputReset = null; g.wasReset = false;
+      g.visible = extra.visible != null ? !!extra.visible : false;
+    }
+    if (kind === "spot"){
+      /* A spotlight: a cone of light from its spot, `angle` degrees round
+         from straight up in its host's frame (so it turns with the host),
+         `cone` degrees wide, `reach` long, in `color` at `bright`. Wired,
+         while the signal is on; unwired, always. Carson: "a light that is
+         directional, shines light in a cone forward, adjustable". */
+      g.angle = extra.angle != null && isFinite(+extra.angle) ? +extra.angle : 90;
+      g.cone = extra.cone != null ? Math.max(10, Math.min(180, +extra.cone)) : 60;
+      g.reach = extra.reach != null ? Math.max(100, Math.min(3000, +extra.reach)) : 600;
+      g.color = typeof extra.color === "string" && /^#[0-9a-fA-F]{6}$/.test(extra.color) ? extra.color : "#FFE9A8";
+      g.bright = extra.bright != null ? Math.max(0.2, Math.min(3, +extra.bright)) : 1;
       g.visible = extra.visible != null ? !!extra.visible : false;
     }
     if (kind === "speech"){
@@ -3670,9 +3684,9 @@
     });
   }
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter" || t.kind === "speech" || t.kind === "destroyer" || t.kind === "sound" || t.kind === "gate"); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter" || t.kind === "speech" || t.kind === "destroyer" || t.kind === "sound" || t.kind === "gate" || t.kind === "spot"); }
   function hasResetPort(t){ return !!t && (t.kind === "timer" || t.kind === "counter"); }
-  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun" && g.kind !== "speech" && g.kind !== "destroyer" && g.kind !== "sound"; }
+  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun" && g.kind !== "speech" && g.kind !== "destroyer" && g.kind !== "sound" && g.kind !== "spot"; }
   function addWire(from, to, port){
     if (!from || !to || from === to) return false;
     port = port === "reset" && hasResetPort(to) ? "reset" : "in";
@@ -6788,7 +6802,8 @@
                label: g.label, analog: g.analog, touching: g.touching, playerOnly: g.playerOnly, requireTag: g.requireTag, tagColor: g.tagColor, target: g.target, mode: g.mode,
                emit: g.emit ? packEmit(g.emit) : undefined, freq: g.freq, life: g.life, maxAlive: g.maxAlive, maxTotal: g.maxTotal, pulse: g.pulse,
                ammo: g.ammoDef ? packProjDef(g.ammoDef) : undefined, ammo_n: g.ammo,
-               text: g.text, once: g.once, explode: g.explode, blast: g.blast, sound: g.sound, pitch: g.pitch, volume: g.volume, every: g.every };
+               text: g.text, once: g.once, explode: g.explode, blast: g.blast, sound: g.sound, pitch: g.pitch, volume: g.volume, every: g.every,
+               cone: g.cone, bright: g.bright };
   }
   function packEmit(e){ return { name: e.name, pieces: e.pieces, gadgets: e.gadgets && e.gadgets.length ? e.gadgets : undefined, wires: e.wires && e.wires.length ? e.wires : undefined }; }
   function normalizeEmit(e){
@@ -7373,7 +7388,9 @@
     return Math.max(0.25, Math.min(2.4, camScale * dpr * BMP_OVERSAMPLE));
   }
   function dropBitmap(obj){
-    if (!obj || !obj._bmp) return;
+    if (!obj) return;
+    obj._glow = null;
+    if (!obj._bmp) return;
     bmpBudgetUsed -= obj._bmp.px;
     obj._bmp = null;
   }
@@ -7666,6 +7683,109 @@
     obj._lights = out; obj._lightsRev = rev;
     return out;
   }
+  /* ---- Lights, polished (Carson: "it doesn't really feel or look like
+     it lights stuff up, it feels like it just paints over the scene";
+     "when placing a massive light object you can't even see the light").
+     Three changes. A light's reach grows with its size (`lightReach`),
+     so a huge lamp throws a huge light. A light GLOWS in every light —
+     daylight too — as a shape-hugging halo (`objectGlow`: the light
+     pieces filled and blurred by the reach into a cached canvas, drawn
+     additively over the scene by `drawLightGlows`). And at night that
+     same halo is the light's falloff — the burn through the dark and
+     the colour cast follow the SHAPE, not a circle from its centre —
+     with the colour cast toned down so it adds light rather than
+     painting over the scene. ---- */
+  function lightReach(halfSize, glow){ return (80 + 0.4 * halfSize) * (glow == null ? 1 : glow); }
+  var GLOW_MAX_PX = 1024;
+  function objectGlow(obj){
+    var ls = objectLights(obj);
+    if (!ls.length) return null;
+    var glow = obj.glow == null ? 1 : obj.glow, rev = obj.geomRev || 0;
+    var gl = obj._glow;
+    if (gl && gl.rev === rev && gl.glow === glow) return gl;
+    // the light pieces' box, grown by the biggest reach
+    var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, reach = 0, i;
+    for (i = 0; i < ls.length; i++){
+      var L = ls[i];
+      x0 = Math.min(x0, L.x - L.r); y0 = Math.min(y0, L.y - L.r); x1 = Math.max(x1, L.x + L.r); y1 = Math.max(y1, L.y + L.r);
+      reach = Math.max(reach, lightReach(L.r, glow));
+    }
+    var box = { x: x0 - reach, y: y0 - reach, w: (x1 - x0) + reach * 2, h: (y1 - y0) + reach * 2 };
+    var scale = Math.min(1, GLOW_MAX_PX / Math.max(box.w, box.h));
+    var cv = gl && gl.cv ? gl.cv : document.createElement("canvas");
+    cv.width = Math.max(2, Math.ceil(box.w * scale)); cv.height = Math.max(2, Math.ceil(box.h * scale));
+    var c = cv.getContext("2d");
+    c.setTransform(scale, 0, 0, scale, -box.x * scale, -box.y * scale);
+    c.clearRect(box.x, box.y, box.w, box.h);
+    for (i = 0; i < obj.pieces.length; i++){
+      var mat = matOf(obj.pieces[i].m);
+      if (!mat || !mat.emitter) continue;
+      var path = mpPath(obj.pieces[i].poly);
+      c.save();
+      c.shadowColor = mat.color; c.shadowBlur = reach * scale; c.fillStyle = mat.color;
+      c.fill(path); c.fill(path);   // twice: a blur drawn once is faint at its edge
+      c.shadowBlur = reach * scale * 0.3; c.fill(path);   // and a tighter, brighter halo close in
+      c.restore();
+    }
+    obj._glow = { cv: cv, box: box, scale: scale, rev: rev, glow: glow, reach: reach };
+    return obj._glow;
+  }
+  /* The halo over the scene, in every light: additive, so it brightens
+     what is under it rather than covering it. After the layer's objects,
+     before its bolts and gadgets. */
+  function drawLightGlows(layer){
+    var lv = liveLight();
+    var visX0 = camX - 50, visY0 = camY - 50, visX1 = camX + viewRectW / camScale + 50, visY1 = camY + viewRectH / camScale + 50;
+    for (var i = 0; i < objects.length; i++){
+      var o = objects[i];
+      if (o.layer !== layer || (mode === "build" && peekObj === o)) continue;
+      var gl = objectGlow(o);
+      if (!gl) continue;
+      var b = o.body, half = Math.max(gl.box.w, gl.box.h) / 2;
+      if (b.position.x + half < visX0 || b.position.x - half > visX1 || b.position.y + half < visY0 || b.position.y - half > visY1) continue;
+      var depth = layerDepth(layer), glow = o.glow == null ? 1 : o.glow;
+      ctx.save();
+      ctx.translate(b.position.x, b.position.y); ctx.rotate(b.angle);
+      ctx.globalCompositeOperation = "lighter";
+      // brighter in the dark, where a lamp is the thing you see by; still there by day
+      ctx.globalAlpha = depth.a * (o.alpha == null ? 1 : o.alpha) * Math.min(1, (0.28 + 0.5 * (1 - lv)) * Math.min(2, 0.6 + 0.4 * glow));
+      ctx.drawImage(gl.cv, gl.box.x, gl.box.y, gl.box.w, gl.box.h);
+      ctx.restore();
+    }
+    drawSpotGlows(layer, lv);
+  }
+  /* Every spotlight that is on, as a cone in world space: its spot, the
+     direction (its angle round from up, in the host's frame), the half
+     width in radians, the reach, colour and brightness. */
+  var LIGHT_COLORS = ["#FFE9A8", "#FFFFFF", "#FFD1A6", "#FF8A80", "#FFF176", "#B9F6CA", "#80D8FF", "#B388FF", "#F8BBD0", "#FFAB40"];
+  function spotOn(g){ return g.input != null ? g.input > 0 : true; }
+  function spotLights(){
+    var out = [];
+    for (var i = 0; i < gadgets.length; i++){
+      var g = gadgets[i];
+      if (g.kind !== "spot" || !spotOn(g)) continue;
+      var wp = gadgetWorld(g), ha = g.obj && g.obj.body ? g.obj.body.angle : 0;
+      var dir = ha + (g.angle - 90) * Math.PI / 180;
+      out.push({ x: wp.x, y: wp.y, dir: dir, half: g.cone * Math.PI / 360, reach: g.reach, color: g.color, bright: g.bright, layer: g.layer, obj: g.obj, g: g });
+    }
+    return out;
+  }
+  // the cones over the scene, additive, in every light
+  function drawSpotGlows(layer, lv){
+    var spots = spotLights();
+    for (var i = 0; i < spots.length; i++){
+      var sp = spots[i]; if (sp.layer !== layer) continue;
+      var depth = layerDepth(layer);
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = depth.a * Math.min(1, (0.22 + 0.4 * (1 - lv)) * sp.bright);
+      var gr = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, sp.reach);
+      gr.addColorStop(0, hexToRgba(sp.color, 1)); gr.addColorStop(0.5, hexToRgba(sp.color, 0.5)); gr.addColorStop(1, hexToRgba(sp.color, 0));
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.moveTo(sp.x, sp.y); ctx.arc(sp.x, sp.y, sp.reach, sp.dir - sp.half, sp.dir + sp.half); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  }
   function drawLighting(){
     var lv = liveLight();
     if (lv >= 0.995) return;
@@ -7696,20 +7816,26 @@
     var sc = camScale * dpr * LR, lights = [], i;
     for (i = 0; i < objects.length; i++){
       var o = objects[i];
-      var ls = objectLights(o);
-      if (!ls.length) continue;
+      var gl = objectGlow(o);
+      if (!gl) continue;
       var bd = o.body, ca = Math.cos(bd.angle), sa = Math.sin(bd.angle);
-      var glow = (o.glow == null ? 1 : o.glow);
-      for (var j = 0; j < ls.length; j++){
-        var L = ls[j];
-        var wx = L.x*ca - L.y*sa + bd.position.x, wy = L.x*sa + L.y*ca + bd.position.y;
-        var rr = (L.r + 100 * glow) * sc;
-        if (rr < 2) continue;
-        var lxs = (wx - camX)*sc + shakeOffX*LR, lys = (wy - camY)*sc + shakeOffY*LR;
-        if (lxs + rr < 0 || lxs - rr > W || lys + rr < 0 || lys - rr > H) continue;
-        lights.push({ x:lxs, y:lys, r:rr, c:L.color, layer:o.layer, obj:o });
-      }
+      // the light's centre for the shadows: the middle of its light pieces' box
+      var lcx = gl.box.x + gl.box.w / 2, lcy = gl.box.y + gl.box.h / 2;
+      var wx = lcx*ca - lcy*sa + bd.position.x, wy = lcx*sa + lcy*ca + bd.position.y;
+      var rr = Math.hypot(gl.box.w, gl.box.h) / 2 * sc;
+      if (rr < 2) continue;
+      var lxs = (wx - camX)*sc + shakeOffX*LR, lys = (wy - camY)*sc + shakeOffY*LR;
+      if (lxs + rr < 0 || lxs - rr > W || lys + rr < 0 || lys - rr > H) continue;
+      lights.push({ x:lxs, y:lys, r:rr, c:objectLights(o)[0].color, layer:o.layer, obj:o, glow:gl, angle:bd.angle, ox:(bd.position.x - camX)*sc + shakeOffX*LR, oy:(bd.position.y - camY)*sc + shakeOffY*LR });
       if (lights.length > 200) break;
+    }
+    // the spotlights: a cone each
+    var spots = spotLights();
+    for (i = 0; i < spots.length && lights.length < 240; i++){
+      var sp = spots[i], sr = sp.reach * sc;
+      var sxs = (sp.x - camX)*sc + shakeOffX*LR, sys = (sp.y - camY)*sc + shakeOffY*LR;
+      if (sxs + sr < 0 || sxs - sr > W || sys + sr < 0 || sys - sr > H) continue;
+      lights.push({ x:sxs, y:sys, r:sr, c:sp.color, layer:sp.layer, obj:sp.obj, cone:sp, bright:sp.bright });
     }
     /* Each light is built on its own before it touches the night: its
        falloff is drawn into a scratch buffer, everything solid in the way
@@ -7735,7 +7861,7 @@
     if (shadowBuf.width !== S || shadowBuf.height !== S){ shadowBuf.width = S; shadowBuf.height = S; }
     var sh = shadowBuf.getContext("2d");
     var half = S / 2;
-    var tint = 0.62 * (1 - lv) + 0.10;
+    var tint = 0.42 * (1 - lv) + 0.06;
     var budget = 6000;                       // shadow corners per frame
     for (i = 0; i < lights.length; i++){
       var a = lights[i];
@@ -7749,12 +7875,33 @@
       // put the light at the middle of the scratch, then carry on
       // working in ordinary screen coordinates
       sh.setTransform(k, 0, 0, k, half - a.x*k, half - a.y*k);
-      var g1 = sh.createRadialGradient(a.x, a.y, 0, a.x, a.y, a.r);
-      g1.addColorStop(0, hexToRgba(a.c, 1));
-      g1.addColorStop(0.5, hexToRgba(a.c, 0.55));
-      g1.addColorStop(1, hexToRgba(a.c, 0));
-      sh.fillStyle = g1;
-      sh.beginPath(); sh.arc(a.x, a.y, a.r, 0, Math.PI*2); sh.fill();
+      if (a.cone){
+        // a spotlight: its cone, brightest along the middle, fading to the edges and the end
+        var cn = a.cone, a0 = cn.dir - cn.half, a1 = cn.dir + cn.half;
+        sh.save();
+        sh.beginPath(); sh.moveTo(a.x, a.y); sh.arc(a.x, a.y, a.r, a0, a1); sh.closePath(); sh.clip();
+        var g1 = sh.createRadialGradient(a.x, a.y, 0, a.x, a.y, a.r);
+        g1.addColorStop(0, hexToRgba(a.c, Math.min(1, a.bright)));
+        g1.addColorStop(0.55, hexToRgba(a.c, Math.min(1, 0.6 * a.bright)));
+        g1.addColorStop(1, hexToRgba(a.c, 0));
+        sh.fillStyle = g1;
+        sh.beginPath(); sh.arc(a.x, a.y, a.r, 0, Math.PI*2); sh.fill();
+        sh.restore();
+      } else {
+        // a light object: a soft throw out to its reach, and over it its own halo,
+        // turned as the object is — so the light follows the shape and still carries
+        var g1 = sh.createRadialGradient(a.x, a.y, 0, a.x, a.y, a.r);
+        g1.addColorStop(0, hexToRgba(a.c, 0.85));
+        g1.addColorStop(0.45, hexToRgba(a.c, 0.42));
+        g1.addColorStop(1, hexToRgba(a.c, 0));
+        sh.fillStyle = g1;
+        sh.beginPath(); sh.arc(a.x, a.y, a.r, 0, Math.PI*2); sh.fill();
+        var gb = a.glow, gcs = Math.cos(a.angle), gsn = Math.sin(a.angle);
+        sh.save();
+        sh.transform(gcs, gsn, -gsn, gcs, a.ox, a.oy);
+        sh.drawImage(gb.cv, gb.box.x * sc, gb.box.y * sc, gb.box.w * sc, gb.box.h * sc);
+        sh.restore();
+      }
 
       // anything solid on the light's own layer takes its light away —
       // except the thing the light is part of, which would otherwise
@@ -8012,6 +8159,11 @@
       ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2); ctx.fillStyle = on ? sc : "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, 5, Math.PI * 0.75, Math.PI * 2.25); ctx.strokeStyle = "#F6ECD9"; ctx.lineWidth = 2; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI*2); ctx.fillStyle = sc; ctx.fill();
+    } else if (g.kind === "spot"){
+      // a torch: a head in its colour, a beam mark
+      ctx.beginPath(); ctx.rect(-4, -2, 8, 12); ctx.fillStyle = "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-8, -2); ctx.lineTo(8, -2); ctx.lineTo(5, -11); ctx.lineTo(-5, -11); ctx.closePath(); ctx.fillStyle = on ? g.color : "#8B8374"; ctx.fill(); ctx.stroke();
+      if (on){ ctx.globalAlpha = (alpha == null ? 1 : alpha) * 0.5; ctx.beginPath(); ctx.moveTo(-5, -11); ctx.lineTo(-11, -22); ctx.lineTo(11, -22); ctx.lineTo(5, -11); ctx.closePath(); ctx.fillStyle = g.color; ctx.fill(); ctx.globalAlpha = alpha == null ? 1 : alpha; }
     } else if (g.kind === "speech"){
       // a little balloon with dots
       ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-11, -9, 22, 15, 6) : ctx.rect(-11, -9, 22, 15);
@@ -8511,6 +8663,18 @@
       ctx.restore();
     });
     // a mover waiting for its second click: the travel follows the cursor
+    // a spotlight's cone outlined while it is selected or the tool is in hand
+    if (mode === "build"){
+      for (var si = 0; si < gadgets.length; si++){
+        var sg = gadgets[si];
+        if (sg.kind !== "spot" || (selectedGadget !== sg && currentTool !== "spot")) continue;
+        var swp = gadgetWorld(sg), sha = sg.obj && sg.obj.body ? sg.obj.body.angle : 0, sdir = sha + (sg.angle - 90) * Math.PI / 180, shalf = sg.cone * Math.PI / 360;
+        ctx.save();
+        ctx.beginPath(); ctx.moveTo(swp.x, swp.y); ctx.arc(swp.x, swp.y, sg.reach, sdir - shalf, sdir + shalf); ctx.closePath();
+        ctx.lineWidth = 2/camScale; ctx.strokeStyle = sg.color; ctx.setLineDash([8/camScale, 6/camScale]); ctx.globalAlpha = 0.9; ctx.stroke(); ctx.setLineDash([]);
+        ctx.restore();
+      }
+    }
     if (moverDraft && mode === "build"){
       var mst = gadgetWorld(moverDraft);
       ctx.save();
@@ -9383,9 +9547,9 @@
     // Draw order: Back decoration, Mid (the actual level), the player
     // and its markers, THEN Front decoration on top — so anything you
     // paint on the front layer correctly covers the player, LBP-style.
-    drawLayer(0);
+    drawLayer(0); drawLightGlows(0);
     drawBolts(0); drawLinks(0); drawGadgets(0); drawSprites(0);
-    drawLayer(1);
+    drawLayer(1); drawLightGlows(1);
     drawBolts(1); drawLinks(1); drawGadgets(1); drawSprites(1);
     drawBubbles();
     checkpoints.forEach(function(cp, i){ drawFlag(cp, i===0 ? "#5F9E5A" : "#2F86A6", i===0 ? "start" : "checkpoint"); });
@@ -9393,7 +9557,7 @@
     drawPlayer();
     drawParticles();
     drawMaterialWater();
-    drawLayer(2);
+    drawLayer(2); drawLightGlows(2);
     drawBolts(2); drawLinks(2); drawGadgets(2); drawSprites(2);
     drawWires();
     drawUsePrompt();
@@ -10233,7 +10397,7 @@
                   note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
     logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["impact","💥","Impact sensor"],["projsensor","🎯","Projectile sensor"],["tag","🏷","Tag"],["tagsensor","📡","Tag sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["timer","⏱","Timer"],["counter","🔢","Counter"],["gate","🔀","Gate"],["changer","🌗","World changer"]],
                   note:"Put them on something. Right-click one and Connect it to a motor, a piston, a camera, a mover or a world changer — it drives that while it is on." },
-    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["speech","💬","Speech bubble"],["destroyer","💣","Destroyer"],["sound","🔊","Sound"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
+    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["spot","🔦","Spotlight"],["speech","💬","Speech bubble"],["destroyer","💣","Destroyer"],["sound","🔊","Sound"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
                   note:"A camera shows its shot while the player is in its zone. A mover carries an object along a line. A creature eye makes an object chase the player." }
   };
   function renderToolsTab(el, pageId){
@@ -12538,6 +12702,16 @@
       ctx.restore();
       ctx.globalAlpha = depth.a; ctx.strokeStyle = INK; ctx.lineWidth = INK_W;
       ctx.stroke(path);
+      if (mat.emitter){
+        // a light shows its light while it is painted, not only once it is let go of
+        var bb = pgBounds(stroke.poly), pr = lightReach(bb ? Math.max(bb.w, bb.h) / 2 : 20, newGlow);
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = depth.a * (0.35 + 0.45 * (1 - liveLight()));
+        ctx.shadowColor = mat.color; ctx.shadowBlur = pr * camScale * 0.55; ctx.fillStyle = mat.color;
+        ctx.fill(path); ctx.fill(path);
+        ctx.restore();
+      }
     }
     ctx.restore();
   }
@@ -13659,6 +13833,27 @@
       cnote.textContent = "Each time its signal comes on it counts one; at the target its own output comes on and stays on. Reset from… puts it back to nought. Now at " + (g.count || 0) + ".";
       cnote.style.flexBasis = "100%"; opSection(null).appendChild(cnote);
       opBtn(opSection(null), "↺ Back to nought now", "", function(){ g.count = 0; renderSelBar(); sfx("tick"); }, "wide");
+    }
+    if (g.kind === "spot"){
+      var spc = opSection("Colour");
+      var spRow = document.createElement("div"); spRow.className = "colorGrid"; spRow.style.flexBasis = "100%";
+      LIGHT_COLORS.forEach(function(c){
+        var b = document.createElement("button"); b.className = "colorSw" + (g.color === c ? " active" : ""); b.style.background = c; b.title = c;
+        b.addEventListener("click", function(){ pushUndo("changing a spotlight"); g.color = c; renderSelBar(); sfx("tick"); });
+        spRow.appendChild(b);
+      });
+      var spPick = document.createElement("input"); spPick.type = "color"; spPick.value = g.color; spPick.title = "Any colour";
+      spPick.addEventListener("input", function(){ g.color = spPick.value; });
+      spRow.appendChild(spPick);
+      spc.appendChild(spRow);
+      var spb = opSection("Beam");
+      slider(spb, "Points", g.angle, -180, 180, 5, function(v){ g.angle = v; }, function(v){ return v === 0 ? "up" : (Math.abs(v) === 180 ? "down" : (v === 90 ? "right" : (v === -90 ? "left" : Math.round(v) + "°"))); }, "changing a spotlight");
+      slider(spb, "Width", g.cone, 10, 180, 5, function(v){ g.cone = v; }, function(v){ return Math.round(v) + "°"; }, "changing a spotlight");
+      slider(spb, "Reach", g.reach, 100, 3000, 20, function(v){ g.reach = v; }, function(v){ return Math.round(v) + "px"; }, "changing a spotlight");
+      slider(spb, "Brightness", g.bright, 0.2, 3, 0.1, function(v){ g.bright = v; }, function(v){ return Math.round(v * 100) + "%"; }, "changing a spotlight");
+      var spn = document.createElement("div"); spn.className = "noteText";
+      spn.textContent = "The beam turns with whatever it sits on. " + (g.input != null ? "Wired: it shines while the signal is on." : "Wire a switch or sensor to it and it shines only while that is on.") + " Turn World Light down to see it at its best.";
+      spn.style.flexBasis = "100%"; opSection(null).appendChild(spn);
     }
     if (g.kind === "speech"){
       var sp = opSection("Says");
