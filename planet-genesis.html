@@ -7341,12 +7341,18 @@
     var solids = [], pb = player.bounds;
     for (var i = 0; i < objects.length; i++){
       var o = objects[i]; if (!o.body || o.decorative || o.projectile) continue;
-      if (objectWalkThrough(o)) continue;
+      // nothing you can pass through can squash you: a body that is a
+      // sensor (a walk-through light, a drawn thing with no collision) is
+      // skipped whole, and a sensor PART — a light painted into a plank —
+      // is left out of a solid thing (Carson: "when I fall through an
+      // object that is supposed to have no collision I die")
+      if (o.body.isSensor || objectWalkThrough(o)) continue;
+      if (carried && o.body === carried.body) continue;
       var ob = o.body.bounds;
       if (ob.max.x < pb.min.x || ob.min.x > pb.max.x || ob.max.y < pb.min.y || ob.min.y > pb.max.y) continue;
-      solids.push(o.body);
+      var parts = o.body.parts.length > 1 ? o.body.parts.slice(1) : o.body.parts;
+      for (var k = 0; k < parts.length; k++) if (!parts[k].isSensor) solids.push(parts[k]);
     }
-    if (carried && carried.body) solids = solids.filter(function(b){ return b !== carried.body; });
     var deepest = 0;
     if (solids.length){
       var hits = Query.collides(player, solids);

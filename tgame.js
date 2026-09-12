@@ -412,6 +412,21 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(() => window.__pg.paused(false)); await p.waitForTimeout(500);
   ok('ending up inside a thing, with the world running in Build, squashes too', (await p.evaluate(() => window.__pg.bangs())).crushes > cq3);
   await p.evaluate(() => window.__pg.paused(true));
+  // nothing you can pass through squashes you: a walk-through light, and a light painted into a plank
+  await fresh();
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);
+  await lockAll();
+  await rect('light', 1, X-200, Y-120, X-40, Y+100);   // a light-only shape: no collision
+  await rect('wood', 1, X+60, Y-120, X+260, Y+100);    // a plank…
+  await lockAll();
+  await rect('light', 1, X+120, Y-100, X+200, Y+100);  // …with a light painted into it
+  await lockAll();
+  const cq4 = (await p.evaluate(() => window.__pg.bangs())).crushes;
+  await play(); await standAt(X-120, Y-60); await p.waitForTimeout(900);
+  ok('falling through a walk-through light is not a crush', (await p.evaluate(() => window.__pg.bangs())).crushes === cq4 && (await pos()).y > Y, { crushes: (await p.evaluate(() => window.__pg.bangs())).crushes, cq4, pos: await pos() });
+  await standAt(X+160, Y-60); await p.waitForTimeout(900);
+  ok('nor the light inside a plank', (await p.evaluate(() => window.__pg.bangs())).crushes === cq4, { crushes: (await p.evaluate(() => window.__pg.bangs())).crushes, cq4, pos: await pos() });
+  await build();
 
   ok('no page errors', errs.length === 0, errs);
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');

@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` `tversus.js` `ttopdown.js` `tcoaster.js` | Playwright suites, 1348 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` `tversus.js` `ttopdown.js` `tcoaster.js` | Playwright suites, 1350 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1348 checks + checkgeom, in order
+npm test                   # all 1350 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -78,7 +78,7 @@ node tplayers.js           # 43 — local players: a second pad joins on Start, 
 node tversus.js            # 34 — Versus: players collide (one on the other's head), the camera frames everyone, a launcher's shot is a knockout credited to the shooter, the HUD chips, the winner named and a new round, lives putting a player out, a hazard for nobody's credit, an adventure's shot only splatting
 node ttopdown.js           # 27 — Top-down: no gravity, a disc of a body, the arrows every way and no jump, looking at the cursor, a shove that slides and stops, water a still pool, a creature chasing down the screen, gravity back in an adventure, saved
 node tcoaster.js           # 34 — the rollercoaster: the track tool draws a line (no object), the coaster waits at the start, F rides, it runs to the end and stops, Space hops off, it glides back; four seats coupled along the rail and the pace; a drawn seat, the box, the level file, Del and undo; two riders in two seats
-node tgame.js              # 85 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
+node tgame.js              # 87 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -849,8 +849,11 @@ fast or get hit too hard they break to avoid breaking the game".
 ## Squashed
 
 `crushCheck`, an `afterUpdate` step: the deepest overlap between the
-player and any solid (`Query.collides` depths; a carried object left
-out) past `CRUSH_FRAC` (0.42) of the body's narrow side for
+player and any solid (`Query.collides` depths against the solid PARTS
+only — a sensor body such as a walk-through light or a drawn thing
+with no collision is skipped whole, and a sensor part such as a light
+painted into a plank is left out of it, since nothing you can pass
+through can squash you; a carried object left out) past `CRUSH_FRAC` (0.42) of the body's narrow side for
 `CRUSH_STEPS` (10) steps in a row is a crush, not a graze — a landing
 dents a body a pixel or two, a squeeze pushes right into it — and the
 character dies (zap, shake, "Squashed!", `respawnPlayer`). In Play, and
