@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1093 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1112 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1093 checks + checkgeom, in order
+npm test                   # all 1112 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -70,7 +70,7 @@ node tfill.js              # 14 — the fill: a closed outline fills with materi
 node tfan.js               # 9 — the Fan: lifts the player and a loose crate, hovers in reach, wired on/off, saved
 node tstickers.js          # 15 — stickers: drawn, kept, stuck on a thing (never on nothing), riding, picked by their picture, size/turn/flip, saved
 node tlogic.js             # 43 — tags and tag sensors, impact sensors, timers, counters, the reset wire, the object emitter
-node tproj.js              # 23 — the launcher (bullets, shots that run out, a ray, a saved object), the projectile sensor, a drawn projectile that hurts a creature, an emitter firing bullets, the save tabs
+node tproj.js              # 42 — the launcher (bullets, shots that run out, a ray, a saved object), a drawn projectile that hurts a creature, an emitter firing bullets, the save tabs; how it flies is the firer's, the Impact drawing, an emitter firing rays, the projectile sensor's every-Nth-hit, named projectile, box, painted spots and destroy
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node tui.js                # 97 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider
@@ -742,6 +742,53 @@ projectile sensor there pulsed, a beam drawn for 140ms (`gunBeams`).
 Player-fired projectiles share `CARRY_GROUP`, so they never hit the
 player. `drawGunHud` names the ammo and counts the shots. Entering
 Play disarms.
+
+**How a projectile flies is a setting of what fires it.** The studio's
+projectile draft is a look, an **Impact** drawing and a hitbox — nothing
+about speed or trajectory (Carson: "custom projectiles should not have
+settings relating to trajectory"). The launcher and the object emitter
+carry `pgrav`, `plife`, `pbreaks`, `phurts` (`readFlight` on load,
+`flightOf` when firing, `renderFlightRows` in both boxes under "How it
+flies", `PROJ_DEFAULTS` the defaults) and hand them to
+`spawnProjectile` as `opts`, which win over the definition's old
+fields; a definition still carries those so a file from before loads.
+`o.projectile` keeps `name` and `def`.
+
+**The Impact drawing** (`SKIN_STATES.projectile` gains `impact`): when
+a breaking projectile hits, `spawnImpact` pushes a sprite of the
+impact frames — `frames` on the sprite instead of an emitter's `g`,
+which `stepSprites`/`drawSprites` allow — the projectile's size ×1.3,
+turned the way it flew, at least 24 frames long so it is never a
+blink, fading only at the end (`noFade`). `impactsSeen` counts them.
+
+**The emitter chooses what kind of thing it fires** — `fireKind`:
+`object`, `bullet`, `projectile` or `ray` — as a row of buttons at the
+top of its box, the list below filtered to that kind (Carson's "a
+little circle at the top where you choose what is being emitted").
+`ray`: `objEmitterStep` fires `fireRay` from the emitter's mouth
+(walked out of its host) along its aim, `reach` long. `fireRay(from,
+ang, maxLen, skip)` is the one ray for the launcher and the emitter:
+`Query.ray` to the first solid `skip` does not rule out, bisected to
+its edge, a creature popped, a projectile sensor hit at the point (and
+any sensor whose box the beam crosses, `rayCrossesZone`), a beam kept
+in `gunBeams`.
+
+**The projectile sensor, grown** (Carson's list): `hits` — fires on
+every Nth hit (`count`, `fires`); `only` — a named projectile
+(`Bullet`, `Ray`, or a drawn one's name) or any; where a hit counts —
+anywhere on the host, in a box round it (`useZone`, `zone` `{dx, dy,
+w, h}` in world axes about its spot, drawn in Build while selected or
+the tool is in hand; any projectile inside it counts once,
+`pj.zoned[g.id]`, checked each gadget step), or on painted spots
+(`useSpots`, `weak` — painted with the creature's own mask tools,
+`beginMaskPaint(g, "weak")`, drawn as red targets, carried through
+rebuilds, resize and flip with the creature's areas); and `destroy` —
+the firing hit takes the host with it in Play (`destroyHost` with a
+small bang). `projSensorHit(g, name, at, dir)` is the one gate: the
+name, then the spots — the hit point sits on the surface, where a
+painted edge is a coin toss, so it also looks 4 and 8px in along the
+shot — then the count. `resetGadgetsForPlay` clears `count` and
+`fires`.
 
 **An object emitter can fire projectiles** (`ammoDef` instead of
 `emit`): spawned from the emitter's spot walked out of its host along

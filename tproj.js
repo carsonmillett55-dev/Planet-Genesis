@@ -28,6 +28,8 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const kind = (k) => gadgets().then(gs => gs.filter(g => g.kind === k)[0]);
   const kinds = (k) => gadgets().then(gs => gs.filter(g => g.kind === k));
   const idOf = async (k, i) => (await kinds(k))[i || 0].id;
+  const G = async (k, i) => (await kinds(k))[i || 0];
+  const objs = () => p.evaluate(() => window.__pg.objects().length);
   const stats = () => p.evaluate(() => window.__pg.stats());
   const pos = () => p.evaluate(() => window.__pg.playerPos());
   const lockAll = () => p.evaluate(() => { window.__pg.objects().forEach(o => { if (!o.body.isStatic){ window.__pg.select(o); window.__pg.anchor(); } }); window.__pg.deselect(); });
@@ -169,6 +171,114 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X+250, Y+40]); await p.waitForTimeout(300);
   const placed = (await kinds('creature')).slice(-1)[0];
   ok('a click places it ready-made: no studio, hitbox and weak spot on', (await kinds('creature')).length === nCr + 1 && (await p.evaluate(() => document.getElementById('charEditorOverlay').hidden)) && placed.hitStrokes === 1 && placed.weakArea > 20 && placed.hasSkin && placed.ghost === false, placed && { hit: placed.hitStrokes, weak: placed.weakArea, ghost: placed.ghost });
+
+  console.log('');
+  console.log('== how it flies is the firer\'s: the studio has no flight settings, the launcher and emitter do ==');
+  ok('the projectile studio no longer asks how it flies', await p.evaluate(() => { window.__pg.projDraft(); return !/How it flies/.test(document.getElementById('ceLeft').innerText); }));
+  ok('but it has an Impact drawing', await p.evaluate(() => /Impact/.test(document.getElementById('ceLeft').innerText)));
+  await st('size', 30, 30);
+  const nx2 = await p.evaluate(() => Array.from(document.querySelectorAll('#ceLeft button')).map(b => b.textContent).find(t => /^Next:/.test(t)));
+  await st('click', nx2); await st('setColor', '#2F86A6'); await stroke(0.1, 0.5, 0.9, 0.5);
+  await st('go', 'impact', 0); await st('setColor', '#F2B705'); await stroke(0.2, 0.2, 0.8, 0.8); await stroke(0.2, 0.8, 0.8, 0.2);
+  await st('go', 'hitbox', 0); await stroke(0.1, 0.5, 0.9, 0.5);
+  await st('close'); await p.waitForTimeout(200);
+  await p.evaluate(() => { document.getElementById('nameInput').value = 'Splat'; document.getElementById('nameOk').click(); }); await p.waitForTimeout(200);
+  const mine2 = await p.evaluate(() => window.__pg.myProjectiles());
+  const splat = mine2.filter(m => m.name === 'Splat')[0];
+  ok('Splat is kept', !!splat);
+  // a range: a pedestal for the emitter on the left, a tall wall on the right
+  const range = async () => {
+    await fresh();
+    await rect('wood', 1, X-400, Y+100, X+400, Y+140);
+    await rect('wood', 1, X-380, Y-200, X-300, Y-140);   // the pedestal
+    await rect('metal', 1, X+300, Y-250, X+340, Y+100);  // the wall (its top on screen: a drag must never start off it)
+    await lockAll();
+  };
+  const emitterOn = async (x, y, props, ammo) => {
+    const g = await place('objemitter', x, y);
+    if (ammo) await p.evaluate(([id, e]) => window.__pg.emitterUseProjectile(id, e), [g.id, ammo]);
+    await p.evaluate(([id, pr]) => window.__pg.gadgetSet(id, pr), [g.id, props]);
+    return g;
+  };
+  await range();
+  await emitterOn(X-340, Y-170, { fireKind: 'projectile', angle: 90, speed: 700, pgrav: 0, plife: 2.5, pbreaks: true, phurts: false, freq: 0.5, maxAlive: 3 }, splat.id);
+  await play(); await standAt(X-380, Y+60); await p.waitForTimeout(300);
+  const pf = await p.evaluate(() => window.__pg.projFlight());
+  ok('what the emitter fires flies by the emitter\'s settings, not the drawing\'s', pf.length >= 1 && pf[0].name === 'Splat' && pf[0].grav === 0 && pf[0].life === 2.5 && pf[0].hurts === false, pf[0]);
+  await p.waitForTimeout(1000);
+  const imps = await p.evaluate(() => window.__pg.impacts());
+  ok('hitting the wall plays its Impact drawing there', imps.seen >= 1 && imps.lastX > X+250, imps);
+  await build();
+  const fk = (await kinds('objemitter'))[0];
+  ok('the emitter remembers what kind of thing it fires', fk.fireKind === 'projectile' && fk.pgrav === 0 && fk.plife === 2.5);
+
+  console.log('');
+  console.log('== an emitter can fire rays ==');
+  await range();
+  await emitterOn(X-340, Y-170, { fireKind: 'ray', angle: 90, freq: 0.3, reach: 2000 });
+  await place('projsensor', X+320, Y-170);
+  await play(); await standAt(X-380, Y+60); await p.waitForTimeout(500);
+  ok('rays go out and the sensor on the wall is hit', (await p.evaluate(() => window.__pg.beams())) >= 1 && (await G('projsensor')).out === 1, { beams: await p.evaluate(() => window.__pg.beams()), out: (await G('projsensor')).out });
+  await build();
+
+  console.log('');
+  console.log('== the projectile sensor: every Nth hit, a named projectile only, a box round it, painted spots, destroy ==');
+  await range();
+  await emitterOn(X-340, Y-170, { fireKind: 'bullet', angle: 90, speed: 900, pgrav: 0, freq: 0.25, maxAlive: 6 }, 'bullet');
+  const ps3 = await place('projsensor', X+320, Y-170);
+  await p.evaluate(id => window.__pg.gadgetSet(id, { hits: 3 }), ps3.id);
+  await play(); await standAt(X-380, Y+60); await p.waitForTimeout(900);
+  let s3 = await G('projsensor');
+  ok('with "every 3rd hit", the first hits count but do not fire', s3.hitCount >= 1 && s3.hitCount < 3 && s3.out === 0, { count: s3.hitCount, out: s3.out });
+  await p.waitForTimeout(600);
+  s3 = await G('projsensor');
+  ok('the third fires it', s3.fires >= 1 && s3.fires < 3, { count: s3.hitCount, out: s3.out, fires: s3.fires });
+  await build();
+  await p.evaluate(id => window.__pg.gadgetSet(id, { hits: 1, only: 'Splat' }), (await G('projsensor')).id);
+  await play(); await standAt(X-380, Y+60); await p.waitForTimeout(1000);
+  ok('asked for Splat only, bullets do not count', (await G('projsensor')).out === 0 && (await G('projsensor')).hitCount === 0);
+  await build();
+  await p.evaluate(id => window.__pg.gadgetSet(id, { only: 'Bullet' }), (await G('projsensor')).id);
+  await play(); await standAt(X-380, Y+60); await p.waitForTimeout(1000);
+  ok('asked for the bullet, it counts', (await G('projsensor')).fires >= 1);
+  await build();
+  // a box round it: bullets flying past the sensor's box count without touching the wall
+  await p.evaluate(id => window.__pg.gadgetSet(id, { only: null, useZone: true, zone: { dx: -200, dy: 0, w: 120, h: 400 } }), (await G('projsensor')).id);
+  await play(); await standAt(X-380, Y+60); await p.waitForTimeout(700);
+  ok('a projectile crossing the box counts', (await G('projsensor')).fires >= 1, (await G('projsensor')).fires);
+  await build();
+  // painted spots: nothing counts until spots are painted; then only a hit on them does
+  await p.evaluate(id => window.__pg.gadgetSet(id, { useZone: false, useSpots: true, hits: 1 }), (await G('projsensor')).id);
+  await play(); await standAt(X-380, Y+60); await p.waitForTimeout(1000);
+  ok('with spots chosen and none painted, nothing counts', (await G('projsensor')).out === 0);
+  await build();
+  const psId = (await G('projsensor')).id;
+  await p.evaluate(id => window.__pg.beginMask(id, 'weak'), psId);
+  await p.evaluate(() => window.__pg.setPaintMode('rect'));
+  const a1 = await w2p(X+295, Y-250), c1 = await w2p(X+345, Y-195);   // the top of the wall
+  await p.mouse.move(a1.x, a1.y); await p.mouse.down(); await p.mouse.move(c1.x, c1.y, { steps: 6 }); await p.mouse.up(); await p.waitForTimeout(200);
+  await p.keyboard.press('Escape');
+  ok('spots painted on the top of the wall', (await G('projsensor')).spotArea > 500, (await G('projsensor')).spotArea);
+  await play(); await standAt(X-380, Y+60); await p.waitForTimeout(1000);
+  ok('bullets hitting the wall below the spots do not count', (await G('projsensor')).out === 0 && (await G('projsensor')).hitCount === 0);
+  await build();
+  // a second emitter higher up, aimed at the painted top
+  await rect('wood', 1, X, Y-230, X+80, Y-190);   // (clear of the HUD pills at the top left, which would take the drag)
+  await lockAll();
+  await emitterOn(X+40, Y-210, { fireKind: 'bullet', angle: 90, speed: 900, pgrav: 0, freq: 0.25, maxAlive: 6 }, 'bullet');
+  await play(); await standAt(X-380, Y+60); await p.waitForTimeout(1000);
+  ok('bullets hitting the painted spots count', (await G('projsensor')).fires >= 1, await G('projsensor'));
+  await build();
+  // destroy: the wall goes on the hit
+  await p.evaluate(id => window.__pg.gadgetSet(id, { useSpots: false, destroy: true, hits: 1 }), (await G('projsensor')).id);
+  const nO = await objs();
+  await play(); await standAt(X-380, Y+60); await p.waitForTimeout(1000);
+  ok('with destroy on, the hit takes the wall with it', (await kinds('projsensor')).length === 0 && (await p.evaluate(() => window.__pg.objects().filter(o => o.pieces[0].m === 'metal').length)) === 0, { before: nO, after: await objs() });
+  await build();
+  ok('Build has the wall and its sensor back', (await kinds('projsensor')).length === 1 && (await p.evaluate(() => window.__pg.objects().filter(o => o.pieces[0].m === 'metal').length)) === 1);
+  const dataP = await p.evaluate(() => window.__pg.serialize('ps'));
+  const psF = dataP.gadgets.filter(g => g.kind === 'projsensor')[0];
+  ok('the level file carries the sensor\'s settings', psF && psF.destroy === true && psF.hits === 1 && psF.useSpots === false && psF.weak, psF && [psF.destroy, psF.hits, !!psF.weak]);
 
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs : 'none');
