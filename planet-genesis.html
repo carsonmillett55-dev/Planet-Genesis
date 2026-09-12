@@ -983,6 +983,14 @@
     padding:.3rem .9rem; pointer-events:none; white-space:nowrap;
   }
   #scoreHud[hidden]{ display:none !important; }
+  #leaveHud{
+    position:absolute; top:2.7rem; left:5.4rem; z-index:16; cursor:pointer;
+    background:rgba(142,91,181,.92); border:2px solid var(--ink); border-radius:999px;
+    color:#F6ECD9; font-family:'Patrick Hand',cursive; font-weight:700; font-size:.9rem;
+    padding:.3rem .9rem; white-space:nowrap;
+  }
+  #leaveHud:hover{ background:#C89BD9; color:var(--ink); }
+  #leaveHud[hidden]{ display:none !important; }
 
   /* ---------- personal menu: a popup box that hovers near
      the player, opened with E. Tabs down the side, content on the
@@ -1364,6 +1372,7 @@
         </div>
       </div>
       <div id="scoreHud" hidden>⭐ 0</div>
+      <button id="leaveHud" hidden title="Back through the door to where you came from">🚪 Leave</button>
       <canvas id="minimap" width="240" height="120" title="The level — click to look there, right-click to go there (M hides it)"></canvas>
 
       <div id="pausedBanner" hidden>❚❚ PAUSED</div>
@@ -2454,7 +2463,8 @@
   var WORLD_DEFAULTS = { gravity: 1, waterLevel: null, ropeLength: 220, motorSpeed: 0.06, light: 1,
                          grabReach: 16, walkSpeed: 1, sprintSpeed: 1.45, playZoom: 1, camHeight: -70, doubleJump: false,   // camHeight: px above (negative) the character the view centres
                          bg: null, bgPlain: null, bgSlide: 0.25,   // a drawn background, what is behind it (null: the usual scenery, else a colour), how much it slides with the level
-                         music: null };   // the level's tune — see Music
+                         music: null,   // the level's tune — see Music
+                         charSize: null };   // the character's size this level is played at (a scale), or null: whatever the player chose
   var worldSettings = {};
   function resetWorldSettings(){ for (var k in WORLD_DEFAULTS) worldSettings[k] = WORLD_DEFAULTS[k]; }
   resetWorldSettings();
@@ -3578,7 +3588,8 @@
          takes you into that level; finishing it, or leaving from the
          pause menu, brings you back to the door. `target` is `{ local: id }`
          or `{ cloud: id }`; `targetName` what the door says. */
-      g.target = extra.target && typeof extra.target === "object" && (typeof extra.target.local === "string" || typeof extra.target.cloud === "string") ? { local: extra.target.local, cloud: extra.target.cloud } : null;
+      var lt = extra.leadsTo || extra.target;   // (an early file used `target`, which is a timer's number elsewhere)
+      g.leadsTo = lt && typeof lt === "object" && (typeof lt.local === "string" || typeof lt.cloud === "string") ? { local: lt.local, cloud: lt.cloud } : null;
       g.targetName = typeof extra.targetName === "string" ? extra.targetName.slice(0, 40) : "";
       g.label = typeof extra.label === "string" ? extra.label.slice(0, 40) : "";
       g.visible = true;
@@ -3842,7 +3853,7 @@
     if (!player) return null;
     var best = null, bestD = 80;
     gadgets.forEach(function(g){
-      if (g.kind !== "lever" && !(g.kind === "door" && g.target && mode === "play")) return;
+      if (g.kind !== "lever" && !(g.kind === "door" && g.leadsTo && mode === "play")) return;
       var d = dist(gadgetWorld(g), player.position);
       if (d < bestD){ bestD = d; best = g; }
     });
@@ -6274,11 +6285,11 @@
     applyCharSize();
     if (player){ spawnPlayer(pos); Body.setVelocity(player, vel); }
   }
-  function setCharScale(v){
+  function setCharScale(v, forLevel){
     v = Math.max(CHAR_SCALE_MIN, Math.min(CHAR_SCALE_MAX, +v || 1));
     if (Math.abs(v - charScale) < 1e-6) return;
     charScale = v;
-    localStorage.setItem("pg_char_scale", String(v));
+    if (!forLevel) localStorage.setItem("pg_char_scale", String(v));   // a level's size is the level's, not the player's choice
     respawnSameSpot();
   }
   function setCharSize(sz){ if (CHAR_SIZES[sz]) setCharScale(CHAR_SIZES[sz].h / CHAR_BASE_H); }
@@ -6699,10 +6710,10 @@
     done(null);
   }
   function enterDoor(g){
-    if (!g || !g.target || doorEntering) return;
+    if (!g || !g.leadsTo || doorEntering) return;
     doorEntering = true;
     var at = gadgetWorld(g), from = { x: at.x, y: at.y };
-    levelRecordById(g.target, function(data){
+    levelRecordById(g.leadsTo, function(data){
       doorEntering = false;
       if (!data){ showToast("That door leads nowhere now — the level is gone."); sfx("deny"); return; }
       var wasPlay = mode === "play";
@@ -6711,7 +6722,7 @@
       var stack = doorVisit ? doorVisit : null;   // a door inside a visited level: back is one step
       doorVisit = { from: fromData, ids: { cloud: cloudLevelId, local: localLevelId }, at: from, name: fromData.name, outer: stack };
       loadLevelData(data);
-      setLevelIds(g.target.cloud || null, g.target.local || null);
+      setLevelIds(g.leadsTo.cloud || null, g.leadsTo.local || null);
       document.getElementById("levelNameInput").value = data.name || "Untitled Level";
       buildFrozen = snapshotFull();
       setMode("play");
@@ -7284,7 +7295,7 @@
                emit: g.emit ? packEmit(g.emit) : undefined, freq: g.freq, life: g.life, maxAlive: g.maxAlive, maxTotal: g.maxTotal, pulse: g.pulse,
                ammo: g.ammoDef ? packProjDef(g.ammoDef) : undefined, ammo_n: g.ammo,
                text: g.text, once: g.once, explode: g.explode, blast: g.blast, sound: g.sound, pitch: g.pitch, volume: g.volume, every: g.every,
-               cone: g.cone, bright: g.bright, target: g.target ? { local: g.target.local, cloud: g.target.cloud } : undefined, targetName: g.targetName,
+               cone: g.cone, bright: g.bright, leadsTo: g.leadsTo ? { local: g.leadsTo.local, cloud: g.leadsTo.cloud } : undefined, targetName: g.targetName,
                fireKind: g.fireKind, pgrav: g.pgrav, plife: g.plife, pbreaks: g.pbreaks, phurts: g.phurts,
                hits: g.hits, only: g.only, useZone: g.useZone, useSpots: g.useSpots, destroy: g.destroy };
   }
@@ -7461,6 +7472,7 @@
     return { id: typeof b.id === "string" ? b.id : ("bg" + Date.now()), name: typeof b.name === "string" ? b.name : "Background", art: art };
   }
   function unpackPlayerSettings(w){
+    worldSettings.charSize = w.charSize != null && isFinite(+w.charSize) ? Math.max(CHAR_SCALE_MIN, Math.min(CHAR_SCALE_MAX, +w.charSize)) : null;
     worldSettings.music = normalizeMusic(w.music);
     musicStop();
     worldSettings.bg = normalizeBg(w.bg);
@@ -8585,6 +8597,18 @@
     }
     ctx.globalAlpha = 1;
   }
+  /* The picture of the level behind a door — the target's saved
+     thumbnail as an Image, made once per target and kept on the door. */
+  function doorPicture(g){
+    if (!g.leadsTo || !g.leadsTo.local) return null;
+    if (g._picFor === g.leadsTo.local) return g._pic && g._pic.complete && g._pic.naturalWidth ? g._pic : null;
+    g._picFor = g.leadsTo.local; g._pic = null;
+    var rec = localLevels().filter(function(l){ return l.id === g.leadsTo.local; })[0];
+    var th = rec && rec.data && typeof rec.data.thumb === "string" && rec.data.thumb.slice(0, 11) === "data:image/" ? rec.data.thumb : null;
+    if (!th) return null;
+    var im = new Image(); im.src = th; g._pic = im;
+    return null;
+  }
   function drawGadgetGlyph(g, alpha){
     ctx.globalAlpha = alpha == null ? 1 : alpha;
     var on = g.out > 0;
@@ -8646,10 +8670,19 @@
       // a door with an arch, big enough to walk into, its knob lit when it leads somewhere
       ctx.save(); ctx.translate(0, -30); ctx.scale(2.4, 2.4);
       ctx.beginPath(); ctx.moveTo(-14, 22); ctx.lineTo(-14, -8); ctx.arc(0, -8, 14, Math.PI, 0); ctx.lineTo(14, 22); ctx.closePath();
-      ctx.fillStyle = g.target ? "#8E5BB5" : "#8B8374"; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.fillStyle = g.leadsTo ? "#8E5BB5" : "#8B8374"; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.beginPath(); ctx.moveTo(-9, 22); ctx.lineTo(-9, -6); ctx.arc(0, -6, 9, Math.PI, 0); ctx.lineTo(9, 22); ctx.closePath();
-      ctx.fillStyle = g.target ? "#C89BD9" : "#A39B8C"; ctx.fill(); ctx.lineWidth = 0.8; ctx.stroke();
-      ctx.beginPath(); ctx.arc(5, 8, 2, 0, Math.PI*2); ctx.fillStyle = g.target ? "#F2B705" : "#2B1B12"; ctx.fill();
+      ctx.fillStyle = g.leadsTo ? "#C89BD9" : "#A39B8C"; ctx.fill(); ctx.lineWidth = 0.8; ctx.stroke();
+      ctx.beginPath(); ctx.arc(5, 8, 2, 0, Math.PI*2); ctx.fillStyle = g.leadsTo ? "#F2B705" : "#2B1B12"; ctx.fill();
+      // the level's own picture in the arch, when it has one
+      var dpic = doorPicture(g);
+      if (dpic){
+        ctx.save();
+        ctx.beginPath(); ctx.moveTo(-9, 22); ctx.lineTo(-9, -6); ctx.arc(0, -6, 9, Math.PI, 0); ctx.lineTo(9, 22); ctx.closePath(); ctx.clip();
+        ctx.globalAlpha = (alpha == null ? 1 : alpha) * 0.9;
+        ctx.drawImage(dpic, -16, -15, 32, 37);
+        ctx.restore();
+      }
       ctx.restore();
       var dl = g.label || g.targetName;
       if (dl){
@@ -11427,6 +11460,19 @@
       djRow.appendChild(b);
     });
     el.appendChild(djRow);
+    var csRow = document.createElement("div"); csRow.className = "segRow";
+    [[null, "Any size"], [1, "Small"], [2, "Medium"], [3, "Big"]].forEach(function(o){
+      var b = document.createElement("button");
+      b.textContent = o[1];
+      b.className = (worldSettings.charSize == null ? o[0] == null : (o[0] != null && Math.abs(worldSettings.charSize - o[0]) < 0.01)) ? "active" : "";
+      b.title = o[0] == null ? "The character is whatever size the player made it" : "In Play the character is this size, whatever the player made it";
+      b.addEventListener("click", function(){ worldSettings.charSize = o[0]; sfx("click"); renderPersonalMenu(); });
+      csRow.appendChild(b);
+    });
+    el.appendChild(csRow);
+    var csNote = document.createElement("div"); csNote.className = "noteText";
+    csNote.textContent = "The character's size in this level. Small is the old size, Medium twice that (the usual), Big three times. Play sets it; leaving Play puts the player's own size back.";
+    el.appendChild(csNote);
     el.appendChild(sliderRow("Grab reach", worldNum("grabReach"), 2, 120, 1, function(v){ worldSettings.grabReach = v; }, function(v){ return Math.round(v) + "px"; }));
     var gNote = document.createElement("div"); gNote.className = "noteText";
     gNote.textContent = "How far from the character's body a grabbable thing can be and still be caught. Small is LittleBigPlanet's touch-it-to-hold-it; bigger is more forgiving.";
@@ -14407,7 +14453,7 @@
     if (g.kind === "door"){
       var dsec = opSection("Leads to");
       var dn0 = document.createElement("div"); dn0.className = "noteText"; dn0.style.flexBasis = "100%";
-      dn0.textContent = g.target ? ("This door leads to '" + (g.targetName || "a level") + "'. In Play, walk up and press " + keyLabel((keyBinds.interact && keyBinds.interact[0]) || "KeyF") + " to go in.") : "Nowhere yet — pick a level below, or make a new one for it.";
+      dn0.textContent = g.leadsTo ? ("This door leads to '" + (g.targetName || "a level") + "'. In Play, walk up and press " + keyLabel((keyBinds.interact && keyBinds.interact[0]) || "KeyF") + " to go in.") : "Nowhere yet — pick a level below, or make a new one for it.";
       dsec.appendChild(dn0);
       opBtn(dsec, "✨ Make a new level for this door", "A fresh level of its own, saved on this device", function(){
         askName("Name the new level", "New level", function(name){
@@ -14421,7 +14467,7 @@
           loadLevelData(here); setLevelIds(hereIds.cloud, hereIds.local); levelIsHub = hereHub; updateHubButton();
           var gd = gadgets.filter(function(q){ return q.kind === "door"; })[0];   // the door as it is after the reload: its id changed, its spot did not
           gadgets.forEach(function(q){ if (q.kind === "door" && Math.abs(q.pos.x - g.pos.x) < 1 && Math.abs(q.pos.y - g.pos.y) < 1) gd = q; });
-          if (okSave && gd){ gd.target = { local: newId }; gd.targetName = name; selectGadget(gd); opWanted = true; renderSelBar(); showToast("'" + name + "' is behind this door now. Go in from Play to build it — or open it from Load."); }
+          if (okSave && gd){ gd.leadsTo = { local: newId }; gd.targetName = name; selectGadget(gd); opWanted = true; renderSelBar(); showToast("'" + name + "' is behind this door now. Go in from Play to build it — or open it from Load."); }
           else showToast("No room on this device for a new level.");
           buildFrozen = snapshotFull();
         });
@@ -14429,10 +14475,10 @@
       var locals = localLevels().filter(function(l){ return l.id !== localLevelId; });
       locals.forEach(function(l){
         var nm = (l.data && l.data.name) || "Untitled";
-        opBtn(dsec, "💾 " + nm, "Lead to this level", function(){ pushUndo("pointing a door"); g.target = { local: l.id }; g.targetName = nm; renderSelBar(); sfx("tick"); }, "wide" + (g.target && g.target.local === l.id ? " on" : ""));
+        opBtn(dsec, "💾 " + nm, "Lead to this level", function(){ pushUndo("pointing a door"); g.leadsTo = { local: l.id }; g.targetName = nm; renderSelBar(); sfx("tick"); }, "wide" + (g.leadsTo && g.leadsTo.local === l.id ? " on" : ""));
       });
       if (!locals.length){ var dn1 = document.createElement("div"); dn1.className = "noteText"; dn1.textContent = "No other levels on this device yet."; dn1.style.flexBasis = "100%"; dsec.appendChild(dn1); }
-      if (g.target) opBtn(dsec, "✕ Leads nowhere", "", function(){ pushUndo("pointing a door"); g.target = null; g.targetName = ""; renderSelBar(); sfx("tick"); }, "wide");
+      if (g.leadsTo) opBtn(dsec, "✕ Leads nowhere", "", function(){ pushUndo("pointing a door"); g.leadsTo = null; g.targetName = ""; renderSelBar(); sfx("tick"); }, "wide");
       var dl = opSection("Sign");
       var dInp = document.createElement("input"); dInp.type = "text"; dInp.className = "opText"; dInp.maxLength = 40; dInp.value = g.label || ""; dInp.placeholder = g.targetName || "What the door says";
       var dPushed = false;
@@ -16206,7 +16252,7 @@
      (the character's own if it is on screen, else the middle of the
      view); the start marker itself is untouched. Ctrl+P, or the button
      beside Play. A death still returns to the real checkpoint. */
-  var playFrom = null;
+  var playFrom = null, playScaleHold = null;   // the player's own size, held while a level plays at its own
   function playFromHere(){
     if (mode !== "build") return;
     var visW = viewRectW / camScale, visH = viewRectH / camScale, cx = camX + visW/2, cy = camY + visH/2;
@@ -16221,6 +16267,7 @@
       buildFrozen = snapshotFull();
     } else if (mode === "play"){
       musicStop();
+      if (playScaleHold != null){ var backTo = playScaleHold; playScaleHold = null; setCharScale(backTo, true); }
       restoreFull(buildFrozen);
     }
     mode = m;
@@ -16229,6 +16276,7 @@
     viewHudEl.hidden = m !== "build";
     document.getElementById("playHereBtn").hidden = m !== "build";
     scoreHudEl.hidden = m !== "play";
+    document.getElementById("leaveHud").hidden = !(m === "play" && doorVisit);
     clearSelection();
     hoverObj = null;
     shapeDrag = null;
@@ -16262,6 +16310,8 @@
       score = 0; comboMult = 1; lastBubbleTime = -99999;
       updateScoreHud();
       resetGadgetsForPlay();
+      // the level's own character size, if it has one; the player's comes back with Build
+      if (worldSettings.charSize != null && Math.abs(worldSettings.charSize - charScale) > 1e-6){ if (playScaleHold == null) playScaleHold = charScale; setCharScale(worldSettings.charSize, true); }
       respawnPlayer();
       if (worldSettings.music && worldSettings.music.on && musicHas(worldSettings.music)) musicStart("play"); else musicStop();
       if (playFrom){
@@ -16276,6 +16326,7 @@
   }
   modeBuildBtn.addEventListener("click", function(){ setMode("build"); });
   modePlayBtn.addEventListener("click", function(){ setMode("play"); });
+  document.getElementById("leaveHud").addEventListener("click", function(){ if (doorVisit) leaveDoor(); });
   document.getElementById("myWorldBtn").addEventListener("click", function(){ if (levelIsHub && !doorVisit){ if (mode !== "play") setMode("play"); return; } openMyWorld(); });
   document.getElementById("playHereBtn").addEventListener("click", function(){ playFromHere(); });
 

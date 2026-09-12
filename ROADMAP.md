@@ -418,8 +418,10 @@ still boots into the last level.
 In the inventory's **Tools tab**, a **"level door"**. Built: the Level door
 tool on the Gameplay page; its box picks a level on the device or makes a
 new one for it; in Play, F at the door goes in, finishing the level or the
-pause menu's Leave comes back to the door. Still to do: the level options
-asked before entering, the door's own look, cloud levels in the picker.
+pause menu's Leave (or the 🚪 pill) comes back to the door; the level's
+picture shows through the arch; a level can set the character's size
+(World → Player). Still to do: the door's own look, cloud levels in the
+picker.
 
 - Place it in My World, then right-click for options including **"create
   level"**.

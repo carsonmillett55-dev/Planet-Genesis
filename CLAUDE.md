@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1170 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1177 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1170 checks + checkgeom, in order
+npm test                   # all 1177 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -73,7 +73,7 @@ node tlogic.js             # 43 — tags and tag sensors, impact sensors, timers
 node tproj.js              # 42 — the launcher (bullets, shots that run out, a ray, a saved object), a drawn projectile that hurts a creature, an emitter firing bullets, the save tabs; how it flies is the firer's, the Impact drawing, an emitter firing rays, the projectile sensor's every-Nth-hit, named projectile, box, painted spots and destroy; the missile's hole, scorch and launcher
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
-node tui.js                # 119 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider; My World and level doors
+node tui.js                # 126 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider; My World and level doors, a level's character size
 node tgame.js              # 85 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -2321,8 +2321,12 @@ in; Build is a click away and edits it like any level. The button lights
 while the hub is open.
 
 **A level door** (`kind:"door"`, Gameplay, host-less like the launcher):
-`target` `{ local: id }` or `{ cloud: id }`, `targetName`, `label` (the
-sign over the arch; the target's name when blank). Its box lists the
+`leadsTo` `{ local: id }` or `{ cloud: id }` — **not `target`, which is
+a timer's and a counter's number**; packing a door's object under that
+name broke every timer on load — `targetName`, `label` (the sign over
+the arch; the target's name when blank). The level's own picture shows
+through the arch (`doorPicture`, the local record's thumbnail as an
+Image kept on the door). Its box lists the
 device's other levels to lead to, **✨ Make a new level for this door**
 — which saves a fresh starter level locally and points the door at it,
 round-tripping the current level through `serializeLevel`/`loadLevelData`
@@ -2342,7 +2346,15 @@ reached (`levelComplete`, after 1.4s) or the pause menu's "Leave this
 level" — is the same the other way, `playFrom` set to the door so Play
 starts there. `autosaveNow` does nothing while visiting: what is
 running is not what is being built. A target that is gone says so and
-stays put.
+stays put. A **🚪 Leave** pill sits in the Play HUD while visiting.
+
+**A level's character size** — the roadmap's "small, medium or large
+characters only": `worldSettings.charSize` (null, or a scale; World →
+Player: Any / Small 1 / Medium 2 / Big 3). Entering Play with one set
+holds the player's own scale in `playScaleHold` and calls
+`setCharScale(size, true)` — `forLevel` keeps it out of
+`pg_char_scale`, since the level's size is the level's, not the
+player's choice — and leaving Play puts the player's own back.
 
 ## Tips
 
