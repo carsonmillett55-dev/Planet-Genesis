@@ -134,6 +134,75 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('a press long before landing does not fire on landing', floorY - stale < 10, { top: stale, floor: floorY });
 
   console.log('');
+  console.log('== ice is skated on: you coast, and a slope takes you down ==');
+  await fresh();
+  await rect('wood', 1, X-400, Y+100, X-100, Y+140);          // a wooden run-up
+  await rect('ice', 1, X-100, Y+100, X+400, Y+140);           // then ice
+  await lockAll();
+  await play();
+  await standAt(X-300, Y+60); await p.waitForTimeout(400);
+  await p.keyboard.down('KeyD'); await p.waitForTimeout(500); await p.keyboard.up('KeyD');   // run onto the ice and let go
+  const letGo = (await pos()).x;
+  await p.waitForTimeout(600);
+  const later = (await pos()).x;
+  ok('on ice, letting go of the key does not stop you: you coast on', later > letGo + 40, { letGo, later });
+  await fresh();
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);
+  await lockAll();
+  await play();
+  await standAt(X-300, Y+60); await p.waitForTimeout(400);
+  await p.keyboard.down('KeyD'); await p.waitForTimeout(500); await p.keyboard.up('KeyD');
+  const letGoW = (await pos()).x;
+  await p.waitForTimeout(400);
+  ok('on wood you stop where you let go', Math.abs((await pos()).x - letGoW) < 12, { letGoW, later: (await pos()).x });
+  // a slope of ice: a triangle, apex up; stood on its right side you slide down it with no key pressed
+  await fresh();
+  await rect('wood', 1, X-400, Y+140, X+400, Y+180);
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('ice'); window.__pg.setPaintMode('tri'); });
+  const ta = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X-200, Y-60]), tb = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+200, Y+140]);
+  await p.mouse.move(ta.x, ta.y); await p.mouse.down(); await p.mouse.move(tb.x, tb.y, { steps: 6 }); await p.mouse.up(); await p.waitForTimeout(150);
+  await p.evaluate(() => { window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
+  await lockAll();
+  await play();
+  await standAt(X+40, Y-30); await p.waitForTimeout(1200);
+  const slid = await pos();
+  ok('stood on an icy slope with no key down, you slide down it', slid.x > X + 40 + 60 && slid.y > Y - 30 + 20, slid);
+
+  console.log('');
+  console.log('== the double jump, a level setting ==');
+  await fresh();
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);          // floor
+  await lockAll();
+  await p.evaluate(() => window.__pg.worldSet('doubleJump', false));
+  await play();
+  const stand = async () => { await standAt(X, Y+60); await p.waitForTimeout(500); };
+  const ppos = pos;
+  await stand();
+  await p.keyboard.press('Space'); await p.waitForTimeout(220);
+  const mid1 = (await ppos()).y;
+  await p.keyboard.press('Space'); await p.waitForTimeout(220);
+  const top1 = (await ppos()).y;
+  ok('off: a second press in the air adds nothing', top1 > mid1 - 8, { mid: mid1, later: top1 });
+  await p.evaluate(() => window.__pg.worldSet('doubleJump', true));
+  await p.waitForTimeout(1200);
+  await stand();
+  await p.keyboard.press('Space'); await p.waitForTimeout(220);
+  const mid2 = (await ppos()).y;
+  await p.keyboard.press('Space'); await p.waitForTimeout(220);
+  const top2 = (await ppos()).y;
+  ok('on: a second press in the air jumps again', top2 < mid2 - 40, { mid: mid2, later: top2 });
+  await p.keyboard.press('Space'); await p.waitForTimeout(220);
+  const top3 = (await ppos()).y;
+  ok('but only once before landing', top3 > top2 - 8, { after2nd: top2, after3rd: top3 });
+  await p.waitForTimeout(1500);
+  await p.keyboard.press('Space'); await p.waitForTimeout(220);
+  const g2 = (await ppos()).y;
+  await p.keyboard.press('Space'); await p.waitForTimeout(220);
+  ok('landing gives it back', (await ppos()).y < g2 - 40);
+  ok('and it is saved with the level', (await p.evaluate(() => window.__pg.serialize('dj').world.doubleJump)) === true);
+  await p.evaluate(() => window.__pg.worldSet('doubleJump', false));
+
+  console.log('');
   console.log(fail ? `FAILED ${fail} of ${pass+fail} checks` : `ALL ${pass} checks`);
   console.log('errors:', errs.length ? errs : 'none');
   await b.close();

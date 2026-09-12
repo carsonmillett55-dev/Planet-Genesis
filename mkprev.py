@@ -21,12 +21,15 @@ HOOK = """
     zoomTo: function(z, x, y){ camFollow = false; camZoom = z; applyCamScale(); camX = x - viewRectW/camScale/2; camY = y - viewRectH/camScale/2; clampCamNow(); },
     setMode: setMode, mode: function(){ return mode; },
     load: loadLevelData, serialize: serializeLevel, autosave: autosaveNow,
+    enclosedArea: function(x, y){ var r = enclosedRegionAt(x, y, buildLayer); return r ? Math.round(Math.abs(pgArea(r))) : 0; },
+    enclosedAreaOn: function(x, y, l){ var r = enclosedRegionAt(x, y, l); return r ? Math.round(Math.abs(pgArea(r))) : 0; },
     clear: function(){ clearAllObjects(); clearWater(); }, starter: starterLevel,
     stats: function(){
       return objects.map(function(o){
         return { id:o.id, layer:o.layer, pieces:o.pieces.map(function(p){ return p.m+':'+pgVertexCount(p.poly)+'v/'+p.poly.length+'i'; }),
                  rings:o.pieces.map(function(p){ return p.poly.map(function(pl){ return pl.length; }); }),
                  parts:o.parts.length, corners:objCorners(o), static:o.body.isStatic, area:Math.round(objArea(o)),
+                 areaBy:o.pieces.reduce(function(acc,p){ var k = p.m.split(':')[0]; acc[k] = (acc[k]||0) + Math.abs(pgArea(p.poly)); return acc; }, {}),
                  pos:{x:Math.round(o.body.position.x),y:Math.round(o.body.position.y)}, angle:+o.body.angle.toFixed(3),
                  bounds:{x:Math.round(o.body.bounds.min.x),y:Math.round(o.body.bounds.min.y),x2:Math.round(o.body.bounds.max.x),y2:Math.round(o.body.bounds.max.y)}, sensor:!!o.body.isSensor };
       });

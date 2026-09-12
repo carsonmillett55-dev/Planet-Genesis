@@ -79,11 +79,11 @@ the whole object. Covered by `tsel.js`.
 ### Other polish
 
 - **Water material** needs work and polish. 2026-09-11: thin water dries up, a pool draws as one calm surface, a Vacuum tool takes water only, the eraser works by layer; then 8px cells and splashes. More to come.
-- **Ice must get slipperier on a slope.**
+- **Ice must get slipperier on a slope.** DONE 2026-09-11 — ice is skated on: the keys accelerate rather than set your speed, letting go coasts, and a slope takes you down it.
 - **Level size at least 4x larger** than now — as large as possible.
 - **Replace "rope grab" with a proper LBP-style grab.** DONE — see below.
 - **Temporarily hide an object in a layer**, the way LBP does.
-- **Double jump toggle** in world settings.
+- **Double jump toggle** in world settings. DONE 2026-09-11 — World → Player, saved with the level.
 - **Inventory and popit menu** should match LBP's menus as closely as possible,
   functionally and visually.
 
@@ -189,11 +189,16 @@ The parts that needed thought:
 - **Uniform or free.** LBP scales uniformly from a corner handle by default.
   Worth matching before offering per-axis stretch.
 
-### Fill tool
+### Fill tool — DONE 2026-09-11
 
 A bucket, inside material paint mode. Draw a weird closed outline in wood, fill
 the interior with any material. The boolean geometry already supports this; it
 needs the tool and the flood-region logic.
+
+Built: "Fill" in the Draw with row. Click inside anything closed all the way
+round by material on your layer and the inside fills — with the material, or
+with water. Hover shows what a click would fill. An island inside is left
+alone; a gap in the outline, or the map's edge, means nothing is enclosed.
 
 ---
 

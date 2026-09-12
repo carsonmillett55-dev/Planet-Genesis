@@ -1709,7 +1709,8 @@
     { id:"brush",   label:"Freehand", icon:"✎" },
     { id:"rect",    label:"Rectangle",icon:"▭" },
     { id:"ellipse", label:"Ellipse",  icon:"⬭" },
-    { id:"tri",     label:"Triangle", icon:"▲" }
+    { id:"tri",     label:"Triangle", icon:"▲" },
+    { id:"fill",    label:"Fill",     icon:"🪣" }    // click inside a closed outline: the inside fills with the material
   ];
   var paintMode = localStorage.getItem("pg_paint_mode") || "brush";
   if (!PAINT_MODES.some(function(m){ return m.id === paintMode; })) paintMode = "brush";
@@ -2157,7 +2158,7 @@
   /* grabReach px; walkSpeed and sprintSpeed are multipliers (sprint on top
      of walk); playZoom is the camera's zoom in Play, set from Build. */
   var WORLD_DEFAULTS = { gravity: 1, waterLevel: null, ropeLength: 220, motorSpeed: 0.06, light: 1,
-                         grabReach: 16, walkSpeed: 1, sprintSpeed: 1.45, playZoom: 1, camHeight: -70 };   // camHeight: px above (negative) the character the view centres
+                         grabReach: 16, walkSpeed: 1, sprintSpeed: 1.45, playZoom: 1, camHeight: -70, doubleJump: false };   // camHeight: px above (negative) the character the view centres
   var worldSettings = {};
   function resetWorldSettings(){ for (var k in WORLD_DEFAULTS) worldSettings[k] = WORLD_DEFAULTS[k]; }
   resetWorldSettings();
@@ -5130,11 +5131,29 @@
     if (grounded) return true;
     return performance.now() - lastGroundedAt < COYOTE_MS && player.velocity.y > -1;
   }
+  /* The double jump, a level setting (World → Player): one more jump in
+     the air, on a fresh press only — a buffered press is for landing —
+     and never while hanging. `airJumps` counts them and the ground clears
+     it, so a walk off a ledge still gets one, as LBP's would. */
+  var airJumps = 0, groundMat = null, groundMatNext = null;
+  /* Ice is skated on, not walked on. The walk sets the sideways speed
+     outright every step, which is why ice was only "slippery" for
+     objects: the player stopped dead the moment a key came up, and on a
+     slope the sideways push gravity gave them was overwritten before it
+     could add up. On a material with next to no friction (ice: 0.02;
+     glass, at 0.3, is merely a little slick) the keys are an
+     acceleration instead — ICE_ACCEL a step toward the walk speed — and
+     letting go barely brakes (ICE_BRAKE), so you coast, and a slope
+     takes you down it whether you like it or not. Carson: "ice must get
+     slipperier on a slope." */
+  var ICE_FRICTION_MAX = 0.05, ICE_ACCEL = 0.22, ICE_BRAKE = 0.994;
+  function onIce(){ return grounded && !!groundMat && groundMat.friction <= ICE_FRICTION_MAX; }
+  function canDoubleJumpNow(){ return !!worldSettings.doubleJump && !grounded && airJumps < 1 && !grabConstraint && !flying; }
   onStep("beforeUpdate", function(){
     var wasGrounded = grounded;
-    grounded = groundedNext; groundBody = groundedNext ? groundBodyNext : null;
-    groundedNext = false; groundBodyNext = null;
-    if (grounded) lastGroundedAt = performance.now();
+    grounded = groundedNext; groundBody = groundedNext ? groundBodyNext : null; groundMat = groundedNext ? groundMatNext : null;
+    groundedNext = false; groundBodyNext = null; groundMatNext = null;
+    if (grounded){ lastGroundedAt = performance.now(); airJumps = 0; }
     // a landing worth hearing: you were airborne, coming down fast, and
     // now you're not
     if (player && !wasGrounded && grounded && lastFallSpeed > 5 && !flying){
@@ -5169,6 +5188,7 @@
       if (sn && sy / sn < player.position.y + PH * 0.2) return;
       groundedNext = true;
       var gb = isPlayerPart(p.bodyA) ? p.bodyB : p.bodyA; groundBodyNext = gb.parent || gb;
+      groundMatNext = gb.plugin && gb.plugin.materialId ? matOf(gb.plugin.materialId) : null;   // the part touched, not the whole object
     });
   });
   onStep("collisionStart", function(ev){
@@ -5534,6 +5554,13 @@
         Body.setVelocity(player, { x: vx*0.74, y: vy });   // water drags on you
       } else {
         var gv = groundVel();
+        if (onIce()){
+          // skating: nudge toward where the keys want, coast when they are up
+          var cur = player.velocity.x - gv.x, lim = Math.max(Math.abs(vx), walkSpeedNow() * 3);
+          if (vx !== 0) cur += Math.max(-ICE_ACCEL, Math.min(ICE_ACCEL, vx - cur));
+          else cur *= ICE_BRAKE;
+          vx = Math.max(-lim, Math.min(lim, cur));
+        }
         // ride what you stand on: its sideways motion comes with you, and if
         // it is dropping away you go down with it rather than floating off
         Body.setVelocity(player, { x: vx + gv.x, y: (gv.y > 0.05 && player.velocity.y < gv.y) ? gv.y : player.velocity.y });
@@ -5543,6 +5570,13 @@
           sfx("jump");
           puff(player.position.x, player.position.y + PH/2, 5,
                { color:"#E8DCC0", speed:1.5, g:0.08, angle:Math.PI/2, spread:2.4, life:20 });
+        } else if (input.jumpQueued && canDoubleJumpNow()){
+          airJumps++;
+          Body.setVelocity(player, { x: player.velocity.x, y: -12.5 * carryJumpScale() });
+          input.jumpBufferUntil = 0;
+          sfx("jump");
+          puff(player.position.x, player.position.y + PH/2, 8,
+               { color:"#FFFFFF", speed:2.2, g:0.02, angle:Math.PI/2, spread:Math.PI, life:16, r:2.6 });
         }
       }
     }
@@ -5892,6 +5926,7 @@
     worldSettings.grabReach = w.grabReach != null ? Math.max(2, Math.min(200, +w.grabReach)) : WORLD_DEFAULTS.grabReach;
     worldSettings.walkSpeed = w.walkSpeed != null ? Math.max(0.1, Math.min(5, +w.walkSpeed)) : WORLD_DEFAULTS.walkSpeed;
     worldSettings.sprintSpeed = w.sprintSpeed != null ? Math.max(1, Math.min(5, +w.sprintSpeed)) : WORLD_DEFAULTS.sprintSpeed;
+    worldSettings.doubleJump = !!w.doubleJump;
     worldSettings.playZoom = w.playZoom != null ? Math.max(CAM_ZOOM_MIN, Math.min(CAM_ZOOM_MAX, +w.playZoom)) : WORLD_DEFAULTS.playZoom;
     worldSettings.camHeight = w.camHeight != null && isFinite(+w.camHeight) ? Math.max(-600, Math.min(600, +w.camHeight)) : (w.playZoom != null ? 0 : WORLD_DEFAULTS.camHeight);   // a level saved with a zoom but no height was built centred
   }
@@ -5938,6 +5973,7 @@
      depended on where on the screen you were. */
   function resize(){
     var rect = canvas.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return;   // not laid out yet (a hidden or zero-size pane): a 0 here made the camera NaN and the first frames throw
     dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(rect.width * dpr);
     canvas.height = Math.round(rect.height * dpr);
@@ -7472,6 +7508,21 @@
         ctx.beginPath(); ctx.arc(mouseWorld.x, mouseWorld.y, rr, 0, Math.PI*2); ctx.stroke();
         ctx.restore();
         showCustom = true;
+      } else if (isMaterialTool() && paintMode === "fill"){
+        // Fill mode: the enclosed space under the cursor, lit, so you can
+        // see what a click would fill before you click
+        var nowF = performance.now();
+        if (nowF - fillHoverAt > 120){ fillHoverAt = nowF; fillHover = enclosedRegionAt(mouseWorld.x, mouseWorld.y, buildLayer); }
+        ctx.save();
+        if (fillHover && fillHover.length){
+          var fp = mpPath(fillHover), fm = matOf(currentTool);
+          ctx.globalAlpha = fm.isFluid ? 0.3 : 0.38; ctx.fillStyle = fm.color; ctx.fill(fp);
+          ctx.globalAlpha = 0.9; ctx.lineWidth = 2/camScale; ctx.strokeStyle = fm.dark || "#2B1B12"; ctx.setLineDash([6/camScale, 4/camScale]); ctx.stroke(fp); ctx.setLineDash([]);
+        }
+        ctx.globalAlpha = 1; ctx.font = (20/camScale) + "px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+        ctx.fillText("🪣", mouseWorld.x + 6/camScale, mouseWorld.y - 2/camScale);
+        ctx.restore();
+        showCustom = true;
       } else if (isMaterialTool() && paintMode !== "brush"){
         // Shape mode: a crosshair, because the next thing you do is drag
         // a corner out from here rather than stamp a dab down.
@@ -8565,6 +8616,7 @@
           b.textContent = m.icon + " " + m.label;
           b.className = paintMode === m.id ? "active" : "";
           b.title = m.id === "brush" ? "Drag to smear material like a brush"
+                  : m.id === "fill" ? "Click inside a closed outline and the inside fills with this material — water too"
                                      : "Drag out the shape you want, then let go (hold Shift to keep it regular)";
           b.addEventListener("click", function(){ paintMode = m.id; persistPaintBrush(); sfx("click"); renderPersonalMenu(); });
           modeRow.appendChild(b);
@@ -8572,8 +8624,9 @@
         el.appendChild(modeRow);
       }
 
-      // A fluid has no dab shape to pick — only how wide you pour it.
-      if (!isErase && !isFluid){
+      // A fluid has no dab shape to pick — only how wide you pour it. A fill has neither: the outline decides.
+      var isFill = !isErase && paintMode === "fill";
+      if (!isErase && !isFluid && !isFill){
         var shapeLabel = document.createElement("div"); shapeLabel.className = "noteText";
         shapeLabel.textContent = "Brush shape";
         el.appendChild(shapeLabel);
@@ -8591,7 +8644,7 @@
         el.appendChild(shapeRow);
       }
 
-      el.appendChild(sliderRow(isVac ? "Vacuum size" : (isErase ? "Eraser size" : (isFluid ? "Pour size" : "Brush size")),
+      if (!isFill) el.appendChild(sliderRow(isVac ? "Vacuum size" : (isErase ? "Eraser size" : (isFluid ? "Pour size" : "Brush size")),
         paintScale, PAINT_SCALE_MIN, PAINT_SCALE_MAX, 0.05,
         function(v){ paintScale = v; persistPaintBrush(); }, function(v){ return Math.round(v*BRUSH_R*2) + "px"; }));
 
@@ -8614,7 +8667,9 @@
         ? "Drag over water to suck it up. It takes water and only water — nothing you built is touched, on any layer."
         : isErase
         ? "The dashed outline on your cursor shows exactly what the eraser will take out, on the layer you are on — water too, on the Mid layer. It cuts the shape rather than removing whole chunks, so you can shave an edge as finely as you like."
-        : (paintMode !== "brush"
+        : (paintMode === "fill"
+          ? "Click inside any closed outline on this layer — a shape you drew round, a cave, a bottle — and the inside fills with " + (isFluid ? "water (Mid layer only)" : "this material") + ". It has to be closed all the way round by material; the map's edge does not count."
+        : paintMode !== "brush"
           ? (isFluid
             ? "Drag out an area and let go to fill it with water. Hold Shift to keep it square. Mid layer only."
             : "Drag out the shape at the size you want and let go — it arrives as one exact piece, corners and all. Hold Shift for a regular square, circle or triangle, and drop it into something you've already built to weld the two together. RIGHT-drag to cut this shape OUT of what's already there instead.")
@@ -8745,6 +8800,16 @@
     var ph = document.createElement("h3"); ph.textContent = "Player"; el.appendChild(ph);
     el.appendChild(sliderRow("Walking speed", worldNum("walkSpeed"), 0.25, 3, 0.05, function(v){ worldSettings.walkSpeed = v; }, function(v){ return Math.round(v*100) + "%"; }));
     el.appendChild(sliderRow("Sprint", worldNum("sprintSpeed"), 1, 3, 0.05, function(v){ worldSettings.sprintSpeed = v; }, function(v){ return Math.round(v*100) + "% of walking"; }));
+    var djRow = document.createElement("div"); djRow.className = "segRow";
+    [[false, "Single jump"], [true, "Double jump"]].forEach(function(o){
+      var b = document.createElement("button");
+      b.textContent = o[1];
+      b.className = !!worldSettings.doubleJump === o[0] ? "active" : "";
+      b.title = o[0] ? "One more jump in mid-air, once, before landing" : "Jumps start from the ground only";
+      b.addEventListener("click", function(){ worldSettings.doubleJump = o[0]; sfx("click"); renderPersonalMenu(); });
+      djRow.appendChild(b);
+    });
+    el.appendChild(djRow);
     el.appendChild(sliderRow("Grab reach", worldNum("grabReach"), 2, 120, 1, function(v){ worldSettings.grabReach = v; }, function(v){ return Math.round(v) + "px"; }));
     var gNote = document.createElement("div"); gNote.className = "noteText";
     gNote.textContent = "How far from the character's body a grabbable thing can be and still be caught. Small is LittleBigPlanet's touch-it-to-hold-it; bigger is more forgiving.";
@@ -10535,6 +10600,129 @@
     ctx.fillText(Math.round(R.w) + " × " + Math.round(R.h), R.x + R.w/2, R.y - 8/camScale);
     ctx.restore();
   }
+  /* ---- The fill: a bucket ----------------------------------------
+     Click inside a closed outline and the inside fills. The inside is a
+     HOLE in the union of everything solid on the build layer — a shape
+     you drew round, a cave, the belly of a bottle — so anything of any
+     material bounds it, and an area open to the map's edge is not
+     enclosed at all. The union is cached by a key of the layer's objects
+     (id, shape revision, position, angle) so hovering and clicking do not
+     redo it unless something moved; a level's worth of pieces unions in
+     tens of milliseconds. Pieces sitting inside the hole are cut out of
+     the fill, so filling round an island leaves the island. */
+  var fillCache = { key: null, union: [] }, fillHover = null, fillHoverAt = 0;
+  function layerGeomKey(layer){
+    var k = layer + ":" + objects.length;
+    for (var i = 0; i < objects.length; i++){
+      var o = objects[i];
+      if (o.layer !== layer || !o.body) continue;
+      k += "," + o.id + ":" + (o.geomRev || 0) + ":" + Math.round(o.body.position.x) + ":" + Math.round(o.body.position.y) + ":" + o.body.angle.toFixed(2);
+    }
+    return k;
+  }
+  function solidUnion(layer){
+    var polys = [];
+    objects.forEach(function(o){
+      if (o.layer !== layer || !o.body) return;
+      o.pieces.forEach(function(pc){ var m = matOf(pc.m); if (!m || m.isFluid || m.isMask) return; polys.push(objToWorld(o, pc.poly)); });
+    });
+    return polys.length ? pgUnionMany(polys, GEOM_TOL) : [];
+  }
+  function enclosedRegionAt(x, y, layer){
+    var key = layerGeomKey(layer);
+    if (fillCache.key !== key){ fillCache.key = key; fillCache.union = solidUnion(layer); }
+    var u = fillCache.union;
+    if (pgPieceAt(u, x, y) >= 0) return null;                // on material already
+    for (var i = 0; i < u.length; i++){
+      var poly = u[i];
+      if (!ringContains(poly[0], x, y)) continue;
+      for (var j = 1; j < poly.length; j++){
+        if (!ringContains(poly[j], x, y)) continue;
+        var hole = pgClean([[poly[j].slice().reverse()]], GEOM_TOL);
+        if (!hole.length) return null;
+        return pgDiff(hole, u, GEOM_TOL);                    // less any island sitting inside it
+      }
+    }
+    return null;
+  }
+  function fillAt(pt){
+    var mat = matOf(currentTool);
+    if (!mat || mat.isMask) return;
+    if (mat.isFluid && buildLayer !== MID_LAYER){ showToast("Water only works on the Mid layer — switch to Mid to pour it."); sfx("deny"); return; }
+    var region = enclosedRegionAt(pt.x, pt.y, buildLayer);
+    if (!region || !region.length){
+      showToast(pgPieceAt(fillCache.union, pt.x, pt.y) >= 0 ? "That is already material — click inside an empty enclosed space." : "Nothing closed round here — the fill needs material all the way round it (the map's edge does not count).");
+      sfx("deny"); return;
+    }
+    var bb = pgBounds(region);
+    if (mat.isFluid){
+      pushUndo("filling with water");
+      var wstep = WATER_CELL * 0.8, n = 0;
+      for (var wy = bb.y + wstep/2; wy <= bb.y2; wy += wstep){
+        for (var wx = bb.x + wstep/2; wx <= bb.x2; wx += wstep){
+          if (pgContains(region, wx, wy)){ addWaterAt(wx, wy, WATER_CELL*0.6, 1); n++; }
+        }
+      }
+      sfx("splash");
+      puff(pt.x, pt.y, 14, { color:"#8FD3F0", speed:2, g:0.12, jitter:Math.min(bb.x2 - bb.x, bb.y2 - bb.y)*0.3 });
+      return;
+    }
+    pushUndo("filling with " + mat.label);
+    // fused with whatever the outline is made of: the fill's edge IS their
+    // edge, so it welds to everything it lies against, as paint does
+    paintPolyOnLayer(region, mat, { x: (bb.x + bb.x2)/2, y: (bb.y + bb.y2)/2, w: bb.x2 - bb.x, h: bb.y2 - bb.y }, objectsAlong(region, buildLayer));
+    fillHover = null;
+  }
+  // the objects on `layer` whose edges the region's corners lie on (within 3px)
+  function objectsAlong(region, layer){
+    var pts = [];
+    region.forEach(function(poly){ poly.forEach(function(ring){ for (var i = 0; i < ring.length; i++) pts.push(ring[i]); }); });
+    var step = Math.max(1, Math.floor(pts.length / 300)), wb = pgBounds(region), hits = [];
+    if (!wb) return hits;
+    objects.forEach(function(o){
+      if (o.layer !== layer || !o.body) return;
+      var ob = o.body.bounds;
+      if (ob.max.x < wb.x - 4 || ob.min.x > wb.x2 + 4 || ob.max.y < wb.y - 4 || ob.min.y > wb.y2 + 4) return;
+      for (var k = 0; k < pts.length; k += step){
+        var lc = worldPtToLocal(o, pts[k][0], pts[k][1]);
+        for (var j = 0; j < o.pieces.length; j++){
+          if (pgEdgeDist(o.pieces[j].poly, lc.x, lc.y, 3) < 3){ hits.push(o); return; }
+        }
+      }
+    });
+    return hits;
+  }
+  /* A finished polygon of the current material goes onto the build layer
+     the way a drag-out shape does: fused into whatever it touches, or a
+     new object of its own; selected when done. */
+  function paintPolyOnLayer(poly, mat, at, hosts){
+    beginBulk();
+    var hits = hosts && hosts.length ? hosts : objectsTouching(poly, buildLayer, FUSE_REACH);
+    var obj = hits.length ? hits[0] : null, i;
+    for (i = 1; i < hits.length; i++){
+      if (objects.indexOf(hits[i]) < 0) continue;
+      obj = mergeObjects(obj, hits[i]);
+    }
+    if (obj) addPolyToObject(obj, currentTool, poly, GEOM_TOL);
+    else obj = newObjectFromPoly(currentTool, poly, buildLayer);
+    if (!obj){ endBulk(); return null; }
+    obj.drawing = false;
+    if (stickPaint) obj.forcedStatic = true;
+    rebuildFromPieces(obj);
+    endBulk();
+    if (objects.indexOf(obj) < 0) return null;
+    refreshObjectPhysics(obj);
+    Body.setVelocity(obj.body, {x:0,y:0});
+    Body.setAngularVelocity(obj.body, 0);
+    sfx("shape");
+    puff(at.x, at.y, 16, { color: mat.color, speed:2.6, g:0.05, jitter: Math.max(at.w, at.h)*0.4, r:3.4 });
+    // Hand it over selected: nine times out of ten the next thing you
+    // want is to anchor it, nudge it or copy it, and now all of that is
+    // sitting right above the piece you just made.
+    selected = obj;
+    renderSelBar();
+    return obj;
+  }
   function commitShapeDrag(){
     var d = shapeDrag; shapeDrag = null;
     if (!d){ endBulk(); return; }
@@ -10591,32 +10779,7 @@
 
     var poly = pgClean([[dragShapeRing(paintMode, R)]], GEOM_TOL);
     if (!poly.length){ sfx("deny"); return; }
-    beginBulk();
-    var hits = objectsTouching(poly, buildLayer, FUSE_REACH);
-    var obj = hits.length ? hits[0] : null, i;
-    for (i = 1; i < hits.length; i++){
-      if (objects.indexOf(hits[i]) < 0) continue;
-      obj = mergeObjects(obj, hits[i]);
-    }
-    if (obj) addPolyToObject(obj, currentTool, poly, GEOM_TOL);
-    else obj = newObjectFromPoly(currentTool, poly, buildLayer);
-    if (!obj){ endBulk(); return; }
-    obj.drawing = false;
-    if (stickPaint) obj.forcedStatic = true;
-    rebuildFromPieces(obj);
-    endBulk();
-    if (objects.indexOf(obj) < 0) return;
-    refreshObjectPhysics(obj);
-    Body.setVelocity(obj.body, {x:0,y:0});
-    Body.setAngularVelocity(obj.body, 0);
-    sfx("shape");
-    puff(R.x + R.w/2, R.y + R.h/2, 16, { color: mat.color, speed:2.6, g:0.05,
-      jitter: Math.max(R.w, R.h)*0.4, r:3.4 });
-    // Hand it over selected: nine times out of ten the next thing you
-    // want is to anchor it, nudge it or copy it, and now all of that is
-    // sitting right above the piece you just made.
-    selected = obj;
-    renderSelBar();
+    paintPolyOnLayer(poly, mat, { x: R.x + R.w/2, y: R.y + R.h/2, w: R.w, h: R.h });
   }
   // Nothing you are part-way through drawing should sag, roll or fall:
   // the shape stays frozen until the mouse comes up, then goes live.
@@ -12336,7 +12499,7 @@
           canvas.setPointerCapture(e.pointerId);
           closeObjCtxMenu();
           var snapped = snapPt(pt);
-          if (paintMode !== "brush"){
+          if (paintMode !== "brush" && paintMode !== "fill"){
             shapeDrag = { a: snapped, b: snapped, square: e.shiftKey, erase: true };
             return;
           }
@@ -12391,6 +12554,7 @@
       return;
     }
     // A drag-out shape is one action; freehand is one action per stroke.
+    if (matOf(currentTool) && paintMode === "fill"){ fillAt(pt2); return; }
     var shapeable = matOf(currentTool) && paintMode !== "brush";
     if (shapeable){
       if (matOf(currentTool).isFluid && buildLayer !== MID_LAYER){

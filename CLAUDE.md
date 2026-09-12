@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` | Playwright suites, 727 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 749 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 727 checks + checkgeom, in order
+npm test                   # all 749 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -60,12 +60,13 @@ node tbolt.js              # 57 — bolts: through the layers, four kinds, limit
 node tgadget.js            # 49 — player sensor, button, lever, wires, what they drive, moving, paused walking
 node tlink.js              # 60 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
 node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint; the weight slider
-node tjump.js              # 10 — the jump: no wall climbing, grace off a ledge, a press just before landing
+node tjump.js              # 18 — the jump: no wall climbing, grace off a ledge, a press just before landing; ice is skated on; the double jump setting
 node tmover.js             # 22 — the Mover: two-click placing, once and bounce, riding it, a loose host held, wired, the knob, save/load
 node tworld.js             # 22 — the Water sensor (touching, not a pool above; on Front), and the World changer's light and water, wired, latched, saved
 node tcreature.js          # 32 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, painted weak spot and danger, colour, a Back-layer creature, save/load
 node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
 node tstudio.js            # 61 — the studio: strokes, undo/redo, the tools, frames, playback, no rig; the brush ring, filled shapes, nudge and flip, the Settings card's keys; the character's size and drawn hitbox
+node tfill.js              # 14 — the fill: a closed outline fills with material or water; open space, material, a gap and an island
 node tskins.js             # 64 — the Custom creature and Custom object wizards (look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
@@ -684,6 +685,35 @@ compatibility and is unused).
 `#toast` is `pointer-events:none` — a passing notice was swallowing paint
 strokes that landed under it.
 
+## The fill
+
+A fifth "Draw with" mode on the Materials page, `paintMode === "fill"`:
+click inside a closed outline and the inside fills with the material,
+or with water. The inside is a **hole in the union of everything solid
+on the build layer** (`solidUnion` → `pgUnionMany`; fluids and mask
+pseudo-materials left out), so any material bounds it, and an area
+open to the map's edge is not enclosed at all — Carson's roadmap: "draw
+a weird closed outline in wood, fill the interior with any material".
+`enclosedRegionAt(x, y, layer)`: a point on material is nothing to
+fill; otherwise the hole ring containing it, reversed to an outer,
+cleaned, less any island sitting inside it (`pgDiff` with the union).
+The union is cached (`fillCache`) by `layerGeomKey` — every object on
+the layer's id, `geomRev`, rounded position and angle — so hovering
+does not redo it unless something changed; the cursor overlay shows the
+space a click would fill, lit in the material's colour, recomputed at
+most every 120ms.
+
+The fill is committed through `paintPolyOnLayer` — the tail of
+`commitShapeDrag`, factored out — with an explicit host list from
+`objectsAlong(region, layer)`: the objects whose edges the region's
+corners lie on (within 3px). `objectsTouching` would not have found
+them: a fill only *touches* its outline, and the near-miss test there
+is on the centroid, which is nowhere near the walls. So a fill welds to
+the outline it fills, as paint welds to what it grazes. Water fills by
+sampling cells inside the region (Mid layer only, as pouring is). The
+right button in fill mode is the freehand cut, as it is in brush mode.
+`tfill.js`.
+
 ## The jump
 
 **Ground is what is under you.** `collisionActive` used to count any
@@ -706,6 +736,26 @@ cleared by a jump, by hanging on a grab, and by a mode switch.
 `tjump.js` has both, plus the controls: too late off the ledge is just a
 fall, a press long before landing does nothing, a second press mid-jump
 adds nothing.
+
+**The double jump is a level setting** (`worldSettings.doubleJump`,
+World → Player, saved with the level, off by default): one more jump in
+the air (`canDoubleJumpNow`: not grounded, `airJumps < 1`, not hanging,
+not flying), on a fresh press only — a buffered press is for landing —
+a little lower than a ground jump (−12.5). `airJumps` is cleared by the
+ground, so a walk off a ledge still gets one.
+
+**Ice is skated on.** The walk sets the sideways speed outright every
+step, which is why ice was only slippery for objects: the player
+stopped dead when a key came up, and the sideways push a slope gave
+them was overwritten before it could add up. `groundMat` is the
+material of the part the feet are on (`groundMatNext`, recorded with
+`groundBodyNext` from the pair's part `plugin.materialId`); on one with
+friction at or under `ICE_FRICTION_MAX` (0.05 — ice is 0.02, glass at
+0.3 is only a little slick) the keys are an acceleration of `ICE_ACCEL`
+(0.22 px/step²) toward the walk speed and letting go multiplies by
+`ICE_BRAKE` (0.994) a step, so you coast, and an icy slope takes you
+down it whether you like it or not; the speed is capped at three times
+the walk. Carson: "ice must get slipperier on a slope".
 
 ## Water, the eraser and the vacuum
 
