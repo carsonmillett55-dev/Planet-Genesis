@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1071 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1084 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1071 checks + checkgeom, in order
+npm test                   # all 1084 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -61,7 +61,7 @@ node tgadget.js            # 49 — player sensor, button, lever, wires, what th
 node tlink.js              # 60 — pistons and rope: placing, cycling, stiff, wired modes, hanging, resize, moving, save/load, the slider's field and keys
 node tgrab.js              # 62 — grabbing: by key or mouse, swinging and its cap, dragging, carrying on the ring, loads, no riding, no clipping; sprint; the weight slider
 node tjump.js              # 27 — the jump: no wall climbing, grace off a ledge, a press just before landing; ice is skated on; crouch under a low shelf and the slide; the double jump setting
-node tmover.js             # 22 — the Mover: two-click placing, once and bounce, riding it, a loose host held, wired, the knob, save/load
+node tmover.js             # 28 — the Mover: two-click placing (any tool takes the second click; the box can start the choosing again), once and bounce, riding it, a loose host held, wired, the knob, save/load
 node tworld.js             # 22 — the Water sensor (touching, not a pool above; on Front), and the World changer's light and water, wired, latched, saved
 node tcreature.js          # 32 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, painted weak spot and danger, colour, a Back-layer creature, save/load
 node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
@@ -73,7 +73,7 @@ node tlogic.js             # 43 — tags and tag sensors, impact sensors, timers
 node tproj.js              # 23 — the launcher (bullets, shots that run out, a ray, a saved object), the projectile sensor, a drawn projectile that hurts a creature, an emitter firing bullets, the save tabs
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
-node tui.js                # 90 — Play from here, the minimap, level pictures, the tips, the device's room, backgrounds, music
+node tui.js                # 97 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider
 node tgame.js              # 71 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -1669,6 +1669,16 @@ selected or with the tool in hand; a knob at the end drags (`attachDrag`
 kind `moverEnd`, one undo per drag on the first move). Resize and flip
 map the line through `carryGadgets` like the spot.
 
+**Choosing where it goes is a mode of its own.** `moverDraft` is the
+mover waiting for the click; the canvas's pointerdown hands the click
+to `moverSetLine` before anything else, whatever tool is in hand, so
+picking Select (or opening the box) in between no longer leaves a line
+that follows the cursor and a click that does nothing — Carson's "the
+mover seems to be broken". The box's "🎯 Choose where it goes" starts
+it again on a placed mover; Esc keeps a placed mover's run and takes
+away a fresh one (`fresh`, set at placement) that had none. The box
+stays open through the click.
+
 **The host is driven, not solved** — the stiff piston's approach. `home`
 is taken when the world starts running (`moverHomeAll`: entering Play,
 unpausing Build), so the travel begins from wherever the object is right
@@ -1820,6 +1830,23 @@ on LBP2's, but the words are ordinary ones — Select, Build, Tools, World,
 Character. Keep it that way in anything user-facing.
 
 ## Sliders
+
+**Ranges are sized to what people do** — an emitter every 0.1–15s, each
+copy living up to 30s, at most 20 alive and 50 in all, speeds to 1500
+px/s, a timer to 60s, a fan 800 wide reaching 1500, reaches to 1000–2000
+— so the usual value sits in the first half of the slider rather than
+in its first few pixels (Carson: "most people will not have something
+that emits every 10 minutes"). `addGadget`'s clamps stay wider, so an
+older level with a bigger value still loads as it was.
+
+**The menu holds still while a slider is worked.** The personal menu
+follows the character's screen position every frame
+(`updatePersonalMenuPos`), and the World page's Play-zoom preview moves
+the camera while its slider is held, so the menu — and the slider — slid
+out from under the cursor mid-drag: Carson's "really buggy and
+glitchy". `pmHeld` (the pointer down inside the menu, cleared on the
+window's pointerup) and `camEditHeld` / `worldPagePreviewWanted()` all
+freeze the position.
 
 Every slider in the game is built by `sliderRow`, so every one gets the
 same three ways in: **drag** it; **click it and nudge** with the arrow
@@ -2041,6 +2068,13 @@ character there (clamped inside the map, velocity zeroed, the 900ms
 hazard grace); the start marker and the checkpoints are untouched, so a
 death goes back to the real checkpoint. Plain Play is unchanged.
 
+## Undo pauses
+
+`undo()` pauses a running Build first (`setPaused(true)`): an undo is a
+rewind, and what it brings back should stay put rather than fall, fire
+or blow up again in the running world (Carson: "imagine I accidentally
+place something that blows stuff up, and I need to rewind").
+
 ## The minimap
 
 `#minimap`, a 240×120 canvas at the bottom-right of Build, hidden in
@@ -2056,7 +2090,9 @@ as a dot in its colour, the view as a gold box, and the world's edge
 dashed where it falls inside the frame. Redrawn at most twice a second
 (`minimapAt`); it is a rough map, not a second view. A click looks
 there — `camFollow` off, the view centred on the point read against
-`minimapFrame`, the frame the last draw used.
+`minimapFrame`, the frame the last draw used. **The right button goes
+there**: the character is put at the point (clamped inside the map,
+velocity zeroed) and the camera follows them again. Carson's ask.
 
 ## Backgrounds
 

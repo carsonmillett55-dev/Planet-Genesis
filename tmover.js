@@ -59,6 +59,25 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.keyboard.press('Escape'); await p.waitForTimeout(150);
   ok('and Escape takes it away again', (await movers()).length === 1 && (await p.evaluate(() => window.__pg.moverDraft())) === null);
 
+  // choosing where it goes is a mode of its own: any tool takes the click, and the box can start it
+  await p.evaluate(() => window.__pg.setTool('mover'));
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X+30, Y+80]);
+  ok('a fresh mover waits for its click', (await movers()).length === 2 && (await p.evaluate(() => window.__pg.moverDraft())) !== null);
+  await p.evaluate(() => window.__pg.setTool('move'));   // the tool changed under it — the old bug
+  const sp2 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+30, Y-120]);
+  await p.mouse.click(sp2.x, sp2.y); await p.waitForTimeout(150);
+  const m2 = (await movers())[1];
+  ok('a click with Select in hand still sets where it goes', (await p.evaluate(() => window.__pg.moverDraft())) === null && m2.line && Math.abs(m2.line.dy + 200) < 2 && Math.abs(m2.line.dx) < 2, m2.line);
+  ok('the box can start the choosing again', await p.evaluate(id => window.__pg.moverChoose(id), m2.id) && (await p.evaluate(() => window.__pg.moverDraft())) === m2.id);
+  await p.keyboard.press('Escape'); await p.waitForTimeout(100);
+  ok('Esc then keeps the mover and its run', (await movers()).length === 2 && (await p.evaluate(() => window.__pg.moverDraft())) === null && Math.abs((await movers())[1].line.dy + 200) < 2);
+  await p.evaluate(id => window.__pg.moverChoose(id), m2.id);
+  const sp3 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+330, Y+80]);
+  await p.mouse.click(sp3.x, sp3.y); await p.waitForTimeout(150);
+  ok('and a click sets a new run', Math.abs((await movers())[1].line.dx - 300) < 2 && Math.abs((await movers())[1].line.dy) < 2, (await movers())[1].line);
+  await p.evaluate(id => window.__pg.removeGadget(id), m2.id); await p.waitForTimeout(100);
+  ok('(the second mover is taken away again for the rest)', (await movers()).length === 1);
+
   console.log('');
   console.log('== travelling once, and stopping ==');
   await p.evaluate(id => window.__pg.gadgetSet(id, { speed: 200 }), m0.id);   // 200px in a second

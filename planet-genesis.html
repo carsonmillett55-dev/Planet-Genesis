@@ -1359,7 +1359,7 @@
         </div>
       </div>
       <div id="scoreHud" hidden>⭐ 0</div>
-      <canvas id="minimap" width="240" height="120" title="The whole map — click to look there (M hides it)"></canvas>
+      <canvas id="minimap" width="240" height="120" title="The level — click to look there, right-click to go there (M hides it)"></canvas>
 
       <div id="pausedBanner" hidden>❚❚ PAUSED</div>
       <div id="transport">
@@ -6302,7 +6302,7 @@
       e.preventDefault();
       if (wiring){ wiring = null; showToast("Wiring cancelled."); }
       else if (linkDraft){ linkDraft = null; showToast("Cancelled."); }
-      else if (moverDraft){ removeGadget(moverDraft); moverDraft = null; clearSelection(); showToast("Cancelled."); }
+      else if (moverDraft){ moverCancelDraft(); }
       else onEscape();
     }
       return;
@@ -6369,7 +6369,7 @@
       // Esc backs out of whatever is half done before it means "menu".
       if (wiring){ wiring = null; showToast("Wiring cancelled."); }
       else if (linkDraft){ linkDraft = null; showToast("Cancelled."); }
-      else if (moverDraft){ removeGadget(moverDraft); moverDraft = null; clearSelection(); showToast("Cancelled."); }
+      else if (moverDraft){ moverCancelDraft(); }
       else onEscape();
     }
     if (isAction("layerDown", e.code) && !e.repeat) setBuildLayer(buildLayer - 1);
@@ -6904,6 +6904,7 @@
   function undo(){
     if (mode !== "build"){ showToast("Undo is a Build-mode tool."); sfx("deny"); return; }
     if (!undoStack.length){ showToast("Nothing left to undo."); sfx("deny"); return; }
+    if (runner.enabled) setPaused(true);   // an undo is a rewind: the world stops so what comes back stays put (Carson: "I need to rewind")
     var e = undoStack.pop();
     redoStack.push({ label: e.label, snap: snapshotFull() });
     endPaintStroke(); clearSelection();
@@ -9506,9 +9507,20 @@
     e.preventDefault(); e.stopPropagation();
     var r = minimapEl.getBoundingClientRect(), f = minimapFrame;
     var wx = f.x + (e.clientX - r.left) / r.width * f.w, wy = f.y + (e.clientY - r.top) / r.height * f.h;
+    if (e.button === 2){
+      // the right button: the character goes there too, and the camera with them
+      if (player){
+        Body.setPosition(player, { x: Math.max(PW, Math.min(WORLD_W - PW, wx)), y: Math.max(PH, Math.min(WORLD_H - PH, wy)) });
+        Body.setVelocity(player, { x: 0, y: 0 });
+        camFollow = true; updateCamera(); minimapAt = 0;
+        puff(player.position.x, player.position.y, 8, { color:"#F2B705", speed:1.6, g:0.05 }); sfx("place");
+      }
+      return;
+    }
     var visW = viewRectW / camScale, visH = viewRectH / camScale;
     camFollow = false; camX = wx - visW/2; camY = wy - visH/2; clampCamNow(); updateViewHud(); minimapAt = 0;
   });
+  minimapEl.addEventListener("contextmenu", function(e){ e.preventDefault(); });
   function toggleMinimap(){ minimapOn = !minimapOn; localStorage.setItem("pg_minimap", minimapOn ? "1" : "0"); showToast(minimapOn ? "Map on" : "Map off (M brings it back)"); }
   var hoverLayerEl = document.getElementById("hoverLayer"), hoverLayerShown = "";
   function updateHoverLayer(){
@@ -9763,6 +9775,9 @@
   var pmOpen = false, pmActiveSection = null, pmActivePage = null;
   var pmEditState = "idle", pmEditFrame = 0, pmPaintColor = CHAR_PALETTE[0];
 
+  personalMenuEl.addEventListener("pointerdown", function(){ pmHeld = true; });
+  window.addEventListener("pointerup", function(){ pmHeld = false; });
+  window.addEventListener("pointercancel", function(){ pmHeld = false; });
   function togglePersonalMenu(){ pmOpen ? closePersonalMenu() : openPersonalMenu(); }
   function openPersonalMenu(){
     pmOpen = true;
@@ -9851,8 +9866,10 @@
     el.appendChild(reset);
   }
   applyMenuGradient();
+  var pmHeld = false;   // the pointer is down inside the menu: a slider mid-drag; the menu holds still or the slider jumps from under the cursor
   function updatePersonalMenuPos(){
     if (!pmOpen || !player) return;
+    if (pmHeld || camEditHeld || worldPagePreviewWanted()) return;
     var s = worldToScreen(player.position.x, player.position.y);
     var wrapRect = wrap.getBoundingClientRect();
     var mw = personalMenuEl.offsetWidth || 360, mh = personalMenuEl.offsetHeight || 300;
@@ -12327,19 +12344,37 @@
     linkDraft = null;
     if (l){ selectLink(l); showToast("🔗 " + LINK_LABEL[l.kind] + " placed — right-click it to set it up."); sfx("bolt"); }
   }
+  /* The click that sets where a mover goes — the second click of placing
+     one, or the box's "Choose where it goes". Any tool: the canvas's
+     pointerdown hands the click here before anything else while a draft
+     is waiting, so switching to Select in between (or opening the box)
+     no longer leaves a line that follows the cursor and a click that does
+     nothing. A click on the spot gives a default run to the right. */
+  function moverSetLine(pt){
+    var dm = moverDraft; moverDraft = null;
+    if (!dm || gadgets.indexOf(dm) < 0) return;
+    var st = gadgetWorld(dm), dx = pt.x - st.x, dy = pt.y - st.y;
+    if (Math.hypot(dx, dy) < 12){ dx = 200; dy = 0; }
+    if (!dm.fresh) pushUndo("setting where a mover goes");
+    dm.fresh = false;
+    dm.line = { dx: dx, dy: dy };
+    var keepBox = opWanted;
+    selectGadget(dm); opWanted = keepBox; renderSelBar();
+    showToast("✨ Mover set — right-click it for speed and bounce. Drag the knob to change where it goes.");
+    sfx("glue");
+  }
+  /* Esc while choosing: a mover just placed, with no run chosen yet, is
+     taken away again (nothing was decided); one that already had a run
+     keeps it. */
+  function moverCancelDraft(){
+    var dm = moverDraft; moverDraft = null;
+    if (!dm || gadgets.indexOf(dm) < 0) return;
+    if (dm.fresh){ removeGadget(dm); clearSelection(); showToast("Cancelled."); return; }
+    showToast("Kept where it was — drag the knob or use its box to change where it goes.");
+  }
   function placeGadgetAt(pt){
     var kind = GADGET_TOOL_KIND[currentTool];
-    if (moverDraft){
-      // the second click: where the travel ends
-      var dm = moverDraft; moverDraft = null;
-      var st = gadgetWorld(dm), dx = pt.x - st.x, dy = pt.y - st.y;
-      if (Math.hypot(dx, dy) < 12){ dx = 200; dy = 0; }   // a click on the spot: a default run to the right
-      dm.line = { dx: dx, dy: dy };
-      selectGadget(dm); renderSelBar();
-      showToast("✨ Mover set — right-click it for speed and bounce. Drag the knob to change where it goes.");
-      sfx("glue");
-      return;
-    }
+    if (moverDraft){ moverSetLine(pt); return; }
     if (kind === "sticker"){
       if (!stickerPick){ showToast("Pick a sticker first — Build → Stickers."); sfx("deny"); return; }
       var sHost = objectUnderOn(pt.x, pt.y, buildLayer, 6);   // on the thing under the cursor — stickers stick to material, as LBP's do
@@ -12384,7 +12419,7 @@
     var g = addGadget(kind, host, pt);
     selectGadget(g);
     if (kind === "emitter" && placePreset && placePreset.kind === "emitter"){ applySavedThing(g, placePreset.entry); showToast("Placed '" + placePreset.entry.name + "'."); sfx("bolt"); return; }
-    if (kind === "mover"){ moverDraft = g; showToast("Now click where it should travel to (Esc to cancel)."); sfx("bolt"); return; }
+    if (kind === "mover"){ moverDraft = g; g.fresh = true; showToast("Now click where it should travel to (Esc to cancel)."); sfx("bolt"); return; }
     showToast("✨ " + GADGET_LABEL[kind] + " placed — right-click it to set it up and wire it.");
     sfx("bolt");
     puff(pt.x, pt.y, 8, { color:"#7FD4D9", speed:1.6, g:0.06 });
@@ -13441,7 +13476,7 @@
       opBtn(cm, "↔ Follows the player on the ground", "", function(){ pushUndo("changing a creature"); g.fly = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.fly ? " on" : ""));
       opBtn(cm, "✦ Floats toward the player", "", function(){ pushUndo("changing a creature"); g.fly = true; renderSelBar(); sfx("tick"); }, "wide" + (g.fly ? " on" : ""));
       slider(opSection("Speed"), "Speed", g.speed, 5, 800, 5, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing a creature");
-      slider(opSection("Sight"), "Notices the player within", g.range, 60, 4000, 20, function(v){ g.range = v; }, function(v){ return Math.round(v) + "px"; }, "changing a creature");
+      slider(opSection("Sight"), "Notices the player within", g.range, 60, 2000, 20, function(v){ g.range = v; }, function(v){ return Math.round(v) + "px"; }, "changing a creature");
       var fc = opSection("Drawn facing");
       opBtn(fc, "➡ Right", "The drawing looks to the right; it is mirrored when it faces left", function(){ pushUndo("changing a creature"); g.drawnFacing = 1; renderSelBar(); sfx("tick"); }, (g.drawnFacing !== -1 ? "on" : ""));
       opBtn(fc, "⬅ Left", "The drawing looks to the left; it is mirrored when it faces right", function(){ pushUndo("changing a creature"); g.drawnFacing = -1; renderSelBar(); sfx("tick"); }, (g.drawnFacing === -1 ? "on" : ""));
@@ -13454,7 +13489,7 @@
     if (g.kind === "sticker"){
       var sb = opSection("Sticker");
       opBtn(sb, "🎨 Edit the drawing", "This sticker's own copy of the drawing", function(){ openSkinStudio(g); }, "wide on");
-      slider(sb, "Size", g.size, 12, 2000, 2, function(v){ g.size = v; stickerSize = v; persistSticker(); }, function(v){ return Math.round(v) + "px"; }, "changing a sticker");
+      slider(sb, "Size", g.size, 12, 1000, 2, function(v){ g.size = v; stickerSize = v; persistSticker(); }, function(v){ return Math.round(v) + "px"; }, "changing a sticker");
       slider(sb, "Turn", (g.rot || 0) * 180 / Math.PI, -180, 180, 1, function(v){ g.rot = v * Math.PI / 180; stickerRot = g.rot; }, function(v){ return Math.round(v) + "°"; }, "changing a sticker");
       opBtn(sb, g.flipX ? "⇄ Flipped" : "⇄ Flip", "Mirror it", function(){ pushUndo("flipping a sticker"); g.flipX = !g.flipX; renderSelBar(); sfx("tick"); }, "wide" + (g.flipX ? " on" : ""));
       opBtn(sb, "📋 Another like it", "Put a copy of this sticker in your hand", function(){
@@ -13467,8 +13502,8 @@
     }
     if (g.kind === "fan"){
       var fb = opSection("The air");
-      slider(fb, "Width", g.width, 40, 1200, 10, function(v){ g.width = v; }, function(v){ return Math.round(v) + "px"; }, "changing a fan");
-      slider(fb, "Reach", g.reach, 60, 3000, 10, function(v){ g.reach = v; }, function(v){ return Math.round(v) + "px up"; }, "changing a fan");
+      slider(fb, "Width", g.width, 40, 800, 10, function(v){ g.width = v; }, function(v){ return Math.round(v) + "px"; }, "changing a fan");
+      slider(fb, "Reach", g.reach, 60, 1500, 10, function(v){ g.reach = v; }, function(v){ return Math.round(v) + "px up"; }, "changing a fan");
       slider(fb, "Strength", g.strength, 0.1, 2, 0.05, function(v){ g.strength = v; }, function(v){ return v < 0.5 ? "a breeze" : (v < 0.9 ? "gentle" : (v < 1.3 ? "lifts you" : "a gale")); }, "changing a fan");
       var fn = document.createElement("div"); fn.className = "noteText";
       fn.textContent = g.input != null ? "Wired: it blows while its signal is on." : "It blows all the time. Wire a switch or sensor to it and it blows only while the signal is on. It blows straight up from whatever it sits on — put it on a wall and it blows sideways.";
@@ -13497,7 +13532,7 @@
       opBtn(em, "↔ Left and right, on the ground", "", function(){ pushUndo("changing a creature"); g.fly = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.fly ? " on" : ""));
       opBtn(em, "✦ Any direction, floating", "", function(){ pushUndo("changing a creature"); g.fly = true; renderSelBar(); sfx("tick"); }, "wide" + (g.fly ? " on" : ""));
       slider(opSection("Speed"), "Speed", g.speed, 5, 800, 5, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing a creature");
-      slider(opSection("Sight"), "Notices the player within", g.range, 60, 4000, 20, function(v){ g.range = v; }, function(v){ return Math.round(v) + "px"; }, "changing a creature");
+      slider(opSection("Sight"), "Notices the player within", g.range, 60, 2000, 20, function(v){ g.range = v; }, function(v){ return Math.round(v) + "px"; }, "changing a creature");
       var ec = opSection("Eye colour");
       var pal = document.createElement("div"); pal.className = "gradPresets"; pal.style.flexBasis = "100%";
       ["#2B1B12","#2F86A6","#5F9E5A","#E8567A","#F2B705","#C89BD9","#F27E42","#FFFFFF"].forEach(function(col){
@@ -13535,7 +13570,7 @@
       });
       if (!(mySkins.projectile || []).length){ var gn0 = document.createElement("div"); gn0.className = "noteText"; gn0.textContent = "Draw your own projectiles under Build → My Projectiles and they appear here."; gn0.style.flexBasis = "100%"; gm.appendChild(gn0); }
       var gs = opSection("How");
-      slider(gs, "Speed", g.speed, 50, 3000, 10, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing a launcher");
+      slider(gs, "Speed", g.speed, 50, 1500, 10, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing a launcher");
       slider(gs, "Shots a second", g.rate, 0.5, 20, 0.5, function(v){ g.rate = v; }, function(v){ return (+v).toFixed(1); }, "changing a launcher");
       slider(gs, "Shots", g.ammo, 0, 200, 1, function(v){ g.ammo = Math.round(v); }, function(v){ return v <= 0 ? "no end" : Math.round(v) + ""; }, "changing a launcher");
       var gnote = document.createElement("div"); gnote.className = "noteText";
@@ -13563,11 +13598,11 @@
         opBtn(eo, "🚀 " + pd.name, "Fire a projectile you drew", function(){ pushUndo("changing an emitter"); g.ammoDef = normalizeProjDef(pd.data); g.emit = null; renderSelBar(); sfx("tick"); }, "wide" + (g.ammoDef && g.ammoDef.name === pd.name ? " on" : ""));
       });
       var ef = opSection("How");
-      slider(ef, "Every", g.freq, 0.1, 60, 0.1, function(v){ g.freq = v; }, function(v){ return (+v).toFixed(1) + "s"; }, "changing an emitter");
-      slider(ef, "Each lives", g.life, 0, 120, 0.5, function(v){ g.life = v; }, function(v){ return v <= 0 ? "for good" : (+v).toFixed(1) + "s"; }, "changing an emitter");
-      slider(ef, "At most alive", g.maxAlive, 1, 60, 1, function(v){ g.maxAlive = Math.round(v); }, function(v){ return Math.round(v) + ""; }, "changing an emitter");
-      slider(ef, "In all", g.maxTotal, 0, 200, 1, function(v){ g.maxTotal = Math.round(v); }, function(v){ return v <= 0 ? "no end" : Math.round(v) + ""; }, "changing an emitter");
-      slider(ef, "Speed", g.speed, 0, 3000, 10, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing an emitter");
+      slider(ef, "Every", g.freq, 0.1, 15, 0.1, function(v){ g.freq = v; }, function(v){ return (+v).toFixed(1) + "s"; }, "changing an emitter");
+      slider(ef, "Each lives", g.life, 0, 30, 0.5, function(v){ g.life = v; }, function(v){ return v <= 0 ? "for good" : (+v).toFixed(1) + "s"; }, "changing an emitter");
+      slider(ef, "At most alive", g.maxAlive, 1, 20, 1, function(v){ g.maxAlive = Math.round(v); }, function(v){ return Math.round(v) + ""; }, "changing an emitter");
+      slider(ef, "In all", g.maxTotal, 0, 50, 1, function(v){ g.maxTotal = Math.round(v); }, function(v){ return v <= 0 ? "no end" : Math.round(v) + ""; }, "changing an emitter");
+      slider(ef, "Speed", g.speed, 0, 1500, 10, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing an emitter");
       slider(ef, "Direction", g.angle, -180, 180, 5, function(v){ g.angle = v; }, function(v){ return v === 0 ? "straight up" : (Math.abs(v) === 180 ? "straight down" : Math.round(Math.abs(v)) + "° to the " + (v > 0 ? "right" : "left")); }, "changing an emitter");
       slider(ef, "Spin", g.spin, -720, 720, 10, function(v){ g.spin = v; }, function(v){ return v === 0 ? "none" : Math.round(v) + "°/s"; }, "changing an emitter");
       var ep = opSection("When wired");
@@ -13594,7 +13629,7 @@
       tn.style.flexBasis = "100%"; opSection(null).appendChild(tn);
     }
     if (g.kind === "tagsensor"){
-      slider(opSection("Reach"), "Reach", g.radius, 20, 4000, 10, function(v){ g.radius = v; }, function(v){ return Math.round(v) + "px"; }, "changing a tag sensor");
+      slider(opSection("Reach"), "Reach", g.radius, 20, 2000, 10, function(v){ g.radius = v; }, function(v){ return Math.round(v) + "px"; }, "changing a tag sensor");
       var ts = opSection("Signal");
       opBtn(ts, "On / off", "On while any " + TAG_NAMES[g.color] + " tag is in reach", function(){ pushUndo("changing a tag sensor"); g.analog = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.analog ? " on" : ""));
       opBtn(ts, "Closeness", "Stronger the nearer the tag: full beside it, nothing at the edge of reach", function(){ pushUndo("changing a tag sensor"); g.analog = true; renderSelBar(); sfx("tick"); }, "wide" + (g.analog ? " on" : ""));
@@ -13609,7 +13644,7 @@
       inote.style.flexBasis = "100%"; opSection(null).appendChild(inote);
     }
     if (g.kind === "timer"){
-      slider(opSection("Time"), "Target", g.target, 0.1, 600, 0.1, function(v){ g.target = v; if (g.time > v) g.time = v; }, function(v){ return (+v).toFixed(1) + "s"; }, "changing a timer");
+      slider(opSection("Time"), "Target", g.target, 0.1, 60, 0.1, function(v){ g.target = v; if (g.time > v) g.time = v; }, function(v){ return (+v).toFixed(1) + "s"; }, "changing a timer");
       var tm = opSection("Counts");
       opBtn(tm, "⏫ Up while on, holds while off", "", function(){ pushUndo("changing a timer"); g.mode = "up"; g.time = 0; renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "up" ? " on" : ""));
       opBtn(tm, "⏫⏬ Up while on, back down while off", "", function(){ pushUndo("changing a timer"); g.mode = "updown"; g.time = 0; renderSelBar(); sfx("tick"); }, "wide" + (g.mode === "updown" ? " on" : ""));
@@ -13632,7 +13667,7 @@
       ta.addEventListener("input", function(){ if (!taPushed){ pushUndo("changing what a speech bubble says"); taPushed = true; } g.text = ta.value.slice(0, 240); });
       ta.addEventListener("keydown", function(e){ e.stopPropagation(); });
       sp.appendChild(ta);
-      slider(opSection("Reach"), "Speaks within", g.radius, 40, 2000, 10, function(v){ g.radius = v; }, function(v){ return Math.round(v) + "px"; }, "changing a speech bubble");
+      slider(opSection("Reach"), "Speaks within", g.radius, 40, 1000, 10, function(v){ g.radius = v; }, function(v){ return Math.round(v) + "px"; }, "changing a speech bubble");
       var so = opSection("How often");
       opBtn(so, "🔁 Every time the player comes near", "", function(){ pushUndo("changing a speech bubble"); g.once = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.once ? " on" : ""));
       opBtn(so, "1️⃣ The first time only", "Once per Play", function(){ pushUndo("changing a speech bubble"); g.once = true; renderSelBar(); sfx("tick"); }, "wide" + (g.once ? " on" : ""));
@@ -13644,7 +13679,7 @@
       var ds = opSection("When its signal comes on");
       opBtn(ds, "💥 Explodes — a bang that shoves what is near", "", function(){ pushUndo("changing a destroyer"); g.explode = true; renderSelBar(); sfx("tick"); }, "wide" + (g.explode ? " on" : ""));
       opBtn(ds, "💨 Vanishes quietly", "", function(){ pushUndo("changing a destroyer"); g.explode = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.explode ? " on" : ""));
-      if (g.explode) slider(opSection("Blast"), "Shoves things within", g.blast, 0, 1200, 10, function(v){ g.blast = v; }, function(v){ return Math.round(v) + "px"; }, "changing a destroyer");
+      if (g.explode) slider(opSection("Blast"), "Shoves things within", g.blast, 0, 800, 10, function(v){ g.blast = v; }, function(v){ return Math.round(v) + "px"; }, "changing a destroyer");
       var dn = document.createElement("div"); dn.className = "noteText";
       dn.textContent = "The thing it sits on is destroyed the moment its signal comes on — in Play only; Build always has it back. " + (g.input != null ? "" : "Nothing is wired to it yet: wire a switch, a sensor or a timer.");
       dn.style.flexBasis = "100%"; opSection(null).appendChild(dn);
@@ -13699,6 +13734,7 @@
     }
     if (g.kind === "mover"){
       var md = opSection("Travel");
+      opBtn(md, moverDraft === g ? "… now click where it should go (Esc keeps it)" : "🎯 Choose where it goes", "Then click the spot on the level", function(){ moverDraft = g; renderSelBar(); showToast("Click where it should travel to."); }, "wide" + (moverDraft === g ? " on" : ""));
       opBtn(md, "➜ Travels once and stops", "", function(){ pushUndo("changing a mover"); g.bounce = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.bounce ? " on" : ""));
       opBtn(md, "⇄ Bounces back and forth", "", function(){ pushUndo("changing a mover"); g.bounce = true; renderSelBar(); sfx("tick"); }, "wide" + (g.bounce ? " on" : ""));
       slider(opSection("Speed"), "Speed", g.speed, 5, 1500, 5, function(v){ g.speed = v; }, function(v){ return Math.round(v) + " px/s"; }, "changing a mover");
@@ -15001,6 +15037,7 @@
     var pt2 = screenToWorld(e.clientX, e.clientY);
     if (e.altKey){ eyedrop(pt2); return; }
     if (glueMode){ handleGlueClick(pt2); return; }
+    if (moverDraft){ moverSetLine(snapPt(pt2)); return; }   // a mover waiting to be told where it goes takes the click, whatever the tool
     canvas.setPointerCapture(e.pointerId);
     if (currentTool === "move"){
       var wasSel = selected;

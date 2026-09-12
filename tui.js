@@ -351,6 +351,35 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(d => window.__pg.load(d), badM); await p.waitForTimeout(150);
   ok('and nonsense is no tune', (await p.evaluate(() => window.__pg.music())) === null);
 
+  console.log('== the small fixes: Ctrl+Z pauses, the menu holds still under a slider, the map\'s right button ==');
+  await fresh();
+  await rect('wood', 1, X-200, Y-100, X+200, Y+100);
+  await p.evaluate(() => window.__pg.paused(false)); await p.waitForTimeout(100);
+  ok('Build is running', !(await p.evaluate(() => window.__pg.paused())));
+  await p.keyboard.press('Control+KeyZ'); await p.waitForTimeout(150);
+  ok('Ctrl+Z pauses it first', await p.evaluate(() => window.__pg.paused()));
+  await p.evaluate(() => { window.__pg.menu('world'); });
+  await p.waitForTimeout(200);
+  const pos0 = await p.evaluate(() => window.__pg.menuPos());
+  const zoomRow = await p.evaluate(() => { const inp = Array.from(document.querySelectorAll('#pmBody input[type=range]')).filter(i => /Zoom in Play/.test((i.closest('.settingRow') || i.parentElement.parentElement || i.parentElement).textContent))[0]; if (!inp) return null; inp.scrollIntoView({ block: 'center' }); const b = inp.getBoundingClientRect(); return { x: b.left + b.width * 0.3, y: b.top + b.height / 2, x2: b.left + b.width * 0.8 }; });
+  ok('the World page has the Play zoom slider', !!zoomRow, zoomRow);
+  if (zoomRow){
+    await p.mouse.move(zoomRow.x, zoomRow.y); await p.mouse.down(); await p.mouse.move(zoomRow.x2, zoomRow.y, { steps: 12 }); await p.waitForTimeout(250);
+    const posMid = await p.evaluate(() => window.__pg.menuPos());
+    ok('the menu does not move while the slider is dragged', posMid.left === pos0.left && posMid.top === pos0.top && posMid.held === true, { pos0, posMid });
+    await p.mouse.up(); await p.waitForTimeout(100);
+    ok('and lets go when the button does', !(await p.evaluate(() => window.__pg.menuPos())).held);
+  }
+  await p.evaluate(() => window.__pg.menu(null));
+  const mr = await p.evaluate(() => { const r = document.getElementById('minimap').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+  await p.waitForTimeout(600);
+  const frM = (await p.evaluate(() => window.__pg.minimap())).frame;
+  await p.mouse.click(mr.x + mr.w * 0.6, mr.y + mr.h * 0.3, { button: 'right' }); await p.waitForTimeout(150);
+  const ppM = await pos();
+  ok('the map\'s right button puts the character there', Math.abs(ppM.x - (frM.x + frM.w * 0.6)) < frM.w * 0.03 && Math.abs(ppM.y - (frM.y + frM.h * 0.3)) < frM.h * 0.06, { ppM, frM });
+  const vM = await p.evaluate(() => window.__pg.view());
+  ok('and the camera goes with them', Math.abs((vM.x + vM.w/2) - ppM.x) < vM.w * 0.5 && Math.abs((vM.y + vM.h/2) - ppM.y) < vM.h, { vM, ppM });
+
   ok('no page errors', errs.length === 0, errs);
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   await b.close();
