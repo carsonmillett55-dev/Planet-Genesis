@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 768 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 776 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 768 checks + checkgeom, in order
+npm test                   # all 776 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -50,7 +50,7 @@ Or one suite at a time:
 
 ```
 node regress.js            # 39 — geometry, save/load, play mode, loop and save safety, two tabs and the autosave, map edges
-node tsel.js               # 38 — selection, marquee, group transforms, resize, detach, the number row
+node tsel.js               # 46 — selection, marquee, group transforms, resize, detach, the number row, the transforms as keys
 node tlayer.js             # 17 — layer accuracy, ranked picking, the hover label, peek
 node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
@@ -1611,6 +1611,17 @@ done.
 **Front** for whatever the Select cursor is over, gone when it is over
 nothing. Refreshed from `hoverObj` every frame in `updateHoverLayer`, which
 only touches the DOM when the text actually changes.
+
+## The transforms as keys
+
+The object box's Turn & flip and Layer buttons have keys, all rebindable
+in Settings (`KEY_ACTIONS`): **Z** / **X** turn the selection 15° left /
+right, **H** flips it, and **Shift+[** / **Shift+]** move it a layer back
+/ forward — the same keys that move the *brush's* layer without Shift.
+They act only in Build with something selected, so plain Z with nothing
+selected is nothing (Ctrl+Z is still undo, handled before). The buttons'
+tooltips name the keys through `bindLabel`. The roadmap's "transforms as
+keybinds".
 
 ## Selection, and what Del means
 

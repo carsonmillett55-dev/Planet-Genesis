@@ -295,6 +295,40 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('undo glues it back', (await stats()).some(o => o.pieces.length === 2), (await stats()).map(o=>o.pieces));
 
   console.log('');
+  console.log('== the transforms as keys: turn, flip, layer ==');
+  await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setStick(true); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
+  await p.waitForTimeout(150);
+  await tool('wood', 1);
+  await drag([[X, Y],[X+200, Y+60]]);
+  await tool('sponge', 1);
+  await drag([[X+300, Y],[X+340, Y+40]]);            // a second object, unselected, that the keys must leave alone
+  await p.evaluate(()=>window.__pg.deselect());
+  const plank = () => stats().then(st => st.filter(o => o.pieces[0].indexOf('wood') === 0)[0]);
+  const lump = () => stats().then(st => st.filter(o => o.pieces[0].indexOf('sponge') === 0)[0]);
+  await p.evaluate(() => { window.__pg.setTool('move'); window.__pg.select(window.__pg.objects().find(o => o.pieces[0].m.indexOf('wood') === 0)); });
+  const ang0 = (await plank()).angle;
+  await p.keyboard.press('x'); await p.waitForTimeout(150);
+  ok('X turns the selection right 15°', Math.abs((await plank()).angle - ang0 - Math.PI/12) < 0.02, (await plank()).angle);
+  await p.keyboard.press('z'); await p.keyboard.press('z'); await p.waitForTimeout(150);
+  ok('Z turns it left', Math.abs((await plank()).angle - ang0 + Math.PI/12) < 0.02, (await plank()).angle);
+  ok('and the unselected sponge did not turn', Math.abs((await lump()).angle) < 0.01, (await lump()).angle);
+  await p.keyboard.press('z'); await p.waitForTimeout(150);   // back to level, so a flip is measurable
+  const bb0 = (await plank()).bounds;
+  await p.evaluate(() => { const o = window.__pg.objects().find(o => o.pieces[0].m.indexOf('wood') === 0); window.__pg.select(o); });
+  await p.keyboard.press('h'); await p.waitForTimeout(150);
+  const bb1 = (await plank()).bounds;
+  ok('H flips it about its own middle', Math.abs((bb0.x + bb0.x2) - (bb1.x + bb1.x2)) < 4 && Math.abs((bb1.x2 - bb1.x) - (bb0.x2 - bb0.x)) < 4, { before: bb0, after: bb1 });
+  await p.keyboard.press('Shift+BracketRight'); await p.waitForTimeout(150);
+  ok('Shift+] moves the selection a layer forward', (await plank()).layer === 2, (await plank()).layer);
+  await p.keyboard.press('Shift+BracketLeft'); await p.keyboard.press('Shift+BracketLeft'); await p.waitForTimeout(150);
+  ok('Shift+[ moves it back', (await plank()).layer === 0, (await plank()).layer);
+  ok('the sponge stayed on Mid', (await lump()).layer === 1);
+  await p.evaluate(()=>window.__pg.deselect());
+  const ang1 = (await plank()).angle;
+  await p.keyboard.press('x'); await p.waitForTimeout(150);
+  ok('with nothing selected the keys do nothing', Math.abs((await plank()).angle - ang1) < 0.001);
+
+  console.log('');
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();

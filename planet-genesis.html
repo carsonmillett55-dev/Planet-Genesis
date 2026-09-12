@@ -1799,6 +1799,9 @@
     { id:"recenter",  label:"Centre camera",    def:["KeyC"] },
     { id:"grid",      label:"Grid snap on/off", def:["KeyG"] },
     { id:"peek",      label:"Peek behind the layers in front", def:["KeyV"] },
+    { id:"rotLeft",   label:"Turn the selection left 15°",  def:["KeyZ"] },
+    { id:"rotRight",  label:"Turn the selection right 15°", def:["KeyX"] },
+    { id:"flip",      label:"Flip the selection",           def:["KeyH"] },
     { id:"brushDown", label:"Smaller brush",    def:["Comma"] },
     { id:"brushUp",   label:"Bigger brush",     def:["Period"] }
   ];
@@ -5453,6 +5456,15 @@
     if (isAction("recenter", e.code) && !e.repeat){ recenterCamera(); }
     if (isAction("grid", e.code) && !e.repeat && mode === "build"){ toggleGrid(); }
     if (isAction("peek", e.code) && !e.repeat && mode === "build"){ togglePeek(); }
+    // the transforms, as keys: the object box's Turn & flip and Layer buttons
+    if (mode === "build" && selList().length && !e.repeat){
+      if (isAction("rotLeft", e.code)){ e.preventDefault(); rotateSelected(-Math.PI/12); return; }
+      if (isAction("rotRight", e.code)){ e.preventDefault(); rotateSelected(Math.PI/12); return; }
+      if (isAction("flip", e.code)){ e.preventDefault(); flipSelected(); return; }
+      // Shift with the layer keys moves the SELECTION a layer, not the brush
+      if (e.shiftKey && isAction("layerDown", e.code)){ e.preventDefault(); layerSelected(-1); return; }
+      if (e.shiftKey && isAction("layerUp", e.code)){ e.preventDefault(); layerSelected(1); return; }
+    }
     if (isAction("brushDown", e.code)) nudgeBrush(-1);
     if (isAction("brushUp", e.code)) nudgeBrush(1);
     // The number row means two different things depending on what you're
@@ -11642,16 +11654,16 @@
 
     // Turn & flip.
     var tf = opSection("Turn & flip");
-    opBtn(tf, "↺", "Rotate left 15°", function(){ rotateSelected(-Math.PI/12); });
-    opBtn(tf, "↻", "Rotate right 15°", function(){ rotateSelected(Math.PI/12); });
-    opBtn(tf, "⇄", "Flip horizontally", function(){ flipSelected(); });
+    opBtn(tf, "↺", "Rotate left 15° — " + bindLabel("rotLeft"), function(){ rotateSelected(-Math.PI/12); });
+    opBtn(tf, "↻", "Rotate right 15° — " + bindLabel("rotRight"), function(){ rotateSelected(Math.PI/12); });
+    opBtn(tf, "⇄", "Flip horizontally — " + bindLabel("flip"), function(){ flipSelected(); });
 
     // Layer.
     var ly = opSection("Layer");
-    opBtn(ly, "⤓ Back", "Move a layer back", function(){ layerSelected(-1); });
+    opBtn(ly, "⤓ Back", "Move a layer back — Shift+" + bindLabel("layerDown"), function(){ layerSelected(-1); });
     var lname = document.createElement("span"); lname.className = "ro"; lname.textContent = LAYER_NAMES[o.layer];
     ly.appendChild(lname);
-    opBtn(ly, "⤒ Front", "Move a layer forward", function(){ layerSelected(1); });
+    opBtn(ly, "⤒ Front", "Move a layer forward — Shift+" + bindLabel("layerUp"), function(){ layerSelected(1); });
 
     // Weight — relative to what the material itself weighs.
     if (many === 1 && !o.allGlow){

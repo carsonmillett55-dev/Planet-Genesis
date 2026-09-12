@@ -143,7 +143,7 @@ resizable, remembered. Carson: "just one object settings box that pops up on
 the right, like LBP; similarly bolts and other things will have a menu like
 this." Covered by `tctx.js`.
 
-**Still to do:** sub-categories inside Materials, and transforms as keybinds.
+**Still to do:** sub-categories inside Materials. Transforms as keybinds DONE 2026-09-11 — Z / X turn, H flips, Shift+[ / Shift+] move the selection a layer; all rebindable.
 The bolt rework and every gadget put their settings in the same box.
 
 ### The build UI rework — original note
