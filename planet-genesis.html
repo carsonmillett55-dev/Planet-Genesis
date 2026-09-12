@@ -1232,6 +1232,8 @@
     display:flex; align-items:center; gap:.5rem;
     background:var(--stitch); border-radius:10px; padding:.4rem .6rem;
   }
+  .levelRow .lthumb{ flex:none; width:5.2rem; height:2.9rem; border-radius:6px; border:2px solid var(--ink); background:var(--desk-dark) center/cover no-repeat; }
+  .levelRow .lthumb.none{ background:var(--desk-dark); opacity:.5; }
   .levelRow .lname{ font-family:'Patrick Hand',cursive; font-size:1.05rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .levelRow .ldate{ font-size:.62rem; opacity:.65; }
   .empty-note{ font-size:.8rem; opacity:.7; padding:.5rem; text-align:center; }
@@ -8995,14 +8997,17 @@
     // scenery — drawn before the Front layer they went behind anything
     // decorative sitting over what you had picked, which reads as the
     // selection landing on the wrong thing.
-    drawDragHighlight();
-    drawSelectionOutline();
-    drawResizePreview();
-    drawStrokePreview();
-    drawShapePreview();
-    drawMarquee();
-    drawCursorOverlay();
+    if (!cleanShot){
+      drawDragHighlight();
+      drawSelectionOutline();
+      drawResizePreview();
+      drawStrokePreview();
+      drawShapePreview();
+      drawMarquee();
+      drawCursorOverlay();
+    }
     ctx.restore();
+    if (cleanShot) return;
     drawGunHud();
     if (mode === "play" && gunHeld && playerGun && mouseOnCanvas) gunFire(mouseWorld);
     drawMinimap(now);
@@ -14742,7 +14747,8 @@
       objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps, links: linkSnaps,
       water: packWaterSparse(), waterCell: WATER_CELL, worldW: WORLD_W, worldH: WORLD_H,
       world: packWorldSettings(),
-      materials: usedCustomMats()
+      materials: usedCustomMats(),
+      thumb: lastThumb || undefined
     };
   }
   /* A level built on a smaller map is placed at the bottom-left of this
@@ -14771,6 +14777,7 @@
     data.worldW = WORLD_W; data.worldH = WORLD_H;
   }
   function loadLevelData(data){
+    lastThumb = (data && typeof data.thumb === "string" && data.thumb.slice(0, 11) === "data:image/") ? data.thumb : null;
     clearAllObjects();
     if (!data || typeof data !== "object") data = {};
     var version = +data.version || 0;
@@ -14917,15 +14924,37 @@
     rememberLevelIds();
   }
 
+  /* The level's picture: what is on screen at the moment of a save, shrunk
+     to THUMB_W × THUMB_H and kept in the level file as a JPEG data URL
+     (`thumb`, ~8KB), shown in the load list. Drawn as a clean frame —
+     `cleanShot` skips the selection ring, the brush ring, previews and the
+     readouts — then the canvas is copied down, cover-fit. Only a real save
+     takes one; the autosave carries the last one it saw so a restore keeps
+     it. Never throws: a canvas that will not read gives no picture. */
+  var THUMB_W = 192, THUMB_H = 108, cleanShot = false, lastThumb = null;
+  function levelThumb(){
+    try {
+      cleanShot = true;
+      try { drawFrame(performance.now()); } finally { cleanShot = false; }
+      var c = document.createElement("canvas"); c.width = THUMB_W; c.height = THUMB_H;
+      var g = c.getContext("2d"), sw = canvas.width, sh = canvas.height;
+      if (!sw || !sh) return lastThumb;
+      var k = Math.max(THUMB_W / sw, THUMB_H / sh), dw = sw * k, dh = sh * k;
+      g.drawImage(canvas, (THUMB_W - dw) / 2, (THUMB_H - dh) / 2, dw, dh);
+      lastThumb = c.toDataURL("image/jpeg", 0.62);
+      return lastThumb;
+    } catch (e){ return lastThumb; }
+  }
   function doSave(){
     var name = document.getElementById("levelNameInput").value.trim() || "Untitled Level";
     var data = serializeLevel(name);
+    data.thumb = levelThumb() || undefined;
     localStorage.setItem("pg_autosave", JSON.stringify(data));
     autosaveSeen = data.updatedAt; autosaveStoodBack = false;
     sfx("save");
     dbPromise.then(function(db){
       if (db){
-        var rec = { name: data.name, updatedAt: data.updatedAt, payload: JSON.stringify(data) };
+        var rec = { name: data.name, updatedAt: data.updatedAt, payload: JSON.stringify(data), thumb: data.thumb || null };
         var saved = function(){ showToast("Saved '"+name+"' to the cloud ☁"); };
         var fellBack = function(){ saveLocalLevel(data); showToast("Cloud save failed — saved on this device instead."); };
         if (cloudLevelId){
@@ -14972,7 +15001,7 @@
       var finish = function(cloudRows){
         levelListEl.innerHTML = "";
         var all = cloudRows.concat(localList.map(function(l){
-          return { id:l.id, name:l.data.name, updatedAt:l.data.data ? l.data.data.updatedAt : l.data.updatedAt, local:true, raw:l.data };
+          return { id:l.id, name:l.data.name, updatedAt:l.data.data ? l.data.data.updatedAt : l.data.updatedAt, local:true, raw:l.data, thumb:l.data.thumb };
         }));
         if (!all.length){ levelListEl.innerHTML = '<div class="empty-note">No saved levels yet — build something and press Ctrl+S!</div>'; return; }
         all.sort(function(a,b){ return (b.updatedAt||0)-(a.updatedAt||0); });
@@ -14982,7 +15011,7 @@
         db.collection("levels").orderBy("updatedAt","desc").limit(40).get().then(function(snap){
           var cloudRows = snap.docs.map(function(d){
             var data = d.data();
-            return { id:d.id, name:data.name, updatedAt:data.updatedAt, payload:data.payload, cloud:true };
+            return { id:d.id, name:data.name, updatedAt:data.updatedAt, payload:data.payload, cloud:true, thumb:data.thumb };
           });
           finish(cloudRows);
         }).catch(function(){ finish([]); });
@@ -14996,7 +15025,9 @@
     var el = document.createElement("div");
     el.className = "levelRow";
     var when = row.updatedAt ? timeAgo(row.updatedAt) : "";
+    var pic = (typeof row.thumb === "string" && row.thumb.slice(0, 11) === "data:image/") ? row.thumb : null;
     el.innerHTML =
+      '<div class="lthumb'+(pic ? "" : " none")+'"'+(pic ? ' style="background-image:url('+pic+')"' : "")+'></div>'+
       '<div class="lname">'+escapeHtml(row.name || "Untitled")+'</div>'+
       '<div class="ldate">'+(row.cloud?"☁ ":"💾 ")+when+'</div>'+
       '<button class="btn small">Load</button>'+

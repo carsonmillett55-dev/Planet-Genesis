@@ -105,6 +105,30 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('and brings it back', !mm.hidden && mm.on, mm);
   ok('a pixel of the map is painted (the canvas is not blank)', await p.evaluate(() => { const c = document.getElementById('minimap'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++; return n > 100; }));
 
+  console.log('== level pictures: a save takes one, the load list shows it, the autosave keeps it ==');
+  await fresh();
+  await p.evaluate(() => { localStorage.removeItem('pg_local_levels'); localStorage.removeItem('pg_level_id'); });
+  await rect('wood', 1, X-200, Y-100, X+200, Y+100);
+  await p.evaluate(() => { document.getElementById('levelNameInput').value = 'Picture test'; window.__pg.doSave(); });
+  await p.waitForTimeout(600);
+  const locals = await p.evaluate(() => window.__pg.localLevels());
+  const th = locals[0] && locals[0].data && locals[0].data.thumb;
+  ok('the saved level carries a JPEG picture', typeof th === 'string' && th.startsWith('data:image/jpeg') && th.length > 1500 && th.length < 60000, th && th.length);
+  const dims = await p.evaluate(src => new Promise(res => { const im = new Image(); im.onload = () => res({ w: im.width, h: im.height }); im.onerror = () => res(null); im.src = src; }), th);
+  ok('192 × 108', dims && dims.w === 192 && dims.h === 108, dims);
+  const auto = await p.evaluate(() => { window.__pg.autosave(); return JSON.parse(localStorage.getItem('pg_autosave')).thumb; });
+  ok('the autosave carries the last picture', auto === th);
+  await p.evaluate(() => window.__pg.openLoad()); await p.waitForTimeout(400);
+  const rowPic = await p.evaluate(() => { const t = document.querySelector('#levelList .levelRow .lthumb'); return t ? { none: t.classList.contains('none'), bg: (t.style.backgroundImage || '').slice(0, 30) } : null; });
+  ok('the load list shows it', rowPic && !rowPic.none && rowPic.bg.indexOf('data:image/jpeg') >= 0, rowPic);
+  await p.evaluate(() => { document.getElementById('closeLoad').click(); });
+  // a level without one shows a blank
+  await p.evaluate(() => { const list = JSON.parse(localStorage.getItem('pg_local_levels')); delete list[0].data.thumb; localStorage.setItem('pg_local_levels', JSON.stringify(list)); window.__pg.openLoad(); });
+  await p.waitForTimeout(400);
+  ok('a level with no picture shows a blank, not a broken image', await p.evaluate(() => { const t = document.querySelector('#levelList .levelRow .lthumb'); return t && t.classList.contains('none') && !t.style.backgroundImage; }));
+  await p.evaluate(() => { document.getElementById('closeLoad').click(); });
+  ok('the picture leaves no interface in the frame (a clean draw does not throw)', await p.evaluate(() => { const t = window.__pg.thumb(); return typeof t === 'string' && t.length > 1000; }));
+
   ok('no page errors', errs.length === 0, errs);
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   await b.close();
