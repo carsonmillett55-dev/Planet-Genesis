@@ -269,6 +269,88 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('editing the saved background updates the level that uses it', bg && bg.strokes > strokesBefore, { before: strokesBefore, after: bg && bg.strokes });
   ok('the studio does not ask for a name again', await p.evaluate(() => document.getElementById('nameOverlay').hidden));
 
+  console.log('== music: a tune drawn on a grid, played in Play, saved with the level ==');
+  await fresh();
+  ok('a fresh level has no tune', (await p.evaluate(() => window.__pg.music())) === null);
+  const worldPages2 = await p.evaluate(() => { window.__pg.menu('world'); return Array.from(document.querySelectorAll('#pmPages button')).map(b => b.textContent.trim()); });
+  ok('World has a Music page', worldPages2.includes('Music'), worldPages2);
+  const musicBody0 = await p.evaluate(() => { Array.from(document.querySelectorAll('#pmPages button')).filter(b => b.textContent.trim() === 'Music')[0].click(); return document.getElementById('pmBody').innerText; });
+  ok('with nothing written it offers to write one', /Write a tune/.test(musicBody0));
+  await p.evaluate(() => { Array.from(document.querySelectorAll('#pmBody button')).filter(b => /Write a tune/.test(b.textContent))[0].click(); });
+  await p.waitForTimeout(150);
+  let mu = await p.evaluate(() => window.__pg.music());
+  ok('a new tune: 110 bpm, two bars, on, empty', mu && mu.bpm === 110 && mu.bars === 2 && mu.on === true && mu.counts.join() === '0,0,0,0', mu);
+  // paint notes on the grid with the mouse: the lead track, a rising line
+  const gr = await p.evaluate(() => window.__pg.musicGridRect());
+  ok('the grid is on the page', gr && gr.w > 200 && gr.h > 100, gr);
+  const cell = (st, row, rows) => ({ x: gr.x + (st + 0.5) / 32 * gr.w, y: gr.y + (rows - 1 - row + 0.5) / rows * gr.h });
+  for (let i = 0; i < 4; i++){ const c = cell(i * 4, i * 2, 14); await p.mouse.click(c.x, c.y); await p.waitForTimeout(40); }
+  mu = await p.evaluate(() => window.__pg.music());
+  ok('four clicks put four notes on the lead', mu.counts[0] === 4 && mu.tracks.lead.map(n => n.join(':')).sort().join() === '0:0,12:6,4:2,8:4', mu.tracks.lead);
+  // a drag paints a run
+  const d0 = cell(16, 5, 14), d1 = cell(23, 5, 14);
+  await p.mouse.move(d0.x, d0.y); await p.mouse.down(); await p.mouse.move(d1.x, d1.y, { steps: 16 }); await p.mouse.up(); await p.waitForTimeout(60);
+  mu = await p.evaluate(() => window.__pg.music());
+  ok('a drag paints a run of notes', mu.counts[0] === 12, mu.counts);
+  // the right button rubs out
+  const r0 = cell(16, 5, 14);
+  await p.mouse.click(r0.x, r0.y, { button: 'right' }); await p.waitForTimeout(60);
+  mu = await p.evaluate(() => window.__pg.music());
+  ok('the right button rubs one out', mu.counts[0] === 11, mu.counts);
+  ok('a second click on a note does not double it', await p.evaluate(() => { const before = window.__pg.music().counts[0]; return before; }) === 11 && (await p.mouse.click(cell(0, 0, 14).x, cell(0, 0, 14).y), await p.waitForTimeout(40), (await p.evaluate(() => window.__pg.music())).counts[0] === 11));
+  // drums, on their own smaller grid
+  await p.evaluate(() => { Array.from(document.querySelectorAll('#pmBody button')).filter(b => /Drums/.test(b.textContent))[0].click(); }); await p.waitForTimeout(150);
+  const gr2 = await p.evaluate(() => window.__pg.musicGridRect());
+  const dc = { x: gr2.x + 0.5 / 32 * gr2.w, y: gr2.y + (3 + 0.5) / 4 * gr2.h };   // step 0, the kick (bottom row)
+  await p.mouse.click(dc.x, dc.y); await p.waitForTimeout(40);
+  const dc2 = { x: gr2.x + 8.5 / 32 * gr2.w, y: gr2.y + (3 + 0.5) / 4 * gr2.h };
+  await p.mouse.click(dc2.x, dc2.y); await p.waitForTimeout(40);
+  mu = await p.evaluate(() => window.__pg.music());
+  ok('two kicks on the drums', mu.counts[3] === 2 && mu.tracks.drums.every(n => n[1] === 0), mu.tracks.drums);
+  // play it from the page: the scheduler runs and notes are sent in order
+  await p.evaluate(() => window.__pg.musicPlay(true));
+  await p.waitForTimeout(900);
+  let ms = await p.evaluate(() => window.__pg.musicState());
+  ok('Play it runs the tune from the page', ms.playing && ms.source === 'page' && ms.logged >= 3, ms);
+  const stepsSeen = ms.log.map(n => n.step);
+  ok('the notes go out in step order', stepsSeen.every((st, i) => i === 0 || st >= stepsSeen[i - 1] || st < 4), stepsSeen);
+  ok('the playhead moves', ms.step > 0 && ms.step < 32, ms.step);
+  await p.evaluate(() => window.__pg.menu(null)); await p.waitForTimeout(100);
+  ok('closing the menu stops the page preview', !(await p.evaluate(() => window.__pg.musicState())).playing);
+  // in Play it plays by itself, and stops with Play
+  const logged0 = (await p.evaluate(() => window.__pg.musicState())).logged;
+  await p.evaluate(() => { window.__pg.paused(false); window.__pg.setMode('play'); }); await p.waitForTimeout(700);
+  ms = await p.evaluate(() => window.__pg.musicState());
+  ok('entering Play starts the tune', ms.playing && ms.source === 'play' && ms.logged > logged0, ms);
+  await build();
+  ok('leaving Play stops it', !(await p.evaluate(() => window.__pg.musicState())).playing);
+  await p.evaluate(() => window.__pg.musicSet('on', false));
+  await p.evaluate(() => { window.__pg.setMode('play'); }); await p.waitForTimeout(300);
+  ok('switched off, Play is silent', !(await p.evaluate(() => window.__pg.musicState())).playing);
+  await build();
+  // tempo: faster means more notes in the same time
+  await p.evaluate(() => { window.__pg.musicSet('on', true); window.__pg.musicSet('bpm', 240); });
+  await p.evaluate(() => window.__pg.musicPlay(true)); await p.waitForTimeout(800);
+  const fast = (await p.evaluate(() => window.__pg.musicState())).step;
+  await p.evaluate(() => window.__pg.musicPlay(false));
+  ok('at 240 bpm the playhead is well along after 0.8s', fast >= 10, fast);
+  // save and load
+  const dataM = await p.evaluate(() => window.__pg.serialize('tune'));
+  ok('the level file carries the tune', dataM.world.music && dataM.world.music.bpm === 240 && dataM.world.music.tracks.lead.length === 11 && dataM.world.music.tracks.drums.length === 2, dataM.world.music && [dataM.world.music.bpm, dataM.world.music.tracks.lead.length]);
+  await fresh();
+  ok('a new level starts without it', (await p.evaluate(() => window.__pg.music())) === null);
+  await p.evaluate(d => window.__pg.load(d), dataM); await p.waitForTimeout(200);
+  mu = await p.evaluate(() => window.__pg.music());
+  ok('loading brings it back', mu && mu.bpm === 240 && mu.counts.join() === '11,0,0,2', mu && mu.counts);
+  // a broken tune in a file loads as no tune, or clamped
+  const badM = JSON.parse(JSON.stringify(dataM)); badM.world.music = { bpm: 9999, bars: 3, tracks: { lead: [[99, 99], [1, 1], 'x'], drums: 'no' } };
+  await p.evaluate(d => window.__pg.load(d), badM); await p.waitForTimeout(150);
+  mu = await p.evaluate(() => window.__pg.music());
+  ok('a broken tune loads clamped: 240 bpm, two bars, the one good note', mu && mu.bpm === 240 && mu.bars === 2 && mu.counts.join() === '1,0,0,0', mu);
+  badM.world.music = 'nonsense';
+  await p.evaluate(d => window.__pg.load(d), badM); await p.waitForTimeout(150);
+  ok('and nonsense is no tune', (await p.evaluate(() => window.__pg.music())) === null);
+
   ok('no page errors', errs.length === 0, errs);
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   await b.close();

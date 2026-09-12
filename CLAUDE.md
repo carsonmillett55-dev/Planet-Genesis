@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1048 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1071 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1048 checks + checkgeom, in order
+npm test                   # all 1071 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -73,7 +73,7 @@ node tlogic.js             # 43 — tags and tag sensors, impact sensors, timers
 node tproj.js              # 23 — the launcher (bullets, shots that run out, a ray, a saved object), the projectile sensor, a drawn projectile that hurts a creature, an emitter firing bullets, the save tabs
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
-node tui.js                # 67 — Play from here, the minimap, level pictures, the tips, the device's room, backgrounds
+node tui.js                # 90 — Play from here, the minimap, level pictures, the tips, the device's room, backgrounds, music
 node tgame.js              # 71 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -2093,6 +2093,43 @@ climbing lifts it down a touch (`lift * 0.08 * k`, clamped so nothing
 above it ever shows), as the scenery's horizon sinks. Two or three
 `drawImage` calls a frame, GPU-scaled — not painted into the scenery
 buffer, which is half-res and would soften the strokes.
+
+## Music
+
+The roadmap's "draw the music the way you draw materials", first cut.
+`worldSettings.music` is `{ bpm, bars (1/2/4), vol, on, tracks }`,
+four tracks — `lead` (triangle), `keys` (sine, longer), `bass`
+(sawtooth two octaves down) and `drums` (kick, snare, hat, clap) —
+each a list of `[step, row]` notes, sixteen steps a bar. The melodic
+rows are `MUSIC_SEMIS`, a major pentatonic over two octaves from C4
+(`musicFreq`), so any two notes drawn agree — the grid cannot be played
+wrong. `normalizeMusic` clamps and de-duplicates a file's tune and
+drops a step out of range; nonsense is no tune. In `WORLD_DEFAULTS`,
+so the level file and snapshots carry it; `unpackPlayerSettings` stops
+the player as it loads.
+
+**The player** (`musicStart(source)` / `musicStop` / `musicTick`,
+50ms): a scheduler on the real clock — `t0` is when the loop began,
+every note within `MUSIC_AHEAD` (180ms) of now is handed to the synth
+as an offset from `actx.currentTime` — so a suspended audio context
+(no gesture yet, the suites) cannot stall the loop; `musicPlayer.step`
+is the playhead. `musicVoice(track, row, at, vol, stepSec)` is the
+voices, on `tone`/`noiseHit` with their `at`. `musicLog` keeps the
+last 64 notes sent, for the suites. **In Play** it starts with the
+mode when `on` and there are notes, and stops with it; the Music page's
+"Play it" previews in Build (`source: "page"`) and closing the menu
+stops that.
+
+**The page** (World → Music, `renderMusicTab`): a track at a time on
+an 800px canvas (`.musicGrid`, `drawMusicGrid`: bars marked, beats
+shaded, the root's rows a touch darker, the other melodic tracks faint
+underneath, the playhead while playing — redrawn each frame from
+`drawFrame` while it plays); the left button paints a note (and sounds
+it when nothing is playing), a drag paints a run, the right button
+rubs out; bars, Clear this track, Tempo, Volume, "Plays in the level",
+"Throw the tune away". A level with no tune shows one button, "Write a
+tune". Not done: a music gadget (LBP2's sequencer as a thing on the
+level), saving tunes to the device, more voices.
 
 ## Tips
 

@@ -1249,6 +1249,7 @@
     display:flex; align-items:center; gap:.5rem;
     background:var(--stitch); border-radius:10px; padding:.4rem .6rem;
   }
+  .musicGrid{ display:block; border:2px solid var(--ink); border-radius:8px; cursor:crosshair; touch-action:none; background:#F6ECD9; }
   #objPanel textarea.opText{ width:100%; box-sizing:border-box; font-family:'Patrick Hand',cursive; font-size:1rem; padding:.3rem .45rem; border:2px solid var(--ink); border-radius:8px; background:#FFFDF6; color:var(--ink); resize:vertical; }
   .levelRow .lthumb{ flex:none; width:5.2rem; height:2.9rem; border-radius:6px; border:2px solid var(--ink); background:var(--desk-dark) center/cover no-repeat; }
   .levelRow .lthumb.none{ background:var(--desk-dark); opacity:.5; }
@@ -2146,6 +2147,94 @@
   }
 
   /* ============================================================
+     1c'. Music — the level's tune, drawn on a grid the way material is
+     painted (Carson's "draw the music the way you draw materials").
+     `worldSettings.music` is `{ bpm, bars, vol, on, tracks }`: four
+     tracks — lead, keys, bass (melodic, MUSIC_ROWS notes of a major
+     pentatonic over two octaves, so anything drawn sounds like a tune)
+     and drums (kick, snare, hat, clap) — each a list of [step, row]
+     notes, sixteen steps a bar. Played on the game's own synth, a
+     little ahead of time from a scheduler on the real clock, looping.
+     Plays in Play when `on`; the Music page previews it in Build.
+     ============================================================ */
+  var MUSIC_ROWS = 14, MUSIC_TRACKS = ["lead", "keys", "bass", "drums"], MUSIC_DRUMS = ["kick", "snare", "hat", "clap"];
+  var MUSIC_SEMIS = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31];   // a major pentatonic, two octaves and a bit, from C
+  var MUSIC_COLORS = { lead: "#E8567A", keys: "#2F86A6", bass: "#5F9E5A", drums: "#F27E42" };
+  function musicFreq(row){ return 261.63 * Math.pow(2, MUSIC_SEMIS[Math.max(0, Math.min(MUSIC_ROWS - 1, row | 0))] / 12); }
+  function newMusic(){ return { bpm: 110, bars: 2, vol: 0.8, on: true, tracks: { lead: [], keys: [], bass: [], drums: [] } }; }
+  function normalizeMusic(m){
+    if (!m || typeof m !== "object") return null;
+    var out = newMusic();
+    out.bpm = m.bpm != null && isFinite(+m.bpm) ? Math.max(40, Math.min(240, Math.round(+m.bpm))) : 110;
+    out.bars = m.bars === 1 || m.bars === 4 ? m.bars : 2;
+    out.vol = m.vol != null && isFinite(+m.vol) ? Math.max(0, Math.min(1, +m.vol)) : 0.8;
+    out.on = m.on !== false;
+    var steps = out.bars * 16, any = false;
+    MUSIC_TRACKS.forEach(function(t){
+      var rows = t === "drums" ? MUSIC_DRUMS.length : MUSIC_ROWS, seen = {};
+      var src = m.tracks && Array.isArray(m.tracks[t]) ? m.tracks[t] : [];
+      src.forEach(function(n){
+        if (!Array.isArray(n) || n.length < 2) return;
+        var st = n[0] | 0, r = n[1] | 0;
+        if (st < 0 || st >= steps || r < 0 || r >= rows || seen[st + ":" + r]) return;
+        seen[st + ":" + r] = 1; out.tracks[t].push([st, r]); any = true;
+      });
+    });
+    return any || m.on === false || m.bpm != null ? out : null;
+  }
+  function musicHas(m){ return !!m && MUSIC_TRACKS.some(function(t){ return m.tracks[t].length > 0; }); }
+  function musicSteps(m){ return (m ? m.bars : 2) * 16; }
+  // one note of one track, at an absolute audio time
+  function musicVoice(track, row, at, vol, stepSec){
+    var v = vol == null ? 1 : vol;
+    if (track === "drums"){
+      if (row === 0){ tone({ type:"sine", f:150, to:42, dur:.16, gain:.32 * v, at:at }); noiseHit({ filter:"lowpass", f:400, to:80, dur:.08, gain:.12 * v, at:at }); }
+      else if (row === 1){ noiseHit({ f:1800, to:900, dur:.13, gain:.16 * v, q:.8, at:at }); tone({ type:"triangle", f:210, to:120, dur:.06, gain:.12 * v, at:at }); }
+      else if (row === 2){ noiseHit({ filter:"highpass", f:7000, dur:.045, gain:.09 * v, at:at }); }
+      else { noiseHit({ f:1300, to:1100, dur:.07, gain:.14 * v, q:1.2, at:at }); noiseHit({ f:1300, dur:.06, gain:.1 * v, q:1.2, at:at + .03 }); }
+      return;
+    }
+    var f = musicFreq(row);
+    if (track === "lead") tone({ type:"triangle", f:f, dur:Math.max(.12, stepSec * .9), gain:.11 * v, at:at });
+    else if (track === "keys") tone({ type:"sine", f:f, dur:Math.max(.25, stepSec * 1.8), gain:.075 * v, at:at });
+    else tone({ type:"sawtooth", f:f / 4, dur:Math.max(.12, stepSec * .95), gain:.1 * v, at:at });
+  }
+  /* The player: a scheduler on the real clock (`performance.now`, so a
+     suspended audio context cannot stall it), scheduling every note that
+     falls within the next MUSIC_AHEAD ms as an audio-time offset. `step`
+     is the step the loop is at, for the page's playhead; `musicLog` the
+     last notes it sent, for the suites. */
+  var musicPlayer = { playing: false, t0: 0, next: 0, timer: 0, step: 0, source: null }, musicLog = [], MUSIC_AHEAD = 180;
+  function musicStepMs(m){ return 60000 / m.bpm / 4; }
+  function musicStart(source){
+    var m = worldSettings.music; if (!m) return false;
+    musicStop();
+    audioInit();
+    musicPlayer = { playing: true, t0: performance.now() + 60, next: 0, timer: 0, step: 0, source: source || "level" };
+    musicTick();
+    musicPlayer.timer = setInterval(musicTick, 50);
+    return true;
+  }
+  function musicStop(){ if (musicPlayer.timer) clearInterval(musicPlayer.timer); musicPlayer.playing = false; musicPlayer.timer = 0; }
+  function musicTick(){
+    var m = worldSettings.music, pl = musicPlayer;
+    if (!pl.playing || !m){ musicStop(); return; }
+    var stepMs = musicStepMs(m), steps = musicSteps(m), now = performance.now();
+    pl.step = Math.max(0, Math.floor((now - pl.t0) / stepMs)) % steps;
+    while (pl.t0 + pl.next * stepMs < now + MUSIC_AHEAD){
+      var st = pl.next % steps, when = pl.t0 + pl.next * stepMs;
+      var at = actx ? Math.max(0, (when - now) / 1000) : 0;
+      MUSIC_TRACKS.forEach(function(t){
+        var notes = m.tracks[t];
+        for (var i = 0; i < notes.length; i++) if (notes[i][0] === st){
+          if (audioOn && actx) musicVoice(t, notes[i][1], at, m.vol, stepMs / 1000);
+          musicLog.push({ t: t, row: notes[i][1], step: st, at: when }); if (musicLog.length > 64) musicLog.shift();
+        }
+      });
+      pl.next++;
+    }
+  }
+  /* ============================================================
      1d. Particles + screen shake — the little bits of feedback that
      make an action feel like it landed. Purely cosmetic, capped, and
      stepped off the render loop so they never touch the physics.
@@ -2355,7 +2444,8 @@
      of walk); playZoom is the camera's zoom in Play, set from Build. */
   var WORLD_DEFAULTS = { gravity: 1, waterLevel: null, ropeLength: 220, motorSpeed: 0.06, light: 1,
                          grabReach: 16, walkSpeed: 1, sprintSpeed: 1.45, playZoom: 1, camHeight: -70, doubleJump: false,   // camHeight: px above (negative) the character the view centres
-                         bg: null, bgPlain: null, bgSlide: 0.25 };   // a drawn background, what is behind it (null: the usual scenery, else a colour), how much it slides with the level
+                         bg: null, bgPlain: null, bgSlide: 0.25,   // a drawn background, what is behind it (null: the usual scenery, else a colour), how much it slides with the level
+                         music: null };   // the level's tune — see Music
   var worldSettings = {};
   function resetWorldSettings(){ for (var k in WORLD_DEFAULTS) worldSettings[k] = WORLD_DEFAULTS[k]; }
   resetWorldSettings();
@@ -6872,6 +6962,8 @@
     return { id: typeof b.id === "string" ? b.id : ("bg" + Date.now()), name: typeof b.name === "string" ? b.name : "Background", art: art };
   }
   function unpackPlayerSettings(w){
+    worldSettings.music = normalizeMusic(w.music);
+    musicStop();
     worldSettings.bg = normalizeBg(w.bg);
     worldSettings.bgPlain = (typeof w.bgPlain === "string" && /^#[0-9a-fA-F]{6}$/.test(w.bgPlain)) ? w.bgPlain : null;
     worldSettings.bgSlide = w.bgSlide != null && isFinite(+w.bgSlide) ? Math.max(0, Math.min(1, +w.bgSlide)) : WORLD_DEFAULTS.bgSlide;
@@ -9326,6 +9418,7 @@
     drawGunHud();
     if (mode === "play" && gunHeld && playerGun && mouseOnCanvas) gunFire(mouseWorld);
     drawMinimap(now);
+    if (musicPlayer.playing && pmOpen && musicGridEl && musicGridEl.isConnected) drawMusicGrid();
     tipWatch();
     if (showPerf){ perfDrawMs += (performance.now() - perfDrawT0 - perfDrawMs) * 0.1; drawPerfHud(now); }
     updatePersonalMenuPos();
@@ -9679,7 +9772,7 @@
     renderPersonalMenu();
     updatePersonalMenuPos();
   }
-  function closePersonalMenu(){ if (pmOpen) sfx("close"); pmOpen = false; personalMenuEl.hidden = true; }
+  function closePersonalMenu(){ if (pmOpen) sfx("close"); pmOpen = false; personalMenuEl.hidden = true; if (musicPlayer.playing && musicPlayer.source === "page") musicStop(); }
 
   /* ---- The menu's own colours --------------------------------------
      The menu is yours, so its gradient is a personal setting rather than
@@ -10342,6 +10435,123 @@
     var dn = document.createElement("div"); dn.className = "noteText";
     dn.textContent = "How far away the picture is. Far, and it barely moves as you walk; near, and it comes along with the level.";
     el.appendChild(dn);
+  }
+  /* ---- The Music page: a grid a track at a time, painted with the
+     left button and rubbed out with the right, the playhead running
+     along it while the preview plays. ---- */
+  var musicTrack = "lead", musicGridEl = null;
+  function renderMusicTab(el){
+    var m = worldSettings.music;
+    var h = document.createElement("h3"); h.textContent = "Music"; el.appendChild(h);
+    if (!m){
+      var note0 = document.createElement("div"); note0.className = "noteText";
+      note0.textContent = "A tune for the level, drawn on a grid the way you paint material: a lead, keys, a bass and drums. It plays while the level is played.";
+      el.appendChild(note0);
+      var nb = document.createElement("button"); nb.className = "btn small"; nb.textContent = "🎵 Write a tune";
+      nb.addEventListener("click", function(){ worldSettings.music = newMusic(); sfx("click"); renderPersonalMenu(); });
+      el.appendChild(nb);
+      return;
+    }
+    var tr = document.createElement("div"); tr.className = "segRow";
+    MUSIC_TRACKS.forEach(function(t){
+      var b = document.createElement("button"); b.textContent = t === "lead" ? "🎹 Lead" : (t === "keys" ? "🎼 Keys" : (t === "bass" ? "🎸 Bass" : "🥁 Drums"));
+      b.className = musicTrack === t ? "active" : ""; b.style.borderColor = MUSIC_COLORS[t];
+      b.addEventListener("click", function(){ musicTrack = t; renderPersonalMenu(); });
+      tr.appendChild(b);
+    });
+    el.appendChild(tr);
+    var cv = document.createElement("canvas"); cv.className = "musicGrid"; cv.width = 800; cv.height = musicTrack === "drums" ? 4 * 40 : MUSIC_ROWS * 26;
+    cv.style.width = "100%"; cv.style.height = "auto";
+    musicGridEl = cv;
+    var cellAt = function(e){
+      var r = cv.getBoundingClientRect(), steps = musicSteps(m), rows = musicTrack === "drums" ? MUSIC_DRUMS.length : MUSIC_ROWS;
+      var st = Math.floor((e.clientX - r.left) / r.width * steps), row = rows - 1 - Math.floor((e.clientY - r.top) / r.height * rows);
+      if (st < 0 || st >= steps || row < 0 || row >= rows) return null;
+      return { st: st, row: row };
+    };
+    var painting = null;   // "add" or "take" while the button is down
+    var apply = function(c){
+      if (!c) return;
+      var notes = m.tracks[musicTrack], i = -1;
+      for (var k = 0; k < notes.length; k++) if (notes[k][0] === c.st && notes[k][1] === c.row){ i = k; break; }
+      if (painting === "add" && i < 0){ notes.push([c.st, c.row]); if (!musicPlayer.playing && audioOn){ audioInit(); if (actx) musicVoice(musicTrack, c.row, 0, m.vol, musicStepMs(m) / 1000); } }
+      if (painting === "take" && i >= 0) notes.splice(i, 1);
+      drawMusicGrid();
+    };
+    cv.addEventListener("pointerdown", function(e){ e.preventDefault(); painting = e.button === 2 ? "take" : "add"; cv.setPointerCapture(e.pointerId); apply(cellAt(e)); });
+    cv.addEventListener("pointermove", function(e){ if (painting) apply(cellAt(e)); });
+    cv.addEventListener("pointerup", function(){ painting = null; });
+    cv.addEventListener("pointercancel", function(){ painting = null; });
+    cv.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+    el.appendChild(cv);
+    var hint = document.createElement("div"); hint.className = "noteText";
+    hint.textContent = (musicTrack === "drums" ? "Kick, snare, hat and clap, bottom to top. " : "Higher up is higher. Every note is in tune with every other, so anything you draw sounds like something. ") + "Left button draws, right button rubs out.";
+    el.appendChild(hint);
+    var pr = document.createElement("div"); pr.className = "segRow";
+    var pb = document.createElement("button"); pb.textContent = musicPlayer.playing ? "⏹ Stop" : "▶ Play it";
+    pb.className = musicPlayer.playing ? "active" : "";
+    pb.addEventListener("click", function(){ if (musicPlayer.playing) musicStop(); else musicStart("page"); renderPersonalMenu(); });
+    pr.appendChild(pb);
+    [1, 2, 4].forEach(function(n){
+      var b = document.createElement("button"); b.textContent = n + (n === 1 ? " bar" : " bars"); b.className = m.bars === n ? "active" : "";
+      b.addEventListener("click", function(){ m.bars = n; var st = musicSteps(m); MUSIC_TRACKS.forEach(function(t){ m.tracks[t] = m.tracks[t].filter(function(x){ return x[0] < st; }); }); renderPersonalMenu(); });
+      pr.appendChild(b);
+    });
+    var cb = document.createElement("button"); cb.textContent = "Clear this track";
+    cb.addEventListener("click", function(){ m.tracks[musicTrack] = []; drawMusicGrid(); sfx("erase"); });
+    pr.appendChild(cb);
+    el.appendChild(pr);
+    el.appendChild(sliderRow("Tempo", m.bpm, 40, 240, 1, function(v){ m.bpm = Math.round(v); }, function(v){ return Math.round(v) + " bpm"; }));
+    el.appendChild(sliderRow("Volume", m.vol, 0, 1, 0.05, function(v){ m.vol = v; }, function(v){ return Math.round(v * 100) + "%"; }));
+    var onRow = document.createElement("div"); onRow.className = "segRow";
+    var onB = document.createElement("button"); onB.textContent = m.on ? "🎵 Plays in the level" : "🔇 Kept, but does not play"; onB.className = m.on ? "active" : "";
+    onB.addEventListener("click", function(){ m.on = !m.on; sfx("tick"); renderPersonalMenu(); });
+    onRow.appendChild(onB);
+    var rm = document.createElement("button"); rm.textContent = "✕ Throw the tune away";
+    rm.addEventListener("click", function(){ askConfirm("Throw this tune away?", function(){ musicStop(); worldSettings.music = null; renderPersonalMenu(); }); });
+    onRow.appendChild(rm);
+    el.appendChild(onRow);
+    var n2 = document.createElement("div"); n2.className = "noteText";
+    n2.textContent = "It loops for as long as the level is played, and is saved with the level.";
+    el.appendChild(n2);
+    drawMusicGrid();
+  }
+  function drawMusicGrid(){
+    var cv = musicGridEl, m = worldSettings.music; if (!cv || !m || !cv.isConnected) return;
+    var c = cv.getContext("2d"), W = cv.width, H = cv.height, steps = musicSteps(m), rows = musicTrack === "drums" ? MUSIC_DRUMS.length : MUSIC_ROWS;
+    var cw = W / steps, ch = H / rows;
+    c.clearRect(0, 0, W, H);
+    for (var st = 0; st < steps; st++){
+      c.fillStyle = (st % 16 < 8) ? (st % 4 === 0 ? "#F6ECD9" : "#EFE2CB") : (st % 4 === 0 ? "#EADBC0" : "#E3D3B5");
+      c.fillRect(st * cw, 0, cw, H);
+    }
+    c.strokeStyle = "rgba(43,27,18,0.18)"; c.lineWidth = 1;
+    for (var r = 0; r <= rows; r++){ c.beginPath(); c.moveTo(0, r * ch + 0.5); c.lineTo(W, r * ch + 0.5); c.stroke(); }
+    c.strokeStyle = "rgba(43,27,18,0.45)"; c.lineWidth = 2;
+    for (var b = 0; b <= m.bars; b++){ c.beginPath(); c.moveTo(b * 16 * cw, 0); c.lineTo(b * 16 * cw, H); c.stroke(); }
+    if (musicTrack !== "drums"){
+      // the root note's rows, a touch darker, so octaves read
+      c.fillStyle = "rgba(43,27,18,0.06)";
+      [0, 5, 10].forEach(function(r){ c.fillRect(0, (rows - 1 - r) * ch, W, ch); });
+    } else {
+      c.fillStyle = "#2B1B12"; c.font = "bold 14px sans-serif"; c.textAlign = "left"; c.textBaseline = "middle";
+      MUSIC_DRUMS.forEach(function(d, i){ c.fillText(d, 6, (rows - 1 - i) * ch + ch / 2); });
+    }
+    // the other tracks faint underneath, so a bass line is drawn against the tune
+    MUSIC_TRACKS.forEach(function(t){
+      if (t === musicTrack || t === "drums" || musicTrack === "drums") return;
+      c.fillStyle = MUSIC_COLORS[t]; c.globalAlpha = 0.18;
+      m.tracks[t].forEach(function(n){ c.fillRect(n[0] * cw + 2, (rows - 1 - n[1]) * ch + 3, cw - 4, ch - 6); });
+      c.globalAlpha = 1;
+    });
+    c.fillStyle = MUSIC_COLORS[musicTrack]; c.strokeStyle = "#2B1B12"; c.lineWidth = 2;
+    m.tracks[musicTrack].forEach(function(n){
+      var x = n[0] * cw + 2, y = (rows - 1 - n[1]) * ch + 2;
+      c.beginPath(); c.roundRect ? c.roundRect(x, y, cw - 4, ch - 4, 4) : c.rect(x, y, cw - 4, ch - 4); c.fill(); c.stroke();
+    });
+    if (musicPlayer.playing){
+      c.fillStyle = "rgba(242,183,5,0.35)"; c.fillRect(musicPlayer.step * cw, 0, cw, H);
+    }
   }
   /* The saved drawn things, a page each: creatures, projectiles, particles
      (drawn objects sit on My Objects). A thumbnail, a name, and what can
@@ -12051,7 +12261,8 @@
     ]},
     { id:"world", icon:"🌍", label:"World", pages:[
       { id:"world", label:"World Settings", render:renderWorldSettingsTab },
-      { id:"background", label:"Background", render:renderBackgroundTab }
+      { id:"background", label:"Background", render:renderBackgroundTab },
+      { id:"music", label:"Music", render:renderMusicTab }
     ]},
     { id:"character", icon:"🧑", label:"Character", pages:[
       { id:"appearance", label:"Appearance", render:renderCharacterTab },
@@ -15133,6 +15344,7 @@
     if (m === "play"){
       buildFrozen = snapshotFull();
     } else if (mode === "play"){
+      musicStop();
       restoreFull(buildFrozen);
     }
     mode = m;
@@ -15175,6 +15387,7 @@
       updateScoreHud();
       resetGadgetsForPlay();
       respawnPlayer();
+      if (worldSettings.music && worldSettings.music.on && musicHas(worldSettings.music)) musicStart("play"); else musicStop();
       if (playFrom){
         // from here, not from the start: dropped in at the spot, on whatever is under it
         Body.setPosition(player, { x: Math.max(PW, Math.min(WORLD_W - PW, playFrom.x)), y: Math.max(PH, Math.min(WORLD_H - PH, playFrom.y)) });

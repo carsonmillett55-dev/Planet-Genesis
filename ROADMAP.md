@@ -329,10 +329,14 @@ A track **material**, not a gadget:
 - Spacing and coupling must actually work. Think through the pitfalls of this
   system before building it — Carson called this out specifically.
 
-### Music creation
+### Music creation — first cut DONE 2026-09-12
 
 A simple music tab where you **draw the music the way you draw materials.**
-Piano, drums, guitar, bass.
+Piano, drums, guitar, bass. Built as World → Music: a grid a track at a time
+(lead, keys, bass, drums), painted with the mouse, every note in tune with
+every other; tempo, one to four bars, plays while the level is played, saved
+with it. Still to come: a music gadget on the level (a tune that starts when
+you reach it), tunes kept on the device, more instruments.
 
 ### Backgrounds — DONE 2026-09-12
 
