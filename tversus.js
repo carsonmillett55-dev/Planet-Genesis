@@ -127,6 +127,18 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ps = await players();
   ok('player two respawns, no bubble', !ps[1].bubble, ps[1]);
 
+  console.log('== a Minigame: each player has their own score ==');
+  await build();
+  await wset('levelType', 'minigame'); await wset('lives', 0);
+  await p.evaluate(([x, y]) => window.__pg.addBubble(x, y), [X+300, Y+70]);
+  await p.evaluate(([x, y]) => window.__pg.addBubble(x, y), [X-100, Y+70]);
+  await play(); await p.waitForTimeout(200);
+  ok('the HUD shows a score each', JSON.stringify(await p.evaluate(() => window.__pg.playersHud())) === JSON.stringify(['Player 1 · ⭐ 0', 'Player 2 · ⭐ 0']), await p.evaluate(() => window.__pg.playersHud()));
+  await standAt(X-400, Y+60); await standAt2(1, X+300, Y+60); await p.waitForTimeout(300);
+  ok('player two picks up a bubble: their own ten points', JSON.stringify(await p.evaluate(() => window.__pg.playersHud())) === JSON.stringify(['Player 1 · ⭐ 0', 'Player 2 · ⭐ 10']) && (await p.evaluate(() => window.__pg.score())) === 10, { hud: await p.evaluate(() => window.__pg.playersHud()), score: await p.evaluate(() => window.__pg.score()) });
+  await standAt(X-100, Y+60); await p.waitForTimeout(300);
+  ok('player one the other', JSON.stringify(await p.evaluate(() => window.__pg.playersHud())) === JSON.stringify(['Player 1 · ⭐ 10', 'Player 2 · ⭐ 10']), await p.evaluate(() => window.__pg.playersHud()));
+
   console.log('== in an adventure a shot only splats on a friend ==');
   await build();
   await wset('levelType', 'adventure');

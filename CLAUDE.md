@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` `tversus.js` `ttopdown.js` | Playwright suites, 1308 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` `tversus.js` `ttopdown.js` | Playwright suites, 1311 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1308 checks + checkgeom, in order
+npm test                   # all 1311 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -75,7 +75,7 @@ node tskins.js             # 70 — the Custom creature and Custom object wizard
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node tui.js                # 158 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider; My World and level doors, a level's character size; level types and their rules; a controller
 node tplayers.js           # 43 — local players: a second pad joins on Start, each pad drives its own character, the keyboard the first; a sensor sees any of them; the camera on the first and a bubble for one left behind, or one who dies; back to Build together; a pad gone and its player leaving; a second player on the keyboard (U joins, I J K L walk)
-node tversus.js            # 29 — Versus: players collide (one on the other's head), the camera frames everyone, a launcher's shot is a knockout credited to the shooter, the HUD chips, the winner named and a new round, lives putting a player out, a hazard for nobody's credit, an adventure's shot only splatting
+node tversus.js            # 32 — Versus: players collide (one on the other's head), the camera frames everyone, a launcher's shot is a knockout credited to the shooter, the HUD chips, the winner named and a new round, lives putting a player out, a hazard for nobody's credit, an adventure's shot only splatting
 node ttopdown.js           # 26 — Top-down: no gravity, a disc of a body, the arrows every way and no jump, looking at the cursor, a shove that slides and stops, water a still pool, a creature chasing down the screen, gravity back in an adventure, saved
 node tgame.js              # 85 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
 node checkgeom.js          # geom.js vs the inlined copy
@@ -2391,8 +2391,11 @@ theirs only while the first player has not bound them to something
 (`boundToP1`), and both handlers route them through `withPlayer`
 before the first player's own keys are read; the pad loop leaves a
 keyboard player alone; Settings → More players says so and has the
-leave button. Still to come: emotes and the launcher HUD for pad
-players.
+leave button. A joined player's launcher shows over their head
+(`drawPlayerGunTag`, `gunLabel` shared with the first player's HUD
+pill) and every pad player's aim draws its crosshair
+(`drawPadCrosshair`, from `drawCursorOverlay`). Still to come: emotes
+for pad players.
 
 **Each player has their own collision group** (`carryGroup()`,
 `CARRY_GROUP - slot`): their own body, what they carry and what they
@@ -2481,8 +2484,10 @@ in a Versus level — nobody is off the screen.
 
 **The HUD**: `#playersHud`, a chip per player in their colour
 (`updatePlayersHud`, from `updateRunHud`, rebuilt only when its text
-changes): "Player 2 · ⚔ 1 · ❤ 2" — knockouts in Versus, lives when the
-level has them; an out player's chip is struck through. Shown in Play
+changes): "Player 2 · ⚔ 1 · ❤ 2" — knockouts in Versus, the player's
+own score in a Minigame (`collectBubble(b, P)` credits `P.score` beside
+the level's `score`; time's up names the top scorer, or a draw), lives
+when the level has them; an out player's chip is struck through. Shown in Play
 in a Versus or Minigame level with more than one player; the shared
 lives pill hides then. The Level page's note says how to join. Hooks:
 `pvp`, `playersHud`, `fireAt`, `armAll`. `tversus.js`.

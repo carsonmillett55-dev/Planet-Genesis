@@ -4347,7 +4347,7 @@
     if (mode !== "play" || !playerGun) return;
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    var txt = "🔫 " + (playerGun.mode === "ray" ? "Ray" : (playerGun.mode === "missile" ? "Missile" : (playerGun.mode === "object" && playerGun.obj ? playerGun.obj.name : (playerGun.mode === "custom" && playerGun.def ? playerGun.def.name : "Bullet")))) + (playerGun.ammo > 0 ? " · " + playerGun.left + " left" : "");
+    var txt = gunLabel() + (playerGun.ammo > 0 ? " left" : "");
     ctx.font = "bold 14px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "top";
     var w = ctx.measureText(txt).width;
     ctx.fillStyle = "rgba(43,27,18,0.75)"; ctx.fillRect(12, 98, w + 18, 26);   // under the score pill
@@ -7083,7 +7083,7 @@
   var playRun = { lives: 0, deaths: 0, t0: 0, over: false };
   function startPlayRun(){
     playRun = { lives: worldSettings.lives || 0, deaths: 0, t0: performance.now(), over: false };
-    players.forEach(function(P){ P.kos = 0; P.dead = 0; P.livesLeft = worldSettings.lives || 0; P.out = false; });
+    players.forEach(function(P){ P.kos = 0; P.dead = 0; P.score = 0; P.livesLeft = worldSettings.lives || 0; P.out = false; });
     updateRunHud();
   }
   /* ---- Versus and Minigame: players against each other. Each player
@@ -7150,7 +7150,7 @@
     var show = mode === "play" && pvpNow() && players.length > 1;
     if (el.hidden !== !show) el.hidden = !show;
     if (!show){ playersHudKey = ""; return; }
-    var key = players.map(function(P){ return P.slot + ":" + (P.kos || 0) + ":" + (P.livesLeft == null ? "" : P.livesLeft) + ":" + (P.out ? 1 : 0) + ":" + (P === me ? charColor : P.charColor); }).join("|");
+    var key = players.map(function(P){ return P.slot + ":" + (P.kos || 0) + ":" + (P.score || 0) + ":" + (P.livesLeft == null ? "" : P.livesLeft) + ":" + (P.out ? 1 : 0) + ":" + (P === me ? charColor : P.charColor); }).join("|");
     if (key === playersHudKey) return;
     playersHudKey = key;
     el.innerHTML = "";
@@ -7159,6 +7159,7 @@
       c.style.setProperty("--c", P === me ? charColor : P.charColor);
       var txt = playerName(P);
       if (levelType() === "versus") txt += " · ⚔ " + (P.kos || 0);
+      if (levelType() === "minigame") txt += " · ⭐ " + (P.score || 0);
       if (worldSettings.lives > 0) txt += " · ❤ " + (P.livesLeft == null ? worldSettings.lives : P.livesLeft);
       c.textContent = txt;
       el.appendChild(c);
@@ -7182,7 +7183,13 @@
     var left = runTimeLeft();
     if (left != null && left <= 0 && !playRun.over){
       playRun.over = true;
-      showToast(levelType() === "adventure" ? "Time's up — from the start again." : "Time's up! " + score + " points.");
+      var topMsg = "Time's up! " + score + " points.";
+      if (pvpNow() && players.length > 1){
+        var best = null, tie = false;
+        players.forEach(function(P){ var sc = P.score || 0; if (!best || sc > (best.score || 0)){ best = P; tie = false; } else if (sc === (best.score || 0)) tie = true; });
+        topMsg = tie ? "Time's up — a draw at " + (best.score || 0) + " points!" : "Time's up! 🏆 " + playerName(best) + " wins with " + (best.score || 0) + " points.";
+      }
+      showToast(levelType() === "adventure" ? "Time's up — from the start again." : topMsg);
       sfx("deny");
       setTimeout(function(){ if (mode === "play"){ activeCheckpoint = 0; score = 0; comboMult = 1; updateScoreHud(); startPlayRun(); respawnAllPlayers(); resetGadgetsForPlay(); } }, 900);
       return;
@@ -10161,9 +10168,26 @@
     ctx.beginPath(); ctx.arc(-r * 0.35, -r * 0.35, r * 0.2, 0, Math.PI * 2); ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.fill();
     ctx.restore();
   }
+  function gunLabel(){
+    return "🔫 " + (playerGun.mode === "ray" ? "Ray" : (playerGun.mode === "missile" ? "Missile" : (playerGun.mode === "object" && playerGun.obj ? playerGun.obj.name : (playerGun.mode === "custom" && playerGun.def ? playerGun.def.name : "Bullet")))) + (playerGun.ammo > 0 ? " · " + playerGun.left : "");
+  }
+  function drawPlayerGunTag(){
+    // a joined player's launcher: what it is and the shots left, over their head
+    if (!playerGun || mode !== "play" || !me || me === players[0]) return;
+    var txt = gunLabel();
+    ctx.save();
+    ctx.translate(player.position.x, player.position.y - PH/2 - 14/camScale);
+    ctx.scale(1/camScale, 1/camScale);
+    ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    var w = ctx.measureText(txt).width + 14;
+    ctx.fillStyle = "rgba(43,27,18,0.7)"; ctx.fillRect(-w/2, -10, w, 20);
+    ctx.fillStyle = "#F6ECD9"; ctx.fillText(txt, 0, 0);
+    ctx.restore();
+  }
   function drawPlayer(){
     if (!player) return;
     if (me && me.bubble){ drawBubbledPlayer(); return; }
+    drawPlayerGunTag();
     var p = player.position;
     if (topdownNow()) me.lookAng = lookAngle();
     if (flying){ p = { x:p.x, y:p.y + Math.sin(performance.now()/260)*3 }; }
@@ -10233,17 +10257,19 @@
            !confirmOverlay.hidden || !loadOverlay.hidden || !nameOverlay.hidden;
   }
   function isMaterialTool(){ return !!matOf(currentTool) && !GADGET_TOOL_KIND[currentTool]; }
+  function drawPadCrosshair(){
+    if (mode !== "play" || !playerGun || !player || !padAim || !gunAim || (me && me.bubble)) return;
+    // the controller's aim: a crosshair on the stick's direction, the line of the shot
+    var pr = 11/camScale;
+    ctx.save();
+    ctx.lineWidth = 2/camScale; ctx.strokeStyle = "rgba(43,27,18,.8)";
+    ctx.beginPath(); ctx.arc(gunAim.x, gunAim.y, pr, 0, Math.PI*2); ctx.stroke();
+    ctx.globalAlpha = 0.25; ctx.setLineDash([4/camScale, 6/camScale]); ctx.beginPath(); ctx.moveTo(player.position.x, player.position.y); ctx.lineTo(gunAim.x, gunAim.y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.restore();
+  }
   function drawCursorOverlay(){
     var showCustom = false;
-    if (mode === "play" && playerGun && player && padAim && gunAim){
-      // the controller's aim: a crosshair on the stick's direction, the line of the shot
-      var pr = 11/camScale;
-      ctx.save();
-      ctx.lineWidth = 2/camScale; ctx.strokeStyle = "rgba(43,27,18,.8)";
-      ctx.beginPath(); ctx.arc(gunAim.x, gunAim.y, pr, 0, Math.PI*2); ctx.stroke();
-      ctx.globalAlpha = 0.25; ctx.setLineDash([4/camScale, 6/camScale]); ctx.beginPath(); ctx.moveTo(player.position.x, player.position.y); ctx.lineTo(gunAim.x, gunAim.y); ctx.stroke(); ctx.setLineDash([]);
-      ctx.restore();
-    }
+    forEachPlayer(drawPadCrosshair);   // every pad player's aim
     if (mouseOnCanvas && !anyOverlayOpen() && !camPan && !shapeDrag){
       if (mode === "play"){
         var rr = 4/camScale;
@@ -11117,16 +11143,18 @@
   var score = 0, comboMult = 1, lastBubbleTime = -99999;
   var COMBO_WINDOW = 1100;
   function updateScoreHud(){ scoreHudEl.textContent = "⭐ " + score; }
-  function collectBubble(b){
+  function collectBubble(b, P){
     b.collected = true;
-    var now = performance.now();
-    comboMult = (now - lastBubbleTime < COMBO_WINDOW) ? Math.min(comboMult+1, 8) : 1;
-    lastBubbleTime = now;
-    score += 10 * comboMult;
+    var now = performance.now(), mult;
+    // the combo is the first player's (the globals) or a joined player's own
+    if (!P || P === players[0]){ comboMult = (now - lastBubbleTime < COMBO_WINDOW) ? Math.min(comboMult+1, 8) : 1; lastBubbleTime = now; mult = comboMult; }
+    else { P.combo = (now - (P.lastBubble || -1e9) < COMBO_WINDOW) ? Math.min((P.combo || 0) + 1, 8) : 1; P.lastBubble = now; mult = P.combo; }
+    score += 10 * mult;
+    if (P) P.score = (P.score || 0) + 10 * mult;   // theirs as well as the level's — a Minigame's own count
     updateScoreHud();
-    sfx("collect", comboMult);
+    sfx("collect", mult);
     puff(b.x, b.y, 12, { color:"#FFE9A6", speed:2.4, g:-0.02, r:2.6, shape:"spark", life:26 });
-    showToast(comboMult > 1 ? ("+" + (10*comboMult) + " combo x" + comboMult + "!") : "+10");
+    showToast(mult > 1 ? ("+" + (10*mult) + " combo x" + mult + "!") : "+10");
   }
 
   var savedObjects = [];
@@ -17434,7 +17462,7 @@
     if (mode !== "play" || !player) return;
     if (goalPoint && anyPlayerWithin(goalPoint, 46)) levelComplete();
     bubbles.forEach(function(b){
-      if (!b.collected && anyPlayerWithin(b, 34)) collectBubble(b);
+      if (!b.collected && anyPlayerWithin(b, 34)) collectBubble(b, nearestPlayer(b));
     });
     for (var i = 1; i < checkpoints.length; i++){
       var cp = checkpoints[i];

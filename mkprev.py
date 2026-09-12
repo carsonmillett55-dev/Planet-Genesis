@@ -42,6 +42,8 @@ HOOK = """
     playHere: function(){ playFromHere(); return mode; },
     players: function(){ return players.map(function(P){ var b = P === me ? player : P.player; return { id: P.id, slot: P.slot, pad: P.pad, keyboard: P.keyboard, keyboard2: !!P.keyboard2, bound: P === me, x: b ? b.position.x : null, y: b ? b.position.y : null, bubble: P.bubble ? { x: P.bubble.x, y: P.bubble.y } : null, flying: P === me ? flying : P.flying, grounded: P === me ? grounded : P.grounded, armed: !!(P === me ? playerGun : P.playerGun), color: P === me ? charColor : P.charColor, scale: P === me ? charScale : P.charScale, carrying: !!(P === me ? carried : P.carried), hanging: !!(P === me ? grabConstraint : P.grabConstraint) }; }); },
     fakePads: function(list){ window.__pgFakePads = list; },
+    addBubble: function(x, y){ bubbles.push({ x: x, y: y, collected: false }); return bubbles.length; },
+    score: function(){ return score; },
     gravityY: function(){ return engine.gravity.y; },
     look: function(){ return me ? me.lookAng : null; },
     bodyKind: function(){ return player ? (player.circleRadius ? "disc" : "box") : null; },
