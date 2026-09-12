@@ -215,6 +215,14 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   let fc = await kind('creature');
   let fo = (await stats()).filter(o => o.id === fc.obj)[0];
   ok('placed: no collision and held still, in the air where it was put', fc.ghost === true && fo.static === true && fo.sensor === true && Math.abs(fo.pos.y - (Y-60)) < 2, { ghost: fc.ghost, static: fo.static, sensor: fo.sensor, y: fo.pos.y });
+  ok('the studio opens on its Size step first', (await st('where')).state === 'size', (await st('where')).state);
+  const szr = await st('size', 200, 100);
+  fo = (await stats()).filter(o => o.id === fc.obj)[0];
+  ok('width and height set the space it is drawn in, and its body with it', szr.w === 200 && szr.h === 100 && Math.abs(fo.area - 200*100) < 200, { size: szr, area: fo.area });
+  const nxS = await p.evaluate(() => Array.from(document.querySelectorAll('#ceLeft button')).map(b => b.textContent).find(t => /^Next:/.test(t)));
+  ok('Next goes on to the look', /Idle/.test(nxS || ''), nxS);
+  await st('click', nxS); await p.waitForTimeout(150);
+  ok('and the drawing box takes that shape', Math.abs((await st('canvasRect')).w / (await st('canvasRect')).h - 2) < 0.05, (await st('canvasRect')));
   await p.evaluate(id => window.__pg.gadgetSet(id, { speed: 150, range: 900 }), fc.id);
   await st('setColor', '#C89BD9'); await stroke(0.2, 0.3, 0.8, 0.7);
   await p.waitForTimeout(700);
@@ -237,6 +245,12 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   fo = (await stats()).filter(o => o.id === fc.obj)[0];
   ok('now it falls and comes after the player', fo.pos.y > Y - 30 && fo.pos.x < X + 60, fo.pos);
   ok('standing up straight, whatever happened on the way', Math.abs(fo.angle) < 0.02, fo.angle);
+  await p.evaluate(id => window.__pg.skinStudioAt(id, 'size'), fc.id); await p.waitForTimeout(200);
+  const areaBefore = (await stats()).filter(o => o.id === fc.obj)[0].area;
+  await st('size', 400, 200);
+  const areaAfter = (await stats()).filter(o => o.id === fc.obj)[0].area;
+  ok('changing the size later scales the drawn hitbox with it', Math.abs(areaAfter / areaBefore - 4) < 0.3, { before: areaBefore, after: areaAfter });
+  await st('close'); await p.waitForTimeout(150);
   await p.evaluate(() => { window.__pg.paused(true); window.__pg.setFlying(true); });
 
   console.log('');

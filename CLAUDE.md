@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 754 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 759 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 754 checks + checkgeom, in order
+npm test                   # all 759 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -67,7 +67,7 @@ node tcreature.js          # 32 — the Creature eye: chasing, stopping short, s
 node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
 node tstudio.js            # 61 — the studio: strokes, undo/redo, the tools, frames, playback, no rig; the brush ring, filled shapes, nudge and flip, the Settings card's keys; the character's size and drawn hitbox
 node tfill.js              # 14 — the fill: a closed outline fills with material or water; open space, material, a gap and an island
-node tskins.js             # 64 — the Custom creature and Custom object wizards (look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
+node tskins.js             # 69 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -1088,6 +1088,21 @@ before the general gadget case) — the marker is the thing, so dragging
 it moves the whole thing, body and picture. It used to lift off like any
 gadget and leave the body behind: "there will just be a square in my
 level".
+
+**The wizard starts with the size.** `SKIN_SIZE_STEP` (`size:true`) is
+the first state of a creature's or object's subject (`hasSize`: the kind,
+an `art` box and a host): Width and Height sliders (`DRAWN_SIZE_MIN` 40
+to `DRAWN_SIZE_MAX` 600) and Small / Medium / Big / Huge / Wide / Tall
+presets, through `subject.setSize(w, h)` — the art box resized about its
+own centre and `applyDrawnSteps` run at once, so the placeholder box (or
+a drawn hitbox, whose strokes are fractions of the box) follows. The
+step's stage is the live level around the thing's own spot
+(`stageAim`, which the Size camera branch aims at instead of the player;
+`ceLiveStage` is the shared blit both stages use) with the box outlined
+at its size and the character's outline beside it for scale. A fresh
+one opens here (`openSkinStudio`: no art yet → `size`); the box's
+"Change the size" reopens it. Carson: "it's just a square" — it need not
+be.
 
 **The wizard** is the studio with steps: `SKIN_STEPS[kind]` are extra
 "states" flagged `mask:true` — `hitbox` (blue), `weakD` (gold), `dangerD`

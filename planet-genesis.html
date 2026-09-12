@@ -2839,6 +2839,8 @@
   /* The drawn steps after the look: the hitbox (physics), then for a
      creature its weak spot and its danger. Each is one drawing in the
      same box as the art, turned into a polygon when the studio closes. */
+  var SKIN_SIZE_STEP = { id:"size", label:"Size", emoji:"📏", size:true };
+  var DRAWN_SIZE_MIN = 40, DRAWN_SIZE_MAX = 600;
   var SKIN_STEPS = {
     creature: [{ id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" }, { id:"weakD", label:"Weak spot", emoji:"🎯", mask:true, color:"#F2B705" }, { id:"dangerD", label:"Danger", emoji:"🔥", mask:true, color:"#E4574B" }],
     anim:     [{ id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" }],
@@ -6153,7 +6155,7 @@
       beginEditorHold();
       var pz = worldNum("playZoom");
       if (Math.abs(camZoom - pz) > 1e-6){ camZoom = pz; applyCamScale(); visW = viewRectW / camScale; visH = viewRectH / camScale; }
-      var aim = playerAim();
+      var aim = (sizeStagePreviewWanted() && ceSubject.stageAim && ceSubject.stageAim()) || playerAim();
       camX = clampCam(aim.x - visW/2, WORLD_W, visW);
       camY = clampCam(aim.y - visH/2, WORLD_H, visH);
     } else if (buildPreviewWanted()){
@@ -9005,36 +9007,25 @@
         // the level itself, live, around the character, at the zoom Play
         // uses — the camera is on them for as long as this step is open
         var artW = Math.round(CHAR_BASE_W * charScale), artH = Math.round(CHAR_BASE_H * charScale);
-        c2.fillStyle = "#BFE3F5"; c2.fillRect(0, 0, w, h);
-        if (!player) return;
-        var ps = worldToScreen(player.position.x, player.position.y);
-        // the window onto the level is centred on you unless that runs off the screen's edge (the camera stops at the map's)
-        var d2 = dpr || 1, cw = canvas.width / d2, chh = canvas.height / d2;
-        var ox0 = Math.max(0, Math.min(cw - w, ps.x - w/2)), oy0 = Math.max(0, Math.min(chh - h, ps.y - h/2));
-        try { c2.drawImage(canvas, ox0 * d2, oy0 * d2, w * d2, h * d2, 0, 0, w, h); } catch(e){}
-        // where the feet are on this stage
-        var fx = ps.x - ox0, feetY = ps.y - oy0 + (PH/2) * camScale, k = camScale;
+        if (!player){ c2.fillStyle = "#BFE3F5"; c2.fillRect(0, 0, w, h); return; }
+        var lv = ceLiveStage(c2, w, h, player.position), k = lv.k;
+        var pc = lv.toStage(player.position.x, player.position.y);
+        var fx = pc.x, feetY = pc.y + (PH/2) * k;
         // the old size beside you, for comparison
         var ow = CHAR_BASE_W * k, oh = CHAR_BASE_H * k, ox = fx + (artW/2) * k + 24 * k, oy = feetY - oh;
         c2.save();
         if (Math.abs(charScale - 1) > 0.01){
           c2.setLineDash([4, 3]); c2.strokeStyle = "rgba(255,255,255,0.9)"; c2.lineWidth = 1.5; c2.strokeRect(ox, oy, ow, oh);
           c2.setLineDash([]); c2.strokeStyle = "rgba(43,27,18,0.7)"; c2.lineWidth = 1; c2.strokeRect(ox + 1, oy + 1, ow - 2, oh - 2);
-          c2.fillStyle = "#2B1B12"; c2.font = "bold 12px sans-serif"; c2.textAlign = "center";
-          c2.strokeStyle = "rgba(255,255,255,0.8)"; c2.lineWidth = 3; c2.strokeText("the old size", ox + ow/2, oy - 6);
-          c2.fillText("the old size", ox + ow/2, oy - 6);
+          ceStageLabel(c2, "the old size", ox + ow/2, oy - 6, "center", true);
         }
         // a measuring line beside you, and the height — on your left if there is room for it, else past the old size
         var top = feetY - artH * k, mx = fx - (artW/2) * k - 14, onLeft = mx > 90;
         if (!onLeft) mx = ox + ow + 14;
         c2.setLineDash([]); c2.strokeStyle = "rgba(43,27,18,0.75)"; c2.lineWidth = 1.5;
         c2.beginPath(); c2.moveTo(mx, top); c2.lineTo(mx, feetY); c2.moveTo(mx - 5, top); c2.lineTo(mx + 5, top); c2.moveTo(mx - 5, feetY); c2.lineTo(mx + 5, feetY); c2.stroke();
-        c2.fillStyle = "#2B1B12"; c2.font = "bold 12px sans-serif"; c2.textAlign = onLeft ? "right" : "left";
-        var lx = onLeft ? mx - 6 : mx + 6;
-        c2.strokeStyle = "rgba(255,255,255,0.8)"; c2.lineWidth = 3; c2.strokeText(artH + "px tall", lx, (top + feetY) / 2 + 4);
-        c2.fillText(artH + "px tall", lx, (top + feetY) / 2 + 4);
-        c2.textAlign = "left"; c2.font = "11px sans-serif";
-        c2.strokeText("your level, as Play shows it", 10, 16); c2.fillText("your level, as Play shows it", 10, 16);
+        ceStageLabel(c2, artH + "px tall", onLeft ? mx - 6 : mx + 6, (top + feetY) / 2 + 4, onLeft ? "right" : "left", true);
+        ceStageLabel(c2, "your level, as Play shows it", 10, 16, "left", false);
         c2.restore();
       },
       preview: function(pctx, w, h){
@@ -9066,17 +9057,66 @@
     var kind = g.kind, host = g.obj;
     var steps = SKIN_STEPS[kind] || [];
     var stepOf = function(id){ for (var i = 0; i < steps.length; i++) if (steps[i].id === id) return steps[i]; return null; };
+    var hasSize = (kind === "creature" || kind === "anim") && !!g.art && !!host;
     var sub = {
       kind: "skin", g: g, title: SKIN_TITLE[kind] || "Drawing",
-      // the look's states, then the drawn steps
-      states: function(){ return SKIN_STATES[kind].concat(steps); },
+      // the size first (a drawn thing), then the look's states, then the drawn steps
+      states: function(){ return (hasSize ? [SKIN_SIZE_STEP] : []).concat(SKIN_STATES[kind]).concat(steps); },
+      isSize: function(st){ return hasSize && st === "size"; },
       isMask: function(st){ return !!stepOf(st); },
       maskColor: function(st){ var d = stepOf(st); return d ? d.color : null; },
       frames: function(st){
+        if (st === "size") return [blankDrawing()];
         if (stepOf(st)){ if (!g[st]) g[st] = blankDrawing(); return [g[st]]; }
         if (!g.skin.states[st]) g.skin.states[st] = [blankDrawing()]; return g.skin.states[st];
       },
-      setFrame: function(st, d){ if (stepOf(st)) g[st] = d; else g.skin.states[st][pmEditFrame] = d; },
+      setFrame: function(st, d){ if (st === "size") return; if (stepOf(st)) g[st] = d; else g.skin.states[st][pmEditFrame] = d; },
+      // the size: the art box, about its own centre; the body follows (the placeholder box, or the drawn hitbox scaled with it)
+      setSize: function(w, h){
+        if (!hasSize) return;
+        w = Math.max(DRAWN_SIZE_MIN, Math.min(DRAWN_SIZE_MAX, Math.round(w))); h = Math.max(DRAWN_SIZE_MIN, Math.min(DRAWN_SIZE_MAX, Math.round(h)));
+        var cx = g.art.x + g.art.w/2, cy = g.art.y + g.art.h/2;
+        g.art = { x: cx - w/2, y: cy - h/2, w: w, h: h, a: g.art.a || 0 };
+        applyDrawnSteps(g);
+      },
+      stageAim: function(){
+        if (!host || !host.body || !g.art) return g.pos;
+        return toWorldPoint(host.body, { x: g.art.x + g.art.w/2, y: g.art.y + g.art.h/2 });
+      },
+      stage: function(c2, w, h){
+        // the level, live, around the spot where it stands, with the drawing box at its size and you beside it for scale
+        var aim = sub.stageAim();
+        var lv = ceLiveStage(c2, w, h, aim), k = lv.k, c = lv.toStage(aim.x, aim.y);
+        var bw = g.art.w * k, bh = g.art.h * k;
+        c2.save();
+        c2.setLineDash([6, 4]); c2.lineWidth = 2; c2.strokeStyle = "rgba(255,255,255,0.95)"; c2.strokeRect(c.x - bw/2, c.y - bh/2, bw, bh);
+        c2.setLineDash([]); c2.lineWidth = 1; c2.strokeStyle = kind === "creature" ? "#5F9E5A" : "#8B8374"; c2.strokeRect(c.x - bw/2 + 1, c.y - bh/2 + 1, bw - 2, bh - 2);
+        c2.fillStyle = kind === "creature" ? "rgba(140,209,125,0.18)" : "rgba(201,194,180,0.2)"; c2.fillRect(c.x - bw/2, c.y - bh/2, bw, bh);
+        ceStageLabel(c2, g.art.w + " by " + g.art.h + "px — the space you draw in", c.x, c.y - bh/2 - 8, "center", true);
+        // you, for scale, standing at the box's foot
+        var pw = PW * k, ph = PH * k, px = c.x + bw/2 + 18 * k, py = c.y + bh/2 - ph;
+        c2.setLineDash([4, 3]); c2.strokeStyle = "rgba(255,255,255,0.9)"; c2.lineWidth = 1.5; c2.strokeRect(px, py, pw, ph);
+        c2.setLineDash([]); c2.strokeStyle = "rgba(43,27,18,0.7)"; c2.lineWidth = 1; c2.strokeRect(px + 1, py + 1, pw - 2, ph - 2);
+        ceStageLabel(c2, "you", px + pw/2, py - 6, "center", true);
+        ceStageLabel(c2, "your level, as Play shows it", 10, 16, "left", false);
+        c2.restore();
+      },
+      leftPanel: function(el){
+        if (pmEditState !== "size") return false;
+        ceH4("Its size", el);
+        var wRow = sliderRow("Width", g.art.w, DRAWN_SIZE_MIN, DRAWN_SIZE_MAX, 5, function(v){ sub.setSize(v, g.art.h); ceLayout(); }, function(v){ return Math.round(v) + "px"; });
+        var hRow = sliderRow("Height", g.art.h, DRAWN_SIZE_MIN, DRAWN_SIZE_MAX, 5, function(v){ sub.setSize(g.art.w, v); ceLayout(); }, function(v){ return Math.round(v) + "px"; });
+        el.appendChild(wRow); el.appendChild(hRow);
+        var pr = document.createElement("div"); pr.className = "ceChips";
+        [[80, 80, "Small"], [120, 120, "Medium"], [200, 200, "Big"], [320, 320, "Huge"], [240, 120, "Wide"], [120, 240, "Tall"]].forEach(function(o){
+          pr.appendChild(ceChip(o[2], g.art.w === o[0] && g.art.h === o[1], function(){ sub.setSize(o[0], o[1]); renderCharEditorPanels(); ceLayout(); }));
+        });
+        el.appendChild(pr);
+        var n = document.createElement("div"); n.className = "noteText";
+        n.textContent = "The dashed box on the stage is the space you will draw in, shown where it stands in your level, with you beside it for scale. You can also resize it later with the corner handles.";
+        el.appendChild(n);
+        return true;
+      },
       count: function(st){ return sub.frames(st).length; },
       setCount: function(st, n){ if (stepOf(st)) return; var a = sub.frames(st); while (a.length < n) a.push(blankDrawing()); a.length = Math.max(1, n); },
       fps: function(st){ return g.skin.fps[st]; },
@@ -9089,6 +9129,7 @@
       persist: function(){},
       hint: function(){
         if (kind === "emitter") return "Draw one particle. Several frames play over its life.";
+        if (pmEditState === "size") return "How big it is on the level. Set the width and height, then draw it in that space.";
         var d = stepOf(pmEditState);
         if (d){
           if (d.id === "hitbox") return "Draw the hitbox — the part of it that is solid. Leave it empty for no collision at all.";
@@ -9123,6 +9164,7 @@
       next: function(){
         var ids = sub.states().map(function(st){ return st.id; }), i = ids.indexOf(pmEditState);
         var firstStep = steps.length ? steps[0].id : null;
+        if (pmEditState === "size") return ids[1] || firstStep;   // the size, then the look
         if (!stepOf(pmEditState)) return firstStep;            // from any look state, on to the first step
         return i + 1 < ids.length ? ids[i + 1] : null;         // then step by step; null means done
       },
@@ -9205,7 +9247,8 @@
     // the host holds still while it is drawn on — a creature used to
     // walk off after the player, and fall, while its picture was painted
     if (g.obj && g.obj.body && (g.kind === "creature" || g.kind === "anim")){ g.obj.studioHold = true; refreshObjectPhysics(g.obj); }
-    if (step) pmEditState = step; else pmEditState = "idle";
+    var freshDrawn = (g.kind === "creature" || g.kind === "anim") && g.art && g.obj && !skinHasArt(g.skin);
+    if (step) pmEditState = step; else pmEditState = freshDrawn ? "size" : "idle";   // a fresh creature or object starts with its size
     pmEditFrame = 0;
     ceOpenWith(ceSkinSubject(g));
   }
@@ -9606,6 +9649,27 @@
     ceKeysPanelEl.appendChild(foot);
   }
   ceKeysBtnEl.addEventListener("click", function(){ ceShowKeys = !ceShowKeys; renderCeKeysPanel(); });
+  /* The live stage: the game's own canvas around `aim`, as the camera is
+     showing it (the Size step's camera branch has it on `aim` at the Play
+     zoom). Returns a world → stage mapping for whatever the caller draws
+     on top. The window is centred on the aim unless that runs off the
+     screen's edge, since the camera stops at the map's. */
+  function ceLiveStage(c2, w, h, aim){
+    c2.fillStyle = "#BFE3F5"; c2.fillRect(0, 0, w, h);
+    var ps = worldToScreen(aim.x, aim.y);
+    var d2 = dpr || 1, cw = canvas.width / d2, chh = canvas.height / d2;
+    var ox0 = Math.max(0, Math.min(cw - w, ps.x - w/2)), oy0 = Math.max(0, Math.min(chh - h, ps.y - h/2));
+    try { c2.drawImage(canvas, ox0 * d2, oy0 * d2, w * d2, h * d2, 0, 0, w, h); } catch(e){}
+    var k = camScale;
+    return { k: k, toStage: function(x, y){ var q = worldToScreen(x, y); return { x: q.x - ox0, y: q.y - oy0 }; } };
+  }
+  function ceStageLabel(c2, text, x, y, align, bold){
+    c2.save();
+    c2.font = (bold ? "bold " : "") + "12px sans-serif"; c2.textAlign = align || "left"; c2.textBaseline = "alphabetic";
+    c2.strokeStyle = "rgba(255,255,255,0.8)"; c2.lineWidth = 3; c2.strokeText(text, x, y);
+    c2.fillStyle = "#2B1B12"; c2.fillText(text, x, y);
+    c2.restore();
+  }
   function ceOpenWith(subject){
     ceSubject = subject;
     ceHistory.undo.length = 0; ceHistory.redo.length = 0; cePending = null; ceStroke = null;
@@ -11230,6 +11294,7 @@
     if (g.kind === "creature" || g.kind === "anim"){
       var dr = opSection("Drawing");
       opBtn(dr, "🎨 Edit the drawing", "The look, the hitbox" + (g.kind === "creature" ? ", the weak spot and the danger" : ""), function(){ openSkinStudio(g); }, "wide on");
+      opBtn(dr, "📏 Change the size", "", function(){ openSkinStudio(g, "size"); }, "wide");
       opBtn(dr, "🧱 Redraw the hitbox", "", function(){ openSkinStudio(g, "hitbox"); }, "wide");
       if (g.kind === "creature"){
         opBtn(dr, "🎯 Redraw the weak spot", "", function(){ openSkinStudio(g, "weakD"); }, "wide");

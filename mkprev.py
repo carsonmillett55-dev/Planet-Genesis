@@ -93,6 +93,7 @@ HOOK = """
       if (cmd === 'canvasRect'){ var r = ceCanvas.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }
       if (cmd === 'chips'){ return Array.from(ceModeRowEl.querySelectorAll('button')).map(function(b){ return b.textContent; }); }
       if (cmd === 'click'){ var btn = Array.from(charEditorOverlay.querySelectorAll('button')).find(function(x){ return x.textContent.trim() === a; }); if (btn){ btn.click(); return true; } return false; }
+      if (cmd === 'size'){ if (ceSubject.setSize) ceSubject.setSize(a, b); renderCharEditorPanels(); ceLayout(); return ceSubject.g ? { w: ceSubject.g.art.w, h: ceSubject.g.art.h } : null; }
       if (cmd === 'cursor'){ return ceCursor ? { x: +ceCursor.x.toFixed(3), y: +ceCursor.y.toFixed(3) } : null; }
       if (cmd === 'history'){ return { undo: ceHistory.undo.length, redo: ceHistory.redo.length }; }
       if (cmd === 'setColor'){ pmPaintColor = a; return pmPaintColor; }
