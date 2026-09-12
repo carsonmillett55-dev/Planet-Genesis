@@ -1249,6 +1249,7 @@
     display:flex; align-items:center; gap:.5rem;
     background:var(--stitch); border-radius:10px; padding:.4rem .6rem;
   }
+  #objPanel textarea.opText{ width:100%; box-sizing:border-box; font-family:'Patrick Hand',cursive; font-size:1rem; padding:.3rem .45rem; border:2px solid var(--ink); border-radius:8px; background:#FFFDF6; color:var(--ink); resize:vertical; }
   .levelRow .lthumb{ flex:none; width:5.2rem; height:2.9rem; border-radius:6px; border:2px solid var(--ink); background:var(--desk-dark) center/cover no-repeat; }
   .levelRow .lthumb.none{ background:var(--desk-dark); opacity:.5; }
   .levelRow .lname{ font-family:'Patrick Hand',cursive; font-size:1.05rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -1720,6 +1721,10 @@
     "tool:objemitter": ["Object emitter", "Fires copies of something you saved — pick which in its box — at a rate, up to a limit. Wire a switch to it to fire on demand. To save something, right-click it: Save as object."],
     "tool:gun":        ["Launcher", "A pickup: walk into it in Play and the cursor becomes a gun. Click to fire. Its box picks what it shoots — a bullet, a ray, a projectile you drew, or something you saved."],
     "tool:fan":        ["Fan", "Blows upward and lifts the player. Its size and strength are in its box, and a wire switches it on and off."],
+    "tool:speech":     ["Speech bubble", "Put it on something and type what it says. It speaks while the player is within reach — or, wired, while the signal is on. A sign, a talking creature, a hint."],
+    "tool:destroyer":  ["Destroyer", "Put it on something and wire a switch, a sensor or a timer to it: the moment the signal comes on, that thing is gone — with a bang, if you like. A bridge that falls, a wall that blows open. Play only."],
+    "tool:sound":      ["Sound", "Put it on something and wire it: it plays its sound when the signal comes on. Pick the sound, its pitch and how loud in its box."],
+    "tool:gate":       ["Gate", "Logic in one chip: AND, OR, XOR, NOT, or a toggle that flips each time. Wire several switches into it, then wire it on to what should happen — two buttons for one door."],
     "tool:sticker":    ["Stickers", "Draw a sticker in the studio, then click on any material to stick it there. It takes the shape of what it lands on."],
     "tool:spawn":      ["Start", "Where the player begins. Play from here (Ctrl+P) lets you test from wherever you are working instead."],
     "tool:checkpoint": ["Checkpoint", "Touch it in Play and it becomes where you come back to."],
@@ -3014,7 +3019,7 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter","gun","projsensor"];
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter","gun","projsensor","speech","destroyer","sound","gate"];
   // LBP's tag colours, and the names the box shows for them
   var TAG_COLORS = ["#E4574B","#E8891D","#F2B705","#5F9E5A","#2A7B8C","#8E5BB5","#E85A9E","#F6ECD9"];
   var TAG_NAMES = ["red","orange","yellow","green","blue","purple","pink","white"];
@@ -3194,8 +3199,8 @@
     if (matOf(currentTool) && matOf(currentTool).isMask){ currentTool = "move"; canvas.dataset.tool = "move"; }
     renderSelBar();
   }
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter", gun:"Launcher", projsensor:"Projectile sensor" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter", gun:"gun", projsensor:"projsensor" };
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter", gun:"Launcher", projsensor:"Projectile sensor", speech:"Speech bubble", destroyer:"Destroyer", sound:"Sound", gate:"Gate" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter", gun:"gun", projsensor:"projsensor", speech:"speech", destroyer:"destroyer", sound:"sound", gate:"gate" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   // the sticker in hand: a saved drawing to place copies of; the size and turn it goes on at
   var stickerPick = null, stickerSize = parseFloat(localStorage.getItem("pg_sticker_size") || "120") || 120, stickerRot = 0;
@@ -3372,6 +3377,43 @@
       g.count = 0; g.wasOn = false; g.inputReset = null; g.wasReset = false;
       g.visible = extra.visible != null ? !!extra.visible : false;
     }
+    if (kind === "speech"){
+      /* A speech bubble: says its line above whatever it sits on while
+         the player is within `radius` — or, wired, while the signal is
+         on. `once`: the first time only, per Play. */
+      g.text = typeof extra.text === "string" ? extra.text.slice(0, 240) : "Hello there!";
+      g.radius = extra.radius != null ? Math.max(40, Math.min(2000, +extra.radius)) : 180;
+      g.once = !!extra.once;
+      g.said = false; g.wasOn = false; g.showing = false; g.suppressed = false;
+      g.visible = extra.visible != null ? !!extra.visible : false;
+    }
+    if (kind === "destroyer"){
+      /* Wired: the moment its signal comes on, the thing it sits on is
+         gone — with a bang that shoves what is near, if `explode`. Play
+         only; Build's snapshot brings everything back. */
+      g.explode = extra.explode != null ? !!extra.explode : true;
+      g.blast = extra.blast != null ? Math.max(0, Math.min(1200, +extra.blast)) : 260;
+      g.wasOn = false;
+      g.visible = extra.visible != null ? !!extra.visible : false;
+    }
+    if (kind === "sound"){
+      /* Plays one of the level sounds when its signal comes on; `every`
+         seconds again while it stays on, if set. */
+      g.sound = LEVEL_SOUNDS[extra.sound] ? extra.sound : "chime";
+      g.pitch = extra.pitch != null ? Math.max(0.5, Math.min(2, +extra.pitch)) : 1;
+      g.volume = extra.volume != null ? Math.max(0, Math.min(1, +extra.volume)) : 0.8;
+      g.every = extra.every != null ? Math.max(0, Math.min(60, +extra.every)) : 0;
+      g.wasOn = false; g.lastAt = 0;
+      g.visible = extra.visible != null ? !!extra.visible : false;
+    }
+    if (kind === "gate"){
+      /* LBP2's logic gates as one gadget: AND (every wire in on), OR
+         (any), XOR (exactly one), NOT (none — unwired, always on), and a
+         toggle that flips each time its signal comes on. */
+      g.mode = ["and", "or", "xor", "not", "toggle"].indexOf(extra.mode) >= 0 ? extra.mode : "and";
+      g.state = !!extra.state; g.wasOn = false; g.inN = 0; g.inOn = 0;
+      g.visible = extra.visible != null ? !!extra.visible : false;
+    }
     if (kind === "sticker"){
       /* A sticker, LittleBigPlanet's decal: a drawing stuck onto whatever
          it was placed on — any object, any layer, or the background —
@@ -3538,9 +3580,9 @@
     });
   }
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter"); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter" || t.kind === "speech" || t.kind === "destroyer" || t.kind === "sound" || t.kind === "gate"); }
   function hasResetPort(t){ return !!t && (t.kind === "timer" || t.kind === "counter"); }
-  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun"; }
+  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun" && g.kind !== "speech" && g.kind !== "destroyer" && g.kind !== "sound"; }
   function addWire(from, to, port){
     if (!from || !to || from === to) return false;
     port = port === "reset" && hasResetPort(to) ? "reset" : "in";
@@ -3656,7 +3698,7 @@
     }
   });
   onStep("beforeUpdate", function(){
-    var i, g, dt = stepSeconds();
+    var i, g, dt = stepSeconds(), toDestroy = [];
     for (i = 0; i < gadgets.length; i++){ g = gadgets[i]; g.pos = gadgetWorld(g); }
     if (!runner.enabled){
       for (i = 0; i < gadgets.length; i++){ g = gadgets[i]; if (g.kind === "eye" && player){ var ex = player.position.x - g.pos.x, ey = player.position.y - g.pos.y, el = Math.hypot(ex, ey) || 1; g.look = { x: ex / el, y: ey / el }; } }
@@ -3711,6 +3753,32 @@
         g.wasOn = cOn;
         g.out = g.count >= g.target ? 1 : 0;
       }
+      if (g.kind === "speech"){
+        var near = !!player && dist(g.pos, player.position) < g.radius;
+        var want = g.input != null ? g.input > 0 : near;
+        if (want && !g.wasOn){ g.suppressed = g.once && g.said; if (!g.suppressed) g.said = true; }
+        g.wasOn = want;
+        g.showing = want && !g.suppressed;
+      }
+      if (g.kind === "destroyer"){
+        var dOn = g.input != null && g.input > 0;
+        if (dOn && !g.wasOn && mode === "play" && g.obj) toDestroy.push(g);
+        g.wasOn = dOn;
+      }
+      if (g.kind === "sound"){
+        var sOn = g.input != null && g.input > 0, nowMs = performance.now();
+        if (sOn && (!g.wasOn || (g.every > 0 && nowMs - g.lastAt >= g.every * 1000))){ playLevelSound(g); g.lastAt = nowMs; }
+        g.wasOn = sOn;
+      }
+      if (g.kind === "gate"){
+        var n = g.inN || 0, k = g.inOn || 0, v = false;
+        if (g.mode === "and") v = n > 0 && k === n;
+        else if (g.mode === "or") v = k > 0;
+        else if (g.mode === "xor") v = k === 1;
+        else if (g.mode === "not") v = k === 0;
+        else { var tg = k > 0; if (tg && !g.wasOn) g.state = !g.state; g.wasOn = tg; v = g.state; }
+        g.out = v ? 1 : 0;
+      }
       if (g.kind === "watersensor"){
         // on while water is actually touching it: a wet cell within its
         // reach, or the world's water above it. It used to ask the column's
@@ -3719,15 +3787,18 @@
         g.out = waterTouching(g.pos.x, g.pos.y, 12) ? 1 : 0;
       }
     }
+    // what a destroyer took this step, after the loop so the list is not pulled from under it
+    for (i = 0; i < toDestroy.length; i++) destroyHost(toDestroy[i]);
     // Inputs: null when nothing is wired to you, else the strongest signal in.
+    // A gate also counts its wires (`inN`) and how many are on (`inOn`).
     for (i = 0; i < bolts.length; i++) bolts[i].input = null;
-    for (i = 0; i < gadgets.length; i++){ gadgets[i].input = null; if (hasResetPort(gadgets[i])) gadgets[i].inputReset = null; }
+    for (i = 0; i < gadgets.length; i++){ gadgets[i].input = null; if (hasResetPort(gadgets[i])) gadgets[i].inputReset = null; if (gadgets[i].kind === "gate"){ gadgets[i].inN = 0; gadgets[i].inOn = 0; } }
     for (i = 0; i < links.length; i++) links[i].input = null;
     for (i = 0; i < wires.length; i++){
       var src = gadgetById(wires[i].from), tgt = receiverById(wires[i].to);
       if (!src || !tgt) continue;
       if (wires[i].port === "reset") tgt.inputReset = Math.max(tgt.inputReset || 0, src.out);
-      else tgt.input = Math.max(tgt.input || 0, src.out);
+      else { tgt.input = Math.max(tgt.input || 0, src.out); if (tgt.kind === "gate"){ tgt.inN++; if (src.out > 0) tgt.inOn++; } }
     }
     for (i = 0; i < gadgets.length; i++){
       g = gadgets[i];
@@ -4167,6 +4238,59 @@
     }
     worldLive.water = worldLive.waterY >= WORLD_H - 1 ? null : worldLive.waterY;
   }
+  /* The destroyer fires: a puff the size of the host, a shove to
+     everything loose within `blast` (the player too) and a shake if it
+     explodes, then the host — and every gadget on it, this one included
+     — is removed. Play only, so Build's snapshot brings it all back. */
+  function destroyHost(g){
+    var o = g.obj; if (!o || !o.body || objects.indexOf(o) < 0) return;
+    var b = o.body, cx = b.position.x, cy = b.position.y, bw = b.bounds.max.x - b.bounds.min.x, bh = b.bounds.max.y - b.bounds.min.y, sz = Math.max(bw, bh);
+    puff(cx, cy, Math.min(60, 12 + sz / 8), { color: g.explode ? "#F2B705" : "#8B8374", speed: g.explode ? 5 : 2, g: 0.1, r: g.explode ? 4 : 2.6, life: 34, shape: g.explode ? "spark" : undefined });
+    if (g.explode){
+      var R = g.blast;
+      var shove = function(body, mass){
+        var dx = body.position.x - cx, dy = body.position.y - cy, d = Math.hypot(dx, dy) || 1;
+        if (d > R + sz / 2) return;
+        var k = 14 * (1 - Math.min(1, Math.max(0, d - sz / 2) / Math.max(1, R)));
+        Body.setVelocity(body, { x: body.velocity.x + dx / d * k, y: body.velocity.y + dy / d * k - k * 0.35 });
+      };
+      objects.forEach(function(q){ if (q !== o && q.body && !q.body.isStatic && !q.decorative) shove(q.body); });
+      if (player) shove(player);
+      shakeAmt = Math.max(shakeAmt, 9);
+      sfx("zap");
+    } else sfx("delete");
+    removeObject(o);
+  }
+  /* The level sounds a Sound gadget can play, from the same little synth
+     as the game's own effects. `p` is the pitch (1 as written), `v` the
+     volume (1 as written). */
+  var LEVEL_SOUNDS = {
+    chime:   { label: "Chime",   play: function(p, v){ tone({ type:"sine", f:880*p, dur:.35, gain:.14*v }); tone({ type:"sine", f:1320*p, dur:.4, gain:.08*v, at:.08 }); } },
+    bell:    { label: "Bell",    play: function(p, v){ tone({ type:"triangle", f:1320*p, dur:.6, gain:.12*v }); tone({ type:"sine", f:1980*p, dur:.35, gain:.05*v }); } },
+    coin:    { label: "Coin",    play: function(p, v){ tone({ type:"sine", f:988*p, dur:.08, gain:.12*v }); tone({ type:"sine", f:1319*p, dur:.3, gain:.12*v, at:.08 }); } },
+    beep:    { label: "Beep",    play: function(p, v){ tone({ type:"square", f:1000*p, dur:.09, gain:.07*v }); } },
+    buzz:    { label: "Buzz",    play: function(p, v){ tone({ type:"square", f:110*p, to:100*p, dur:.4, gain:.08*v }); } },
+    alarm:   { label: "Alarm",   play: function(p, v){ for (var i = 0; i < 4; i++) tone({ type:"sawtooth", f:(i % 2 ? 800 : 600)*p, dur:.14, gain:.08*v, at:i*.15 }); } },
+    boom:    { label: "Boom",    play: function(p, v){ noiseHit({ filter:"lowpass", f:220*p, to:40, dur:.6, gain:.3*v }); tone({ type:"sine", f:70*p, to:35*p, dur:.5, gain:.2*v }); } },
+    thud:    { label: "Thud",    play: function(p, v){ noiseHit({ filter:"lowpass", f:180*p, to:60, dur:.16, gain:.22*v }); } },
+    drum:    { label: "Drum",    play: function(p, v){ noiseHit({ filter:"lowpass", f:320*p, to:80, dur:.13, gain:.16*v }); tone({ type:"sine", f:130*p, to:50*p, dur:.14, gain:.16*v }); } },
+    whoosh:  { label: "Whoosh",  play: function(p, v){ noiseHit({ f:400*p, to:2600*p, dur:.45, gain:.12*v, q:.8 }); } },
+    laser:   { label: "Laser",   play: function(p, v){ tone({ type:"sawtooth", f:1800*p, to:180*p, dur:.22, gain:.1*v }); } },
+    pop:     { label: "Pop",     play: function(p, v){ tone({ type:"sine", f:500*p, to:950*p, dur:.06, gain:.12*v }); } },
+    whistle: { label: "Whistle", play: function(p, v){ tone({ type:"sine", f:1200*p, to:2400*p, dur:.32, gain:.08*v }); } },
+    growl:   { label: "Growl",   play: function(p, v){ tone({ type:"sawtooth", f:85*p, to:60*p, dur:.55, gain:.13*v }); noiseHit({ filter:"lowpass", f:300*p, to:120, dur:.5, gain:.06*v }); } },
+    splash:  { label: "Splash",  play: function(p, v){ noiseHit({ f:2200*p, to:500*p, dur:.25, gain:.1*v, q:.7 }); } },
+    zap:     { label: "Zap",     play: function(p, v){ tone({ type:"sawtooth", f:900*p, to:70*p, dur:.24, gain:.14*v }); noiseHit({ f:2600*p, to:300*p, dur:.2, gain:.09*v }); } }
+  };
+  var LEVEL_SOUND_ORDER = ["chime","bell","coin","beep","buzz","alarm","boom","thud","drum","whoosh","laser","pop","whistle","growl","splash","zap"];
+  var lastLevelSound = null;
+  function playLevelSound(g){
+    var def = LEVEL_SOUNDS[g.sound] || LEVEL_SOUNDS.chime;
+    lastLevelSound = { sound: g.sound, pitch: g.pitch, at: performance.now() };
+    if (!audioOn) return;
+    audioInit(); if (!actx) return;
+    def.play(g.pitch || 1, g.volume == null ? 0.8 : g.volume);
+  }
   function resetGadgetsForPlay(){
     gadgets.forEach(function(g){
       if (g.kind === "button") g.on = false; g.held = false; if (g.kind === "changer") g.latched = false;
@@ -4174,6 +4298,9 @@
       if (g.kind === "counter"){ g.count = 0; g.wasOn = false; g.wasReset = false; }
       if (g.kind === "impact"){ g.hitUntil = 0; g.touchStep = -1; }
       if (g.kind === "objemitter"){ g.total = 0; g.nextAt = 0; g.wasOn = false; }
+      if (g.kind === "speech"){ g.said = false; g.wasOn = false; g.showing = false; g.suppressed = false; }
+      if (g.kind === "destroyer" || g.kind === "sound"){ g.wasOn = false; g.lastAt = 0; }
+      if (g.kind === "gate"){ g.state = false; g.wasOn = false; g.inN = 0; g.inOn = 0; }
     });
     disarmPlayer(); gunBeams.length = 0;
     // every wired receiver starts Play reading "off", not "unwired"
@@ -6577,7 +6704,8 @@
                width: g.width, reach: g.reach, strength: g.strength, rot: g.rot, flipX: g.flipX,
                label: g.label, analog: g.analog, touching: g.touching, playerOnly: g.playerOnly, requireTag: g.requireTag, tagColor: g.tagColor, target: g.target, mode: g.mode,
                emit: g.emit ? { name: g.emit.name, pieces: g.emit.pieces } : undefined, freq: g.freq, life: g.life, maxAlive: g.maxAlive, maxTotal: g.maxTotal, pulse: g.pulse,
-               ammo: g.ammoDef ? packProjDef(g.ammoDef) : undefined, ammo_n: g.ammo };
+               ammo: g.ammoDef ? packProjDef(g.ammoDef) : undefined, ammo_n: g.ammo,
+               text: g.text, once: g.once, explode: g.explode, blast: g.blast, sound: g.sound, pitch: g.pitch, volume: g.volume, every: g.every };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -7779,6 +7907,30 @@
       ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2); ctx.fillStyle = on ? sc : "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, 5, Math.PI * 0.75, Math.PI * 2.25); ctx.strokeStyle = "#F6ECD9"; ctx.lineWidth = 2; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI*2); ctx.fillStyle = sc; ctx.fill();
+    } else if (g.kind === "speech"){
+      // a little balloon with dots
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-11, -9, 22, 15, 6) : ctx.rect(-11, -9, 22, 15);
+      ctx.fillStyle = on ? "#F2B705" : "#F6ECD9"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-4, 5); ctx.lineTo(-7, 11); ctx.lineTo(1, 5.5); ctx.fillStyle = on ? "#F2B705" : "#F6ECD9"; ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#2B1B12"; [-5, 0, 5].forEach(function(dx){ ctx.beginPath(); ctx.arc(dx, -1.5, 1.6, 0, Math.PI*2); ctx.fill(); });
+    } else if (g.kind === "destroyer"){
+      // a bomb
+      ctx.beginPath(); ctx.arc(0, 2, 9, 0, Math.PI*2); ctx.fillStyle = on ? "#F2B705" : "#2B1B12"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.rect(-3, -9, 6, 4); ctx.fillStyle = "#8B8374"; ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, -9); ctx.quadraticCurveTo(4, -14, 8, -12); ctx.lineWidth = 2; ctx.strokeStyle = "#B3261E"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(8, -12, 2.2, 0, Math.PI*2); ctx.fillStyle = "#F2B705"; ctx.fill();
+    } else if (g.kind === "sound"){
+      // a speaker with waves
+      ctx.beginPath(); ctx.moveTo(-10, -4); ctx.lineTo(-5, -4); ctx.lineTo(1, -9); ctx.lineTo(1, 9); ctx.lineTo(-5, 4); ctx.lineTo(-10, 4); ctx.closePath();
+      ctx.fillStyle = on ? "#F2B705" : "#7FD4D9"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(2, 0, 6, -Math.PI/3, Math.PI/3); ctx.stroke();
+      ctx.beginPath(); ctx.arc(2, 0, 10, -Math.PI/3, Math.PI/3); ctx.stroke();
+    } else if (g.kind === "gate"){
+      // a chip with its word on it
+      ctx.beginPath(); ctx.rect(-12, -8, 24, 16); ctx.fillStyle = on ? "#7FD4D9" : "#F6ECD9"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.fillStyle = "#2B1B12"; ctx.font = "bold 8px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(g.mode === "toggle" ? "TOG" : (g.mode || "and").toUpperCase(), 0, 0.5);
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
     } else if (g.kind === "impact"){
       // a starburst
       ctx.beginPath();
@@ -8113,6 +8265,36 @@
     ctx.fillStyle = "#F6ECD9"; ctx.strokeStyle = "rgba(43,27,18,0.75)"; ctx.lineWidth = 3; ctx.lineJoin = "round";
     ctx.strokeText("use", total/2 - tw/2, 0); ctx.fillText("use", total/2 - tw/2, 0);
     ctx.restore();
+  }
+  /* Speech bubbles: every speech gadget that is showing says its line
+     above its spot, at screen size whatever the zoom, wrapped to a
+     readable width, with a tail down to the spot. */
+  function drawSpeech(){
+    if (!runner.enabled) return;
+    for (var i = 0; i < gadgets.length; i++){
+      var g = gadgets[i];
+      if (g.kind !== "speech" || !g.showing || !g.text) continue;
+      var wp = gadgetWorld(g);
+      ctx.save();
+      ctx.translate(wp.x, wp.y - 26/camScale);
+      ctx.scale(1/camScale, 1/camScale);
+      ctx.font = "15px 'Patrick Hand', cursive";
+      var words = g.text.split(/\s+/), lines = [], cur = "";
+      for (var w = 0; w < words.length; w++){
+        var tryLine = cur ? cur + " " + words[w] : words[w];
+        if (ctx.measureText(tryLine).width > 230 && cur){ lines.push(cur); cur = words[w]; } else cur = tryLine;
+      }
+      if (cur) lines.push(cur);
+      var tw = 0; lines.forEach(function(l){ tw = Math.max(tw, ctx.measureText(l).width); });
+      var bw = tw + 22, bh = lines.length * 18 + 14, bx = -bw/2, by = -bh - 12;
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, by, bw, bh, 10) : ctx.rect(bx, by, bw, bh);
+      ctx.fillStyle = "rgba(255,253,246,0.96)"; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-8, by + bh - 1); ctx.lineTo(0, by + bh + 11); ctx.lineTo(8, by + bh - 1); ctx.fillStyle = "rgba(255,253,246,0.96)"; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-8, by + bh); ctx.lineTo(0, by + bh + 11); ctx.lineTo(8, by + bh); ctx.stroke();
+      ctx.fillStyle = "#2B1B12"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+      for (var li = 0; li < lines.length; li++) ctx.fillText(lines[li], 0, by + 8 + li * 18);
+      ctx.restore();
+    }
   }
   function drawLinkGlyph(l, alpha){
     var e = linkEnds(l);
@@ -9110,6 +9292,7 @@
     drawBolts(2); drawLinks(2); drawGadgets(2); drawSprites(2);
     drawWires();
     drawUsePrompt();
+    drawSpeech();
     drawGunBeams();
     drawWorldWaterOverlay();
     drawLighting();
@@ -9860,9 +10043,9 @@
                   note:"Move & Select drags, resizes and picks things to set up. Erase takes material off the layer you are on. Vacuum takes water and nothing else. Hold Tab anywhere to glue two objects into one." },
     connectors: { title:"Connectors", defs:[["bolt","🔩","Bolt"],["sprungbolt","🌀","Sprung bolt"],["motorbolt","⚙","Motor bolt"],["wobblebolt","↔","Wobble bolt"],["piston","🔩","Piston"],["rope","➰","Rope"]],
                   note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
-    logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["impact","💥","Impact sensor"],["projsensor","🎯","Projectile sensor"],["tag","🏷","Tag"],["tagsensor","📡","Tag sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["timer","⏱","Timer"],["counter","🔢","Counter"],["changer","🌗","World changer"]],
+    logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["impact","💥","Impact sensor"],["projsensor","🎯","Projectile sensor"],["tag","🏷","Tag"],["tagsensor","📡","Tag sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["timer","⏱","Timer"],["counter","🔢","Counter"],["gate","🔀","Gate"],["changer","🌗","World changer"]],
                   note:"Put them on something. Right-click one and Connect it to a motor, a piston, a camera, a mover or a world changer — it drives that while it is on." },
-    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
+    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["speech","💬","Speech bubble"],["destroyer","💣","Destroyer"],["sound","🔊","Sound"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
                   note:"A camera shows its shot while the player is in its zone. A mover carries an object along a line. A creature eye makes an object chase the player." }
   };
   function renderToolsTab(el, pageId){
@@ -13153,6 +13336,56 @@
       cnote.style.flexBasis = "100%"; opSection(null).appendChild(cnote);
       opBtn(opSection(null), "↺ Back to nought now", "", function(){ g.count = 0; renderSelBar(); sfx("tick"); }, "wide");
     }
+    if (g.kind === "speech"){
+      var sp = opSection("Says");
+      var ta = document.createElement("textarea"); ta.className = "opText"; ta.rows = 3; ta.maxLength = 240; ta.value = g.text || ""; ta.placeholder = "What it says…";
+      var taPushed = false;
+      ta.addEventListener("input", function(){ if (!taPushed){ pushUndo("changing what a speech bubble says"); taPushed = true; } g.text = ta.value.slice(0, 240); });
+      ta.addEventListener("keydown", function(e){ e.stopPropagation(); });
+      sp.appendChild(ta);
+      slider(opSection("Reach"), "Speaks within", g.radius, 40, 2000, 10, function(v){ g.radius = v; }, function(v){ return Math.round(v) + "px"; }, "changing a speech bubble");
+      var so = opSection("How often");
+      opBtn(so, "🔁 Every time the player comes near", "", function(){ pushUndo("changing a speech bubble"); g.once = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.once ? " on" : ""));
+      opBtn(so, "1️⃣ The first time only", "Once per Play", function(){ pushUndo("changing a speech bubble"); g.once = true; renderSelBar(); sfx("tick"); }, "wide" + (g.once ? " on" : ""));
+      var spn = document.createElement("div"); spn.className = "noteText";
+      spn.textContent = g.input != null ? "Wired: it speaks while the signal is on, whoever is near." : "It speaks while the player is within reach. Wire a switch or sensor to it and it speaks while that is on instead.";
+      spn.style.flexBasis = "100%"; opSection(null).appendChild(spn);
+    }
+    if (g.kind === "destroyer"){
+      var ds = opSection("When its signal comes on");
+      opBtn(ds, "💥 Explodes — a bang that shoves what is near", "", function(){ pushUndo("changing a destroyer"); g.explode = true; renderSelBar(); sfx("tick"); }, "wide" + (g.explode ? " on" : ""));
+      opBtn(ds, "💨 Vanishes quietly", "", function(){ pushUndo("changing a destroyer"); g.explode = false; renderSelBar(); sfx("tick"); }, "wide" + (!g.explode ? " on" : ""));
+      if (g.explode) slider(opSection("Blast"), "Shoves things within", g.blast, 0, 1200, 10, function(v){ g.blast = v; }, function(v){ return Math.round(v) + "px"; }, "changing a destroyer");
+      var dn = document.createElement("div"); dn.className = "noteText";
+      dn.textContent = "The thing it sits on is destroyed the moment its signal comes on — in Play only; Build always has it back. " + (g.input != null ? "" : "Nothing is wired to it yet: wire a switch, a sensor or a timer.");
+      dn.style.flexBasis = "100%"; opSection(null).appendChild(dn);
+    }
+    if (g.kind === "sound"){
+      var ss = opSection("Sound");
+      var sRow = document.createElement("div"); sRow.className = "ceChips"; sRow.style.flexBasis = "100%";
+      LEVEL_SOUND_ORDER.forEach(function(id){
+        var b = document.createElement("button"); b.className = "btn tiny" + (g.sound === id ? "" : " ghost"); b.textContent = LEVEL_SOUNDS[id].label;
+        b.addEventListener("click", function(){ pushUndo("changing a sound"); g.sound = id; playLevelSound(g); renderSelBar(); });
+        sRow.appendChild(b);
+      });
+      ss.appendChild(sRow);
+      slider(ss, "Pitch", g.pitch, 0.5, 2, 0.05, function(v){ g.pitch = v; }, function(v){ return Math.round(v * 100) + "%"; }, "changing a sound");
+      slider(ss, "Volume", g.volume, 0, 1, 0.05, function(v){ g.volume = v; }, function(v){ return Math.round(v * 100) + "%"; }, "changing a sound");
+      slider(opSection("While on"), "Again every", g.every, 0, 10, 0.1, function(v){ g.every = v; }, function(v){ return v <= 0 ? "just once" : (+v).toFixed(1) + "s"; }, "changing a sound");
+      opBtn(opSection(null), "▶ Try it", "", function(){ playLevelSound(g); }, "wide");
+      var sn = document.createElement("div"); sn.className = "noteText";
+      sn.textContent = g.input != null ? "It plays when its signal comes on" + (g.every > 0 ? ", and again every " + g.every.toFixed(1) + "s while it stays on." : ".") : "Wire a switch, a sensor or a timer to it: it plays when the signal comes on.";
+      sn.style.flexBasis = "100%"; opSection(null).appendChild(sn);
+    }
+    if (g.kind === "gate"){
+      var gs = opSection("Gate");
+      [["and", "AND — on when every wire into it is on"], ["or", "OR — on when any wire into it is on"], ["xor", "XOR — on when exactly one is on"], ["not", "NOT — on when nothing into it is on"], ["toggle", "Toggle — flips each time its signal comes on"]].forEach(function(m){
+        opBtn(gs, m[1], "", function(){ pushUndo("changing a gate"); g.mode = m[0]; g.state = false; renderSelBar(); sfx("tick"); }, "wide" + (g.mode === m[0] ? " on" : ""));
+      });
+      var gn = document.createElement("div"); gn.className = "noteText";
+      gn.textContent = (g.inN || 0) + " wire" + (g.inN === 1 ? "" : "s") + " into it, " + (g.inOn || 0) + " on. Wire several switches to it, then wire it on to what should happen.";
+      gn.style.flexBasis = "100%"; opSection(null).appendChild(gn);
+    }
     if (g.kind === "watersensor"){
       var wn = document.createElement("div"); wn.className = "noteText";
       wn.textContent = "On while it is under water — the world's water or painted water. Put it where the water will reach, and wire it to what should happen then.";
@@ -15021,7 +15254,8 @@
                width: g.width, reach: g.reach, strength: g.strength, rot: g.rot, flipX: g.flipX,
                label: g.label, analog: g.analog, touching: g.touching, playerOnly: g.playerOnly, requireTag: g.requireTag, tagColor: g.tagColor, target: g.target, mode: g.mode,
                emit: g.emit ? { name: g.emit.name, pieces: g.emit.pieces } : undefined, freq: g.freq, life: g.life, maxAlive: g.maxAlive, maxTotal: g.maxTotal, pulse: g.pulse,
-               ammo: g.ammoDef ? packProjDef(g.ammoDef) : undefined, ammo_n: g.ammo };
+               ammo: g.ammoDef ? packProjDef(g.ammoDef) : undefined, ammo_n: g.ammo,
+               text: g.text, once: g.once, explode: g.explode, blast: g.blast, sound: g.sound, pitch: g.pitch, volume: g.volume, every: g.every };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);

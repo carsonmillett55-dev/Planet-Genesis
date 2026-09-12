@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` | Playwright suites, 977 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1026 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 977 checks + checkgeom, in order
+npm test                   # all 1026 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -74,6 +74,7 @@ node tproj.js              # 23 — the launcher (bullets, shots that run out, a
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node tui.js                # 67 — Play from here, the minimap, level pictures, the tips, the device's room, backgrounds
+node tgame.js              # 49 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -500,6 +501,10 @@ Each gadget has an **output**, 0 or 1:
 | **objemitter** | fires copies of a saved object — see The object emitter | emit, freq, life, maxAlive, maxTotal, speed, angle, spin, pulse |
 | **gun** | the launcher powerup: touch it and you are armed — bullets, a drawn projectile, a saved object, or a ray — see Projectiles | mode, ammo (def), emit, speed, rate, ammo_n |
 | **projsensor** | a projectile or a ray hit its host (a pulse) | — |
+| **speech** | says its line above its host while the player is within `radius`, or wired, while the signal is on — see The gameplay gadgets | text, radius, once |
+| **destroyer** | wired: the moment the signal comes on, its host is gone (Play only) | explode, blast |
+| **sound** | wired: plays a level sound when the signal comes on, again every `every` seconds while on | sound, pitch, volume, every |
+| **gate** | AND / OR / XOR / NOT of the wires into it, or a toggle — see The gameplay gadgets | mode |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
 
@@ -567,6 +572,51 @@ is wired to you"; `addWire` sets the port to 0 at once and
 `resetGadgetsForPlay` sets every wired port to 0, because the first step
 of Play ran before the first wire pass and an emitter wired to a lever
 that was off fired once as though unwired.
+
+## The gameplay gadgets: speech, destroyer, sound, gates
+
+Four more of LBP's, on the same two arrays:
+
+- **Speech bubble** (`kind:"speech"`, Gameplay) — LBP's magic mouth,
+  without the name. `text` (240 chars, a textarea in the box that stops
+  its keys reaching the game), `radius`, `once`. Each step: wanted =
+  the signal if wired, else the player within reach; on the rising
+  edge, `once` and already `said` suppresses it (`suppressed`) until
+  the next rise; `showing` is wanted and not suppressed. `drawSpeech`,
+  after the use prompt: the line wrapped to 230 screen px, in a rounded
+  bubble at screen size whatever the zoom (`1/camScale`), a tail down to
+  the gadget's spot, while the world runs. `resetGadgetsForPlay` clears
+  `said`, so "the first time only" is per Play.
+- **Destroyer** (`kind:"destroyer"`, Gameplay) — wired only; on the
+  signal's rising edge, **in Play**, `destroyHost`: a puff sized to the
+  host, and if `explode` a shove to every loose Mid body and the player
+  within `blast` px of the host's edge (14 px/step at the edge, fading
+  with distance, a little upward), a shake and a zap; then
+  `removeObject(host)`, which takes every gadget on it, the destroyer
+  included. Requests are collected in the gadget loop and run after it
+  (`toDestroy`), since removing pulls the array from under the loop.
+  Build never destroys anything: the snapshot brings it back anyway,
+  and Build unpaused would take it for real.
+- **Sound** (`kind:"sound"`, Gameplay) — `LEVEL_SOUNDS`, sixteen level
+  sounds on the game's own little synth (`tone`, `noiseHit`), each
+  `play(pitch, volume)`; `LEVEL_SOUND_ORDER` for the box's row of
+  buttons, which play as they are picked, and "Try it". Plays on the
+  rising edge, and again every `every` seconds while on (`lastAt`).
+  `lastLevelSound` is what the suite reads; audio off still records it.
+- **Gate** (`kind:"gate"`, Logic) — LBP2's gates as one gadget with a
+  `mode`: `and` (every wire in on, and at least one), `or`, `xor`
+  (exactly one), `not` (none — unwired, always on), `toggle` (`state`
+  flips on the signal's rise). The wire pass counts, for a gate, `inN`
+  wires into its "in" port and `inOn` of them carrying a signal, beside
+  the usual strongest-signal `input`; the gate reads last step's counts,
+  so a chain of gates is a step per gate, as LBP's is. A gate has an
+  output and takes wires, so it sits between switches and anything.
+
+All four `canReceive`; speech, destroyer and sound have no output
+(`gadgetHasOutput`). Packed in both builders as `text`, `once`,
+`explode`, `blast`, `sound`, `pitch`, `volume`, `every`, and `mode`;
+`addGadget` clamps and defaults every one, so a bad `sound` is the
+chime and a bad `mode` is AND. Tips for each. `tgame.js`.
 
 ## The object emitter
 

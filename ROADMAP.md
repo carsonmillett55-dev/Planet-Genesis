@@ -430,6 +430,16 @@ or in Settings, and "Show them all again" starts over. A guided walkthrough
 (a first level that teaches step by step) would sit on top of this and is
 still open.
 
+### More of the gadget family — DONE 2026-09-12
+
+- **Speech bubble** — a line above whatever it sits on, spoken while the
+  player is near or while wired on; once per Play if you like.
+- **Destroyer** — wired: the thing it sits on is gone the moment the signal
+  comes on, with a bang that shoves what is near, or quietly. Play only.
+- **Sound** — wired: one of sixteen level sounds when the signal comes on,
+  pitch and volume, again every so often while on.
+- **Gate** — AND, OR, XOR, NOT and a toggle, in one chip.
+
 ### Editor conveniences — DONE 2026-09-12
 
 - **Play from here** — Play starting where you are working, not at the
