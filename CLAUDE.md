@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1177 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1198 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,14 +42,14 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1177 checks + checkgeom, in order
+npm test                   # all 1198 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
 Or one suite at a time:
 
 ```
-node regress.js            # 45 — geometry, save/load, play mode, loop and save safety, two tabs and the autosave, map edges, the big map and an old level's move to its bottom
+node regress.js            # 46 — geometry, save/load, play mode, loop and save safety, two tabs and the autosave, map edges, the big map and an old level's move to its bottom
 node tsel.js               # 69 — selection, marquee, group transforms, resize, detach, the number row, the transforms as keys, dragging with physics on, the marquee by material; glue across layers and on one layer
 node tlayer.js             # 20 — layer accuracy, ranked picking, the hover label, peek, the middle button hiding one thing
 node tmat.js               # 33 — materials, colours, glass, light, opacity, a drawn material of your own
@@ -73,7 +73,7 @@ node tlogic.js             # 43 — tags and tag sensors, impact sensors, timers
 node tproj.js              # 42 — the launcher (bullets, shots that run out, a ray, a saved object), a drawn projectile that hurts a creature, an emitter firing bullets, the save tabs; how it flies is the firer's, the Impact drawing, an emitter firing rays, the projectile sensor's every-Nth-hit, named projectile, box, painted spots and destroy; the missile's hole, scorch and launcher
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
-node tui.js                # 126 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider; My World and level doors, a level's character size
+node tui.js                # 146 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider; My World and level doors, a level's character size; level types and their rules
 node tgame.js              # 85 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -2307,6 +2307,46 @@ rubs out; bars, Clear this track, Tempo, Volume, "Plays in the level",
 "Throw the tune away". A level with no tune shows one button, "Write a
 tune". Not done: a music gadget (LBP2's sequencer as a thing on the
 level), saving tunes to the device, more voices.
+
+## Level types
+
+Carson: "different level types … there will need to be settings for all
+of that; when setting up a level, getting to choose the level type".
+`LEVEL_TYPES` — **Adventure** (start to finish), **Versus** (players
+against each other: lives, knockouts, a fall line), **Minigame** (a
+quick round for many: a clock, a score), **Hub** (a place to be in — My
+World is one, any level can be), and **Top-down (2.5D)**, listed as
+coming and not pickable (`soon`), so the idea is not forgotten. Each
+says which rules it shows (`lives`, `time`, `fall`, `knockouts`).
+`worldSettings.levelType` with `lives`, `timeLimit`, `fallLine`,
+`knockouts` ride `WORLD_DEFAULTS`, are clamped by
+`unpackPlayerSettings` (a `soon` type loads as an adventure), and a
+file from before with `hub: true` loads as a hub. Versus and Minigame
+are for several players, which do not exist yet: their rules are kept
+with the level now so a level built today plays right when they can
+join; the page says so.
+
+**Chosen when a level is made** — `askLevelType` (`#typeOverlay`, the
+cards from `renderLevelTypeCards`; "Just an adventure" is the way out)
+in `doNew`, after the confirm — and changed on **World → Level**, the
+section's first page (`renderLevelTypeTab`: the cards, then the rules
+that apply). `menu(section, page)` in the hook takes a page for the
+suites that want World Settings.
+
+**The rules in Play** (`playRun`: lives left, deaths, the clock's
+start, `over`; `startPlayRun` with Play). Every death — a zap, a bite,
+a squash, the void below the map, the fall line — goes through
+`playerDied(msg)`: in Play, not in a hub, it counts; with lives on, a
+life goes, and the last gone starts the run over from the start with
+the lives back. `runRules()` each frame: the clock (`runTimeLeft`), and
+at nought the run starts over (an adventure back to the start, a
+minigame with its score named); the **fall line** (`fallLine`, a y in
+world px, set from the page — under the character, or a slider up from
+the bottom — and drawn as a red dashed line across the map in Build) is
+a death when crossed. The HUD: `#livesHud` (❤ n) and `#timeHud` (⏱
+m:ss, red under ten seconds) beside the score, shown only when the
+level counts them (`updateRunHud`, touching the DOM only on change).
+In Build a death is a plain respawn, as it was.
 
 ## My World and level doors
 

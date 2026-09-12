@@ -363,7 +363,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('Build is running', !(await p.evaluate(() => window.__pg.paused())));
   await p.keyboard.press('Control+KeyZ'); await p.waitForTimeout(150);
   ok('Ctrl+Z pauses it first', await p.evaluate(() => window.__pg.paused()));
-  await p.evaluate(() => { window.__pg.menu('world'); });
+  await p.evaluate(() => { window.__pg.menu('world'); Array.from(document.querySelectorAll('#pmPages button')).filter(b => b.textContent.trim() === 'World Settings')[0].click(); });
   await p.waitForTimeout(200);
   const pos0 = await p.evaluate(() => window.__pg.menuPos());
   const zoomRow = await p.evaluate(() => { const inp = Array.from(document.querySelectorAll('#pmBody input[type=range]')).filter(i => /Zoom in Play/.test((i.closest('.settingRow') || i.parentElement.parentElement || i.parentElement).textContent))[0]; if (!inp) return null; inp.scrollIntoView({ block: 'center' }); const b = inp.getBoundingClientRect(); return { x: b.left + b.width * 0.3, y: b.top + b.height / 2, x2: b.left + b.width * 0.8 }; });
@@ -469,6 +469,78 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('Any size leaves the character as the player made it', Math.abs((await p.evaluate(() => window.__pg.charScale())) - own) < 0.01);
   await build();
   ok('the Leave pill is hidden when not visiting', !(await p.evaluate(() => window.__pg.leaveHudShown())));
+
+  console.log('== level types: the kind of level and its rules — lives, a clock, a fall line; the chooser ==');
+  await fresh();
+  ok('a fresh level is an adventure with no rules', (await p.evaluate(() => window.__pg.levelType())) === 'adventure' && JSON.stringify(await p.evaluate(() => window.__pg.rules())) === JSON.stringify({ lives: 0, timeLimit: 0, fallLine: null, knockouts: 3 }));
+  const worldPagesT = await p.evaluate(() => { window.__pg.menu('world'); return Array.from(document.querySelectorAll('#pmPages button')).map(b => b.textContent.trim()); });
+  ok('World starts with a Level page', worldPagesT[0] === 'Level', worldPagesT);
+  const levelBody = await p.evaluate(() => { Array.from(document.querySelectorAll('#pmPages button')).filter(b => b.textContent.trim() === 'Level')[0].click(); return document.getElementById('pmBody').innerText; });
+  ok('with the five kinds on it, Top-down marked as coming', /Adventure/.test(levelBody) && /Versus/.test(levelBody) && /Minigame/.test(levelBody) && /Hub/.test(levelBody) && /Top-down/.test(levelBody) && (await p.evaluate(() => Array.from(document.querySelectorAll('#pmBody .typeCard.soon')).length)) === 1);
+  await p.evaluate(() => { Array.from(document.querySelectorAll('#pmBody .typeCard')).filter(c => /Versus/.test(c.textContent))[0].click(); }); await p.waitForTimeout(100);
+  ok('picking Versus shows its rules: lives, time, knockouts, a fall line', (await p.evaluate(() => window.__pg.levelType())) === 'versus' && /Knockouts to win/.test(await p.evaluate(() => document.getElementById('pmBody').innerText)) && /fall line/i.test(await p.evaluate(() => document.getElementById('pmBody').innerText)));
+  await p.evaluate(() => window.__pg.menu(null));
+  // lives
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);
+  await p.evaluate(() => { window.__pg.levelType('adventure'); window.__pg.rules({ lives: 3 }); });
+  await play();
+  let run = await p.evaluate(() => window.__pg.run());
+  ok('Play starts the run with three lives on the HUD', run.lives === 3 && run.livesHud === '❤ 3' && run.timeHud === null, run);
+  await p.evaluate(() => window.__pg.die()); await p.waitForTimeout(100);
+  run = await p.evaluate(() => window.__pg.run());
+  ok('a death costs a life', run.lives === 2 && run.deaths === 1 && run.livesHud === '❤ 2', run);
+  await p.evaluate(() => window.__pg.die()); await p.evaluate(() => window.__pg.die()); await p.waitForTimeout(150);
+  run = await p.evaluate(() => window.__pg.run());
+  ok('the last life gone starts the run over with the lives back', run.lives === 3 && /Out of lives/.test(await p.evaluate(() => document.getElementById('toast').textContent)), run);
+  await build();
+  run = await p.evaluate(() => window.__pg.run());
+  ok('in Build the HUD is hidden and a death is just a respawn', run.livesHud === null && (await p.evaluate(() => { window.__pg.die(); return window.__pg.run().deaths; })) === 0);
+  // the clock
+  await p.evaluate(() => window.__pg.rules({ lives: 0, timeLimit: 90 }));
+  await play();
+  run = await p.evaluate(() => window.__pg.run());
+  ok('a time limit shows a clock counting down', run.timeHud && /⏱ 1:2\d/.test(run.timeHud) && run.left > 85 && run.left <= 90, run);
+  await p.evaluate(() => window.__pg.runClock(89500)); await p.waitForTimeout(700);
+  run = await p.evaluate(() => window.__pg.run());
+  ok('at nought the run starts over', /Time's up/.test(await p.evaluate(() => document.getElementById('toast').textContent)), run);
+  await p.waitForTimeout(1000);
+  run = await p.evaluate(() => window.__pg.run());
+  ok('and the clock is full again', run.left > 80, run);
+  await build();
+  // the fall line
+  await p.evaluate(() => window.__pg.rules({ timeLimit: 0, fallLine: null }));
+  const fy = Y + 300;
+  await p.evaluate(y => window.__pg.rules({ fallLine: y }), fy);
+  await play(); await standAt(X, Y+60);
+  const dq0 = (await p.evaluate(() => window.__pg.run())).deaths;
+  await p.evaluate(([x, y]) => window.__pg.playerTo(x, y), [X+380, fy + 40]); await p.waitForTimeout(400);
+  run = await p.evaluate(() => window.__pg.run());
+  ok('falling past the fall line is a death, back at the start', run.deaths >= dq0 + 1 && Math.abs((await pos()).x - 90) < 30, { run, pos: await pos() });
+  await build();
+  // a hub has none of this
+  await p.evaluate(() => { window.__pg.levelType('hub'); window.__pg.rules({ lives: 3, timeLimit: 30 }); });
+  await play();
+  run = await p.evaluate(() => window.__pg.run());
+  ok('a hub shows no lives and no clock', run.livesHud === null && run.timeHud === null);
+  await p.evaluate(() => window.__pg.die()); await p.waitForTimeout(100);
+  ok('and a death there costs nothing', (await p.evaluate(() => window.__pg.run())).deaths === 0);
+  await build();
+  // the file carries it, and an old hub file loads as a hub
+  await p.evaluate(() => { window.__pg.levelType('versus'); window.__pg.rules({ lives: 5, timeLimit: 120, fallLine: 2000, knockouts: 7 }); });
+  const dT = await p.evaluate(() => window.__pg.serialize('t'));
+  ok('the level file carries the kind and the rules', dT.world.levelType === 'versus' && dT.world.lives === 5 && dT.world.timeLimit === 120 && dT.world.fallLine === 2000 && dT.world.knockouts === 7, dT.world);
+  await fresh();
+  await p.evaluate(d => window.__pg.load(d), dT); await p.waitForTimeout(150);
+  ok('loading brings them back', (await p.evaluate(() => window.__pg.levelType())) === 'versus' && (await p.evaluate(() => window.__pg.rules())).knockouts === 7);
+  const oldHub = JSON.parse(JSON.stringify(dT)); oldHub.hub = true; delete oldHub.world.levelType;
+  await p.evaluate(d => window.__pg.load(d), oldHub); await p.waitForTimeout(150);
+  ok('a file from before level types with the hub flag loads as a hub', (await p.evaluate(() => window.__pg.levelType())) === 'hub');
+  const badT = JSON.parse(JSON.stringify(dT)); badT.world.levelType = 'topdown';
+  await p.evaluate(d => window.__pg.load(d), badT); await p.waitForTimeout(150);
+  ok('a kind that is not built yet loads as an adventure', (await p.evaluate(() => window.__pg.levelType())) === 'adventure');
+  // the chooser when a level is made
+  ok('a new level asks what kind it is', await p.evaluate(() => window.__pg.askType()));
+  ok('and picking one closes the chooser', await p.evaluate(() => window.__pg.pickType('Hub')) && (await p.evaluate(() => document.getElementById('typeOverlay').hidden)));
 
   ok('no page errors', errs.length === 0, errs);
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');

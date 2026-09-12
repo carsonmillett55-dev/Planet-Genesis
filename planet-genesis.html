@@ -983,8 +983,17 @@
     padding:.3rem .9rem; pointer-events:none; white-space:nowrap;
   }
   #scoreHud[hidden]{ display:none !important; }
+  #livesHud, #timeHud{
+    position:absolute; top:2.7rem; z-index:16; pointer-events:none; white-space:nowrap;
+    background:rgba(246,236,217,.92); border:2px solid var(--ink); border-radius:999px;
+    color:var(--ink); font-family:'Patrick Hand',cursive; font-weight:700; font-size:.9rem; padding:.3rem .9rem;
+  }
+  #livesHud{ left:5.4rem; background:rgba(232,86,122,.9); color:#F6ECD9; }
+  #timeHud{ left:9.6rem; }
+  #timeHud.low{ background:rgba(179,38,30,.92); color:#F6ECD9; }
+  #livesHud[hidden], #timeHud[hidden]{ display:none !important; }
   #leaveHud{
-    position:absolute; top:2.7rem; left:5.4rem; z-index:16; cursor:pointer;
+    position:absolute; top:2.7rem; right:.6rem; z-index:16; cursor:pointer;
     background:rgba(142,91,181,.92); border:2px solid var(--ink); border-radius:999px;
     color:#F6ECD9; font-family:'Patrick Hand',cursive; font-weight:700; font-size:.9rem;
     padding:.3rem .9rem; white-space:nowrap;
@@ -1260,6 +1269,14 @@
     display:flex; align-items:center; gap:.5rem;
     background:var(--stitch); border-radius:10px; padding:.4rem .6rem;
   }
+  .typeGrid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(9.5rem, 1fr)); gap:.45rem; margin:.3rem 0; }
+  .typeCard{ text-align:left; background:var(--stitch); border:2px solid var(--ink); border-radius:10px; padding:.45rem .55rem; cursor:pointer; color:var(--ink); font-family:inherit; }
+  .typeCard:hover{ background:#FFFDF6; }
+  .typeCard.active{ background:var(--yellow); border-color:var(--yellow-dark); }
+  .typeCard.soon{ opacity:.55; cursor:default; }
+  .typeCard .ti{ font-size:1.3rem; line-height:1; }
+  .typeCard .tl{ font-family:'Patrick Hand',cursive; font-size:1.05rem; margin:.15rem 0; }
+  .typeCard .tb{ font-size:.66rem; line-height:1.25; opacity:.85; }
   .musicGrid{ display:block; border:2px solid var(--ink); border-radius:8px; cursor:crosshair; touch-action:none; background:#F6ECD9; }
   #objPanel input.opText{ width:100%; box-sizing:border-box; font-family:'Patrick Hand',cursive; font-size:1rem; padding:.3rem .45rem; border:2px solid var(--ink); border-radius:8px; background:#FFFDF6; color:var(--ink); }
   #objPanel textarea.opText{ width:100%; box-sizing:border-box; font-family:'Patrick Hand',cursive; font-size:1rem; padding:.3rem .45rem; border:2px solid var(--ink); border-radius:8px; background:#FFFDF6; color:var(--ink); resize:vertical; }
@@ -1372,6 +1389,8 @@
         </div>
       </div>
       <div id="scoreHud" hidden>⭐ 0</div>
+      <div id="livesHud" hidden>❤ 3</div>
+      <div id="timeHud" hidden>⏱ 0:00</div>
       <button id="leaveHud" hidden title="Back through the door to where you came from">🚪 Leave</button>
       <canvas id="minimap" width="240" height="120" title="The level — click to look there, right-click to go there (M hides it)"></canvas>
 
@@ -1417,6 +1436,15 @@
         <button class="btn ghost" id="confirmNo">Cancel</button>
         <button class="btn red" id="confirmYes">Yes, do it</button>
       </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="typeOverlay" hidden>
+    <div class="panel" style="max-width:34rem">
+      <h2>What kind of level?</h2>
+      <div class="sub">You can change it later under World → Level.</div>
+      <div id="typeCards"></div>
+      <div class="panel-actions"><button class="btn ghost" id="typeCancel">Just an adventure</button></div>
     </div>
   </div>
 
@@ -2464,7 +2492,8 @@
                          grabReach: 16, walkSpeed: 1, sprintSpeed: 1.45, playZoom: 1, camHeight: -70, doubleJump: false,   // camHeight: px above (negative) the character the view centres
                          bg: null, bgPlain: null, bgSlide: 0.25,   // a drawn background, what is behind it (null: the usual scenery, else a colour), how much it slides with the level
                          music: null,   // the level's tune — see Music
-                         charSize: null };   // the character's size this level is played at (a scale), or null: whatever the player chose
+                         charSize: null,   // the character's size this level is played at (a scale), or null: whatever the player chose
+                         levelType: "adventure", lives: 0, timeLimit: 0, fallLine: null, knockouts: 3 };   // the kind of level and its rules — see Level types
   var worldSettings = {};
   function resetWorldSettings(){ for (var k in WORLD_DEFAULTS) worldSettings[k] = WORLD_DEFAULTS[k]; }
   resetWorldSettings();
@@ -4532,7 +4561,7 @@
       if (g.kind === "creature" && g.skin && skinStateHasArt(g.skin, "attack")) g.attackT0 = performance.now();   // it bites, visibly
       sfx("zap"); shake(11);
       puff(player.position.x, player.position.y, 20, { color: g.color || "#F2B705", speed:3.4, g:0.05, r:2.8, shape:"spark", life:24 });
-      respawnPlayer("Ouch! That creature bites.");
+      playerDied("Ouch! That creature bites.");
     }
   }
   var creatureStompCheck = creatureContactCheck;
@@ -6539,7 +6568,7 @@
         sfx("zap"); shake(11);
         puff(player.position.x, player.position.y, 20,
              { color:"#F2B705", speed:3.4, g:0.05, r:2.8, shape:"spark", life:24 });
-        respawnPlayer("Ouch! Watch out for the zap hazard.");
+        playerDied("Ouch! Watch out for the zap hazard.");
       }
       if (other.plugin && other.plugin.materialId){
         var touchedMat = matOf(other.plugin.materialId);
@@ -6620,7 +6649,7 @@
       crushSteps = 0; crushesSeen++;
       sfx("zap"); shake(10);
       puff(player.position.x, player.position.y, 18, { color:"#E8567A", speed:3, g:0.06, r:2.6, shape:"spark", life:24 });
-      respawnPlayer("Squashed!");
+      playerDied("Squashed!");
     }
   }
   onStep("afterUpdate", function(){ crushCheck(); glueFollow(); });
@@ -6660,6 +6689,61 @@
   // A breath of invulnerability after respawning, so landing back on
   // top of whatever killed you can't put you straight into a loop.
   var hazardSafeUntil = 0;
+  /* A death in Play, by the level's rules: a life gone when the level
+     counts them, and when the last is gone the run starts over — back at
+     the start with the lives and the clock reset. In Build a death is
+     just a respawn. `playRun` is the run's state: lives left, the clock,
+     the deaths. The HUD shows what the level counts. */
+  var playRun = { lives: 0, deaths: 0, t0: 0, over: false };
+  function startPlayRun(){ playRun = { lives: worldSettings.lives || 0, deaths: 0, t0: performance.now(), over: false }; updateRunHud(); }
+  function playerDied(msg){
+    if (mode === "play" && levelType() !== "hub"){
+      playRun.deaths++;
+      if (worldSettings.lives > 0){
+        playRun.lives--;
+        if (playRun.lives <= 0){
+          showToast("Out of lives — from the start again.");
+          sfx("deny");
+          activeCheckpoint = 0;
+          startPlayRun();
+          respawnPlayer();
+          return;
+        }
+        updateRunHud();
+      }
+    }
+    respawnPlayer(msg);
+  }
+  function runTimeLeft(){ return worldSettings.timeLimit > 0 ? Math.max(0, worldSettings.timeLimit - (performance.now() - playRun.t0) / 1000) : null; }
+  function fmtClock(sec){ var m = Math.floor(sec / 60), s2 = Math.floor(sec % 60); return m + ":" + (s2 < 10 ? "0" : "") + s2; }
+  function updateRunHud(){
+    var lv = document.getElementById("livesHud"), tm = document.getElementById("timeHud");
+    if (!lv || !tm) return;
+    var showLives = mode === "play" && worldSettings.lives > 0 && levelType() !== "hub";
+    if (lv.hidden !== !showLives) lv.hidden = !showLives;
+    if (showLives){ var lt = "❤ " + playRun.lives; if (lv.textContent !== lt) lv.textContent = lt; }
+    var left = mode === "play" && levelType() !== "hub" ? runTimeLeft() : null;
+    if (tm.hidden !== (left == null)) tm.hidden = left == null;
+    if (left != null){ var tt = "⏱ " + fmtClock(left); if (tm.textContent !== tt) tm.textContent = tt; tm.classList.toggle("low", left <= 10); }
+  }
+  // the clock and the fall line, each frame in Play
+  function runRules(){
+    if (mode !== "play" || levelType() === "hub" || !player) return;
+    updateRunHud();
+    var left = runTimeLeft();
+    if (left != null && left <= 0 && !playRun.over){
+      playRun.over = true;
+      showToast(levelType() === "adventure" ? "Time's up — from the start again." : "Time's up! " + score + " points.");
+      sfx("deny");
+      setTimeout(function(){ if (mode === "play"){ activeCheckpoint = 0; score = 0; comboMult = 1; updateScoreHud(); startPlayRun(); respawnPlayer(); resetGadgetsForPlay(); } }, 900);
+      return;
+    }
+    if (worldSettings.fallLine != null && player.position.y > worldSettings.fallLine && performance.now() > hazardSafeUntil){
+      puff(player.position.x, player.position.y, 14, { color:"#F6ECD9", speed:2.2, g:0.02, r:2.4, life:22 });
+      sfx("zap");
+      playerDied("Fell off!");
+    }
+  }
   function respawnPlayer(msg){
     if (msg) showToast(msg);
     hazardSafeUntil = performance.now() + 900;
@@ -6747,7 +6831,6 @@
   /* My World: the hub, a level of your own kept on this device
      (`pg_myworld_id`), flagged `hub` in its file. No start and no finish
      needed; it is walked around in, and doors in it lead to your levels. */
-  var levelIsHub = false;
   function openMyWorld(){
     if (doorVisit){ leaveDoor(); }
     var id = localStorage.getItem("pg_myworld_id"), rec = id ? localLevels().filter(function(l){ return l.id === id; })[0] : null;
@@ -6758,7 +6841,7 @@
       document.getElementById("levelNameInput").value = rec.data.name || "My World";
     } else {
       starterLevel();
-      levelIsHub = true;
+      worldSettings.levelType = "hub";
       document.getElementById("levelNameInput").value = "My World";
       setLevelIds(null, null);
       var data = serializeLevel("My World");
@@ -6771,8 +6854,9 @@
   }
   function updateHubButton(){
     var b = document.getElementById("myWorldBtn"); if (!b) return;
-    b.classList.toggle("active", !!levelIsHub);
-    b.title = levelIsHub ? "You are in My World" : "Go to My World — your own place, where your level doors live";
+    var isHub = levelIsHubNow() && localLevelId && localLevelId === localStorage.getItem("pg_myworld_id");
+    b.classList.toggle("active", !!isHub);
+    b.title = isHub ? "You are in My World" : "Go to My World — your own place, where your level doors live";
   }
 
   /* ============================================================
@@ -7098,7 +7182,7 @@
     input.jumpQueued = false;
 
     if (mode === "play" && player.position.y > WORLD_H + 400){
-      respawnPlayer("Whoa — resetting to start.");
+      playerDied("Whoa — resetting to start.");
     }
   });
 
@@ -7471,7 +7555,30 @@
     if (!art.length) return null;
     return { id: typeof b.id === "string" ? b.id : ("bg" + Date.now()), name: typeof b.name === "string" ? b.name : "Background", art: art };
   }
+  /* ---- Level types. What kind of level this is decides its rules and
+     which settings it shows (Carson: "different level types … there will
+     need to be settings for all of that; when setting up a level, getting
+     to choose the level type"). Adventure is start to finish; Versus and
+     Minigame are for several players and carry their rules now (lives, a
+     time limit, a fall line, knockouts) so a level built today plays right
+     when more players can join; Hub is a place to be in — My World is one;
+     Top-down is the 2.5D idea, listed so it is not forgotten, not built. */
+  var LEVEL_TYPES = [
+    { id:"adventure", icon:"🏁", label:"Adventure", blurb:"Start to finish. Checkpoints along the way, a goal at the end.", lives:true, time:true, fall:true },
+    { id:"versus",    icon:"⚔️", label:"Versus", blurb:"Players against each other in an arena: lives, knockouts, a fall line. For when more than one can play — coming.", lives:true, time:true, fall:true, knockouts:true, soonPlayers:true },
+    { id:"minigame",  icon:"🎯", label:"Minigame", blurb:"A quick round for lots of players — a time limit and a score. More players coming.", time:true, fall:true, soonPlayers:true },
+    { id:"hub",       icon:"🏠", label:"Hub", blurb:"A place to hang out and build in. No start, no finish, no running out of lives.", hub:true },
+    { id:"topdown",   icon:"🧭", label:"Top-down (2.5D)", blurb:"Seen from above, walking in every direction. Coming later.", soon:true }
+  ];
+  function levelTypeDef(id){ for (var i = 0; i < LEVEL_TYPES.length; i++) if (LEVEL_TYPES[i].id === id) return LEVEL_TYPES[i]; return LEVEL_TYPES[0]; }
+  function levelType(){ return worldSettings.levelType || "adventure"; }
+  function levelIsHubNow(){ return levelType() === "hub"; }
   function unpackPlayerSettings(w){
+    var lt = levelTypeDef(w.levelType); worldSettings.levelType = lt.soon ? "adventure" : lt.id;
+    worldSettings.lives = w.lives != null && isFinite(+w.lives) ? Math.max(0, Math.min(99, +w.lives | 0)) : 0;
+    worldSettings.timeLimit = w.timeLimit != null && isFinite(+w.timeLimit) ? Math.max(0, Math.min(3600, +w.timeLimit | 0)) : 0;
+    worldSettings.fallLine = w.fallLine != null && isFinite(+w.fallLine) ? Math.max(0, Math.min(WORLD_H, +w.fallLine)) : null;
+    worldSettings.knockouts = w.knockouts != null && isFinite(+w.knockouts) ? Math.max(1, Math.min(99, +w.knockouts | 0)) : 3;
     worldSettings.charSize = w.charSize != null && isFinite(+w.charSize) ? Math.max(CHAR_SCALE_MIN, Math.min(CHAR_SCALE_MAX, +w.charSize)) : null;
     worldSettings.music = normalizeMusic(w.music);
     musicStop();
@@ -9212,6 +9319,15 @@
       ctx.restore();
     });
     // a mover waiting for its second click: the travel follows the cursor
+    // the fall line: falling past it is a death, drawn across the map in Build
+    if (mode === "build" && worldSettings.fallLine != null){
+      ctx.save();
+      ctx.beginPath(); ctx.moveTo(camX - 100, worldSettings.fallLine); ctx.lineTo(camX + viewRectW / camScale + 100, worldSettings.fallLine);
+      ctx.lineWidth = 3/camScale; ctx.strokeStyle = "#B3261E"; ctx.setLineDash([14/camScale, 8/camScale]); ctx.globalAlpha = 0.85; ctx.stroke(); ctx.setLineDash([]);
+      ctx.font = (12/camScale) + "px 'Patrick Hand', cursive"; ctx.fillStyle = "#B3261E"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+      ctx.fillText("fall line — past here is a life gone", camX + 12/camScale, worldSettings.fallLine - 4/camScale);
+      ctx.restore();
+    }
     // a projectile sensor's zone, boxed while it is selected or the tool is in hand
     if (mode === "build"){
       for (var zi2 = 0; zi2 < gadgets.length; zi2++){
@@ -10145,6 +10261,7 @@
     drawGunHud();
     if (mode === "play" && gunHeld && playerGun && mouseOnCanvas) gunFire(mouseWorld);
     drawMinimap(now);
+    runRules();
     if (musicPlayer.playing && pmOpen && musicGridEl && musicGridEl.isConnected) drawMusicGrid();
     tipWatch();
     if (showPerf){ perfDrawMs += (performance.now() - perfDrawT0 - perfDrawMs) * 0.1; drawPerfHud(now); }
@@ -11179,6 +11296,49 @@
     dn.textContent = "How far away the picture is. Far, and it barely moves as you walk; near, and it comes along with the level.";
     el.appendChild(dn);
   }
+  /* ---- The Level page: what kind of level this is, and its rules ---- */
+  function renderLevelTypeCards(el, onPick, current){
+    var grid = document.createElement("div"); grid.className = "typeGrid";
+    LEVEL_TYPES.forEach(function(t){
+      var card = document.createElement("button"); card.className = "typeCard" + (current === t.id ? " active" : "") + (t.soon ? " soon" : "");
+      card.innerHTML = '<div class="ti">' + t.icon + '</div><div class="tl">' + t.label + '</div><div class="tb">' + t.blurb + '</div>';
+      card.disabled = !!t.soon;
+      card.addEventListener("click", function(){ if (!t.soon) onPick(t.id); });
+      grid.appendChild(card);
+    });
+    el.appendChild(grid);
+  }
+  function renderLevelTypeTab(el){
+    var h = document.createElement("h3"); h.textContent = "Level"; el.appendChild(h);
+    var t = levelTypeDef(levelType());
+    renderLevelTypeCards(el, function(id){ worldSettings.levelType = id; if (id === "hub"){ worldSettings.lives = 0; worldSettings.timeLimit = 0; } sfx("click"); updateHubButton(); renderPersonalMenu(); }, t.id);
+    var n = document.createElement("div"); n.className = "noteText"; n.textContent = t.blurb; el.appendChild(n);
+    if (t.lives || t.time || t.fall || t.knockouts){ var rh = document.createElement("h3"); rh.textContent = "Rules"; el.appendChild(rh); }
+    if (t.lives) el.appendChild(sliderRow("Lives", worldSettings.lives, 0, 20, 1, function(v){ worldSettings.lives = Math.round(v); }, function(v){ return v <= 0 ? "endless" : Math.round(v) + ""; }));
+    if (t.time) el.appendChild(sliderRow("Time limit", worldSettings.timeLimit, 0, 600, 10, function(v){ worldSettings.timeLimit = Math.round(v); }, function(v){ return v <= 0 ? "none" : fmtClock(v); }));
+    if (t.knockouts) el.appendChild(sliderRow("Knockouts to win", worldSettings.knockouts, 1, 20, 1, function(v){ worldSettings.knockouts = Math.round(v); }, function(v){ return Math.round(v) + ""; }));
+    if (t.fall){
+      var fr = document.createElement("div"); fr.className = "segRow";
+      var fOff = document.createElement("button"); fOff.textContent = "No fall line"; fOff.className = worldSettings.fallLine == null ? "active" : "";
+      fOff.addEventListener("click", function(){ worldSettings.fallLine = null; sfx("click"); renderPersonalMenu(); });
+      var fHere = document.createElement("button"); fHere.textContent = worldSettings.fallLine == null ? "Fall line under the character" : "Move the fall line to the character";
+      fHere.addEventListener("click", function(){ worldSettings.fallLine = Math.min(WORLD_H, (player ? player.position.y : WORLD_H - 200) + 400); sfx("click"); renderPersonalMenu(); });
+      fr.appendChild(fOff); fr.appendChild(fHere); el.appendChild(fr);
+      if (worldSettings.fallLine != null) el.appendChild(sliderRow("Fall line", WORLD_H - worldSettings.fallLine, 0, WORLD_H, 20, function(v){ worldSettings.fallLine = WORLD_H - v; }, function(v){ return Math.round(v) + "px up from the bottom"; }));
+      var fn = document.createElement("div"); fn.className = "noteText"; fn.textContent = "Falling past the fall line costs a life — a pit, or the edge of an arena. It draws as a red dashed line in Build."; el.appendChild(fn);
+    }
+    if (t.soonPlayers){ var pn = document.createElement("div"); pn.className = "noteText"; pn.textContent = "This kind of level is for several players. The rules are kept with the level now, so it plays right when more players can join."; el.appendChild(pn); }
+    if (t.hub){ var hn = document.createElement("div"); hn.className = "noteText"; hn.textContent = "No lives, no clock. My World is a hub; any level can be one."; el.appendChild(hn); }
+  }
+  /* The chooser when a level is made: what kind is it? */
+  var typeOverlay = document.getElementById("typeOverlay"), pendingType = null;
+  function askLevelType(onPick){
+    pendingType = onPick;
+    var host = document.getElementById("typeCards"); host.innerHTML = "";
+    renderLevelTypeCards(host, function(id){ typeOverlay.hidden = true; var cb = pendingType; pendingType = null; if (cb) cb(id); }, "adventure");
+    typeOverlay.hidden = false;
+  }
+  document.getElementById("typeCancel").addEventListener("click", function(){ typeOverlay.hidden = true; var cb = pendingType; pendingType = null; if (cb) cb("adventure"); });
   /* ---- The Music page: a grid a track at a time, painted with the
      left button and rubbed out with the right, the playhead running
      along it while the preview plays. ---- */
@@ -13006,6 +13166,7 @@
       { id:"gameplay", label:"Gameplay", render:function(el){ renderToolsTab(el, "gameplay"); } }
     ]},
     { id:"world", icon:"🌍", label:"World", pages:[
+      { id:"leveltype", label:"Level", render:renderLevelTypeTab },
       { id:"world", label:"World Settings", render:renderWorldSettingsTab },
       { id:"background", label:"Background", render:renderBackgroundTab },
       { id:"music", label:"Music", render:renderMusicTab }
@@ -14459,12 +14620,12 @@
         askName("Name the new level", "New level", function(name){
           if (!name) return;
           pushUndo("making a level for a door");
-          var here = serializeLevel(document.getElementById("levelNameInput").value || "Untitled Level"), hereIds = { cloud: cloudLevelId, local: localLevelId }, hereHub = levelIsHub;
-          starterLevel(); levelIsHub = false;
+          var here = serializeLevel(document.getElementById("levelNameInput").value || "Untitled Level"), hereIds = { cloud: cloudLevelId, local: localLevelId };
+          starterLevel();
           setLevelIds(null, null);
           var fresh = serializeLevel(name);
           var okSave = saveLocalLevel(fresh), newId = localLevelId;
-          loadLevelData(here); setLevelIds(hereIds.cloud, hereIds.local); levelIsHub = hereHub; updateHubButton();
+          loadLevelData(here); setLevelIds(hereIds.cloud, hereIds.local); updateHubButton();
           var gd = gadgets.filter(function(q){ return q.kind === "door"; })[0];   // the door as it is after the reload: its id changed, its spot did not
           gadgets.forEach(function(q){ if (q.kind === "door" && Math.abs(q.pos.x - g.pos.x) < 1 && Math.abs(q.pos.y - g.pos.y) < 1) gd = q; });
           if (okSave && gd){ gd.leadsTo = { local: newId }; gd.targetName = name; selectGadget(gd); opWanted = true; renderSelBar(); showToast("'" + name + "' is behind this door now. Go in from Play to build it — or open it from Load."); }
@@ -16276,6 +16437,7 @@
     viewHudEl.hidden = m !== "build";
     document.getElementById("playHereBtn").hidden = m !== "build";
     scoreHudEl.hidden = m !== "play";
+    updateRunHud();
     document.getElementById("leaveHud").hidden = !(m === "play" && doorVisit);
     clearSelection();
     hoverObj = null;
@@ -16310,6 +16472,7 @@
       score = 0; comboMult = 1; lastBubbleTime = -99999;
       updateScoreHud();
       resetGadgetsForPlay();
+      startPlayRun();
       // the level's own character size, if it has one; the player's comes back with Build
       if (worldSettings.charSize != null && Math.abs(worldSettings.charSize - charScale) > 1e-6){ if (playScaleHold == null) playScaleHold = charScale; setCharScale(worldSettings.charSize, true); }
       respawnPlayer();
@@ -16327,7 +16490,7 @@
   modeBuildBtn.addEventListener("click", function(){ setMode("build"); });
   modePlayBtn.addEventListener("click", function(){ setMode("play"); });
   document.getElementById("leaveHud").addEventListener("click", function(){ if (doorVisit) leaveDoor(); });
-  document.getElementById("myWorldBtn").addEventListener("click", function(){ if (levelIsHub && !doorVisit){ if (mode !== "play") setMode("play"); return; } openMyWorld(); });
+  document.getElementById("myWorldBtn").addEventListener("click", function(){ if (levelIsHubNow() && localLevelId === localStorage.getItem("pg_myworld_id") && !doorVisit){ if (mode !== "play") setMode("play"); return; } openMyWorld(); });
   document.getElementById("playHereBtn").addEventListener("click", function(){ playFromHere(); });
 
   /* ============================================================
@@ -16485,7 +16648,7 @@
       world: packWorldSettings(),
       materials: usedCustomMats(),
       thumb: lastThumb || undefined,
-      hub: levelIsHub || undefined
+      hub: levelIsHubNow() || undefined
     };
   }
   /* A level built on a smaller map is placed at the bottom-left of this
@@ -16515,7 +16678,6 @@
   }
   function loadLevelData(data){
     lastThumb = (data && typeof data.thumb === "string" && data.thumb.slice(0, 11) === "data:image/") ? data.thumb : null;
-    levelIsHub = !!(data && data.hub);
     updateHubButton();
     clearAllObjects();
     if (!data || typeof data !== "object") data = {};
@@ -16558,6 +16720,7 @@
         var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : (ws.toLink != null ? links[ws.toLink] : gadgets[ws.toGadget]);
         if (src && tgt) addWire(src, tgt, ws.port);
       });
+      if (data.hub && !(data.world && data.world.levelType)){ data.world = data.world || {}; data.world.levelType = "hub"; }   // a file from before level types
       if (data.world){
         worldSettings.gravity = data.world.gravity != null ? data.world.gravity : 1;
         worldSettings.waterLevel = data.world.waterLevel != null ? data.world.waterLevel : null;
@@ -16637,6 +16800,7 @@
     cloudLevelId = cloud || null;
     localLevelId = local || null;
     rememberLevelIds();
+    if (typeof updateHubButton === "function") updateHubButton();
   }
   function forgetLevelIfDeleted(id){
     if (id && (id === cloudLevelId || id === localLevelId)){
@@ -16745,14 +16909,17 @@
   }
   function doNew(){
     askConfirm("Start a brand new level? Unsaved changes will be lost.", function(){
-      starterLevel();
-      levelIsHub = false; updateHubButton();
-      document.getElementById("levelNameInput").value = "Untitled Level";
-      /* A new level is not the old one — drop the ids or the first save
-         would overwrite whatever was last open. */
-      setLevelIds(null, null);
-      showToast("New level started.");
-      buildFrozen = snapshotFull();
+      askLevelType(function(type){
+        starterLevel();
+        worldSettings.levelType = type;
+        document.getElementById("levelNameInput").value = type === "hub" ? "A hub" : "Untitled Level";
+        /* A new level is not the old one — drop the ids or the first save
+           would overwrite whatever was last open. */
+        setLevelIds(null, null);
+        updateHubButton();
+        showToast("New " + levelTypeDef(type).label.toLowerCase() + " started.");
+        buildFrozen = snapshotFull();
+      });
     });
   }
 

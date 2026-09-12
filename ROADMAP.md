@@ -413,6 +413,41 @@ still boots into the last level.
 - Customisable through a **paintbrush-style customiser**, the same way
   characters and levels are.
 
+### Level types — the framework DONE 2026-09-12
+
+Carson, 2026-09-12: "I'm hoping for different level types! A level that can
+only really support 4 people easily, a platformer a-b classic, where the
+camera follows one person and the others get dragged along — I like the
+Mario bubble mechanic. Or a minigame where you could have a ton of players,
+all with guns trying to shoot each other. Remember my 2.5D idea. Or a level
+where people can chill, a hub. When setting up a level getting to choose the
+level type. A smash-bros style minigame where 4 people fight — lots of
+settings."
+
+Built: the kind is chosen when a level is made and on World → Level —
+Adventure, Versus, Minigame, Hub, and Top-down listed as coming — with the
+rules each kind shows: lives, a time limit, a fall line, knockouts to win.
+Lives, the clock and the fall line work now for one player; Versus and
+Minigame keep their rules so they play right when players can join.
+
+**Still to do, in order** — see Part E for what needs a backend:
+
+1. **Local players first.** Several characters on one machine — gamepads
+   and a second set of keys — before anything online: the same bodies,
+   inputs and cameras are what online play will drive later. The single
+   `player` and its thirty-odd globals become `players[]`; sensors, buttons,
+   creatures and the crush read "any player"; each player has their own
+   grab, gun, lives and character look.
+2. **The camera for a group**: follow the lead (the one furthest ahead, or
+   the first), the others pulled along — a player left off screen pops into
+   a bubble that floats to the lead and is popped with a press (Carson's
+   Mario mechanic); or a camera that frames everyone (Versus).
+3. **Versus rules**: several start points, knockouts counted per player,
+   friendly fire for launchers, the winner named.
+4. **Online**: rooms, joining, the level sent to everyone — Part E.
+5. **Top-down (2.5D)**: its own mode — a second character rig, gravity off,
+   the camera from above.
+
 ### Level doors — first cut DONE 2026-09-12
 
 In the inventory's **Tools tab**, a **"level door"**. Built: the Level door

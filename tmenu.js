@@ -48,7 +48,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('switching page changes the body', !/painting on/.test(await p.evaluate(() => document.getElementById('pmBody').innerText)));
   // World has its settings and the Background page.
   await clickSection('World'); await p.waitForTimeout(300);
-  ok('World holds World Settings, Background and Music', JSON.stringify(await pageNames()) === JSON.stringify(['World Settings','Background','Music']) && !(await p.evaluate(() => document.getElementById('pmPages').hidden)), await pageNames());
+  ok('World holds Level, World Settings, Background and Music', JSON.stringify(await pageNames()) === JSON.stringify(['Level','World Settings','Background','Music']) && !(await p.evaluate(() => document.getElementById('pmPages').hidden)), await pageNames());
 
   console.log('\n== the Tools bag: editing tools apart from the connectors, logic and gameplay ==');
   await clickSection('Tools'); await p.waitForTimeout(300);

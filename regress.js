@@ -228,6 +228,9 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.keyboard.down('Control'); await p.keyboard.press('KeyN'); await p.keyboard.up('Control');
   await p.waitForTimeout(200);
   await p.click('#confirmYes');
+  await p.waitForTimeout(200);
+  ok('a new level asks what kind it is', !(await p.evaluate(() => document.getElementById('typeOverlay').hidden)));
+  await p.click('#typeCancel');   // just an adventure
   await p.waitForTimeout(400);
   ok('starting a new level forgets the old one',
      await p.evaluate(() => { const j = JSON.parse(localStorage.getItem('pg_level_id') || 'null'); return !j || (!j.local && !j.cloud); }),

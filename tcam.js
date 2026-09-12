@@ -443,7 +443,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const ed0 = await view();
   ok('the editor view starts detached, elsewhere, at its own zoom', !(await p.evaluate(() => window.__pg.camFollowing())) && Math.abs(ed0.zoom - 1.3) < 0.01, ed0);
   await p.evaluate(() => { window.__pg.worldSet('playZoom', 0.7); window.__pg.worldSet('camHeight', -120); });
-  ok('the World page opens', await p.evaluate(() => window.__pg.menu('world')));
+  ok('the World page opens', await p.evaluate(() => window.__pg.menu('world', 'world')));
   await p.waitForTimeout(150);
   ok('just opening it leaves the editor view alone', !(await p.evaluate(() => window.__pg.camFollowing())) && Math.abs((await view()).zoom - 1.3) < 0.01, (await view()).zoom);
   // press on the zoom slider: while it is being worked, the level shows the Play view
