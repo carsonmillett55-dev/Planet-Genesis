@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` | Playwright suites, 707 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` | Playwright suites, 718 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 707 checks + checkgeom, in order
+npm test                   # all 718 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -65,8 +65,8 @@ node tmover.js             # 22 — the Mover: two-click placing, once and bounc
 node tworld.js             # 22 — the Water sensor (touching, not a pool above; on Front), and the World changer's light and water, wired, latched, saved
 node tcreature.js          # 32 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, painted weak spot and danger, colour, a Back-layer creature, save/load
 node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
-node tstudio.js            # 59 — the studio: strokes, undo/redo, the tools, frames, playback, no rig; the brush ring, filled shapes, nudge and flip, the Settings card's keys; the character's size and drawn hitbox
-node tskins.js             # 50 — the Custom creature and Custom object wizards (look, hitbox, weak spot, danger), death and attack animations, facing, no-collision, particles with pictures and their opacity
+node tstudio.js            # 61 — the studio: strokes, undo/redo, the tools, frames, playback, no rig; the brush ring, filled shapes, nudge and flip, the Settings card's keys; the character's size and drawn hitbox
+node tskins.js             # 59 — the Custom creature and Custom object wizards (look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -870,7 +870,11 @@ studio's.
 **Undo/redo** (`ceHistory`): whole-frame snapshots, one per change —
 `ceBeginChange` before a stroke or edit, `ceEndChange` after, which pushes
 `{st, fr, before, after}` only if something changed (80 deep). Undo and
-redo jump to the frame they belong to. Inserting, deleting or moving a
+redo jump to the frame they belong to. **`ceApplyHistory` writes the
+frame back through `subject.setFrame`**, not into the array `frames()`
+returned: a drawn step (the hitbox, the weak spot) hands out a fresh
+one-element array each call, so writing into it changed nothing —
+Carson's "I can't use Ctrl+Z while drawing the hitbox". Inserting, deleting or moving a
 frame clears the history rather than trying to reconcile indices.
 Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z, Ctrl+C/V copy and paste a frame.
 
@@ -930,6 +934,12 @@ always agree. It floats over the stage from the header rather than
 sitting at the bottom of the right column, where it scrolled out of
 sight. Opening the studio closes it.
 
+**Nothing in the two columns shrinks** (`#ceLeft > *, #ceRight > * {
+flex-shrink:0 }`): they are flex columns that scroll, and the frame strip
+(`overflow-y:auto`, so its min-height is 0) was being crushed to a sliver
+as the left column filled with steps and states — Carson's "bring back
+the frames on the left".
+
 **The rig ("Simple Animated") mode is gone**, at Carson's ask — the
 four-part procedurally posed character, its editor, `rigSprites`,
 `rigAnchors`, `RIG_*`. A saved character with `mode: "rig"` loads as
@@ -950,13 +960,20 @@ Size slider and the studio both resize you live.
 states `[CHAR_STEP_SIZE] + looks + [CHAR_STEP_HIT]`; `isSize`, `isMask`,
 `next`). A character with nothing drawn yet opens on the Size step
 (`openCharEditor`); one with art opens where it was. **The Size step's
-stage is a scene, to scale** (`subject.stage`, drawn by `ceRedraw` in
-place of the drawing box, the stage the full width): a floor, a 100px
-crate, you beside it at one pixel to one (a placeholder with a face
-until something is drawn), a measuring line, and the old 40×56 size as a
-dashed outline for comparison. Carson: "a visual representation shown in
-your real world". The Height slider and Old size / Twice / Giant presets
-sit on the left. The wheel does nothing there.
+stage is the level itself, live** (`subject.stage`, drawn by `ceRedraw`
+in place of the drawing box, the stage the full width, redrawn every
+`ceTick`): `sizeStagePreviewWanted()` joins `worldPagePreviewWanted()` in
+`updateCamera`, so for as long as the step is open the game's camera sits
+on the character at the Play zoom and height (the editor's view held in
+`edCam` and restored after, as the World page does), and the stage blits
+the game canvas around them — clamped to the screen, since the camera
+stops at the map's edge — with a measuring line, the height, and the old
+40×56 size as a dashed outline beside them. So what you see is exactly
+what Play shows, at the size the level plays at; a scene drawn at one
+pixel to one, with a 100px crate, did not match the level's zoom — Carson:
+"the size in the visual representation does not really match what it
+should in game". The Height slider and Old size / Twice / Giant presets
+sit on the left; the wheel does nothing there.
 
 **The hitbox is drawn** (`charHit`, one drawing, `pg_char_hit`) and
 `buildPlayerBody` makes the body from it on every spawn: `drawingToPoly`
@@ -967,6 +984,15 @@ the shape's centroid, so the picture stays where it was drawn around the
 new body. Nothing drawn (or a sliver under 8px) is the rounded box it
 always was, its chamfer scaled with the size. `Body.setInertia(Infinity)`
 as before, so a drawn shape never tumbles.
+
+**A compound player collides by its parts.** Matter reports a compound's
+pairs at the part level — `pair.bodyA` is the convex piece that touched,
+whose `.parent` is the player — so `collisionActive` and `collisionStart`
+go through `isPlayerPart(b)` (`b === player || b.parent === player`)
+rather than `=== player`. With the old test a drawn hitbox was never
+grounded and could not jump at all ("when I make the hitbox a weird
+shape I can't jump"), and hazards did not fire. `Query.collides` walks
+parts itself and needed nothing.
 
 **The suites are pinned to the old size.** Every suite's geometry —
 where the feet land, what fits under a ledge, how far a sponge is stood
@@ -1007,14 +1033,45 @@ two). No frame tools on a step. `subject.next()` walks look → first step
 tick when drawn. `openSkinStudio(g, step)` opens straight at a step, for
 the box's "Redraw the hitbox / weak spot / danger".
 
+**Nothing touches a fresh one until its hitbox is drawn, and it holds
+still while it is drawn on.** Placing sets `ghost` and `ghostAuto`;
+`objectHeldStill` (a drawn thing that is a ghost, or whose host has
+`studioHold`) makes `refreshObjectPhysics` keep the body static; a
+ghost creature on any layer takes `creatureStep`'s by-hand path (it
+floats after the player as a Back-layer one does — a dynamic sensor
+would fall forever). `openSkinStudio` sets `studioHold` on the host and
+the subject's `onClose` clears it: a creature used to walk off after the
+player, fall, and tumble while its picture was being painted, so the
+hitbox went on a body that was somewhere else and rotated — Carson's
+"the marker moved to the left", "the hitbox was way lower, it fell
+through the ground". When the first hitbox is drawn `ghostAuto` flips
+`ghost` off; a "no collision" chosen in the box (`ghostAuto = false`)
+stays. The box's Body section, with no hitbox drawn, is one button that
+opens the hitbox step.
+
 **Drawings become geometry when the studio closes** (`applyDrawnSteps`):
 `drawingToPoly(strokes, w, h, tol)` — every stroke is the exact shape a
 round brush of its width sweeps, a capsule per segment (`sweepRing`, the
 level brush's own geometry), unioned, an eraser stroke subtracted, in a
-box centred on (0,0), cleaned at 1.2px. The hitbox polygon is moved to
-the art box's centre in the host's frame, taken to the world through the
-body, and `rebuildFromPieces(o, {a:0,x:0,y:0})` makes it the body — so
-the drawn hitbox is as clean a polygon as a painted one. **An empty
+box centred on (0,0), cleaned at 1.2px. The hitbox polygon goes on
+**upright, at the art box's world centre** — never through the body's
+angle: it was drawn over the picture upright, so that is where it
+belongs — `Body.setAngle(b, 0)`, and `rebuildFromPieces(o,
+{a:0,x:0,y:0})` makes it the body, so the drawn hitbox is as clean a
+polygon as a painted one. After the rebuild `g.art` is re-expressed
+about the same world centre with `a: 0`, and the gadget itself is put at
+the body's centre (`local` 0,0) — the marker sits in the middle of the
+drawn hitbox, which is what Carson asked for. `homeAngle` is reset. A
+drawn creature's body is also given infinite inertia
+(`objectIsDrawnCreature` in `refreshObjectPhysics`), so it stands as
+drawn whatever hits it.
+
+**The art box remembers a turn** (`art.a`, radians, saved): any other
+rebuild — painting onto the thing, a resize — bakes the body's angle
+into the polygons and resets it to 0, and an axis-aligned rect in the
+new frame would leave the picture upright over a turned hitbox. So
+`rebuildFromPieces` adds `oldAngle` to `art.a`, `drawSkinOn` rotates by
+it about the art centre, and a flip negates it. **An empty
 hitbox means no collision**: the body is the art box and `ghost` is set.
 For a creature the weak spot and danger become `g.weak` / `g.danger` the
 same way (`weakMode` is always `painted`), so the contact code is the

@@ -204,6 +204,42 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await build();
 
   console.log('');
+  console.log('== a fresh creature holds still and touches nothing until its hitbox is drawn ==');
+  await fresh();
+  await rect('wood', 1, X-380, Y+100, X+400, Y+140);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('creature'); window.__pg.setFlying(false); window.__pg.paused(false); });   // the world runs while it is drawn on
+  await standAt(X-200, Y+60);
+  await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [X+100, Y-60]);       // in the air, near the player
+  await p.waitForTimeout(200);
+  let fc = await kind('creature');
+  let fo = (await stats()).filter(o => o.id === fc.obj)[0];
+  ok('placed: no collision and held still, in the air where it was put', fc.ghost === true && fo.static === true && fo.sensor === true && Math.abs(fo.pos.y - (Y-60)) < 2, { ghost: fc.ghost, static: fo.static, sensor: fo.sensor, y: fo.pos.y });
+  await p.evaluate(id => window.__pg.gadgetSet(id, { speed: 150, range: 900 }), fc.id);
+  await st('setColor', '#C89BD9'); await stroke(0.2, 0.3, 0.8, 0.7);
+  await p.waitForTimeout(700);
+  fo = (await stats()).filter(o => o.id === fc.obj)[0];
+  ok('while it is drawn on it neither falls nor walks after the player', Math.abs(fo.pos.x - (X+100)) < 2 && Math.abs(fo.pos.y - (Y-60)) < 2, fo.pos);
+  await st('go', 'hitbox', 0);
+  await stroke(0.5, 0.2, 0.5, 0.8);
+  ok('a hitbox stroke lands on the step', (await st('drawing')).length === 1);
+  await p.keyboard.press('Control+z'); await p.waitForTimeout(80);
+  ok('and Ctrl+Z takes it back off the step', (await st('drawing')).length === 0, await st('drawing'));
+  await p.keyboard.press('Control+y'); await p.waitForTimeout(80);
+  ok('Ctrl+Y puts it back', (await st('drawing')).length === 1);
+  await st('close'); await p.waitForTimeout(150);
+  fc = await kind('creature');
+  fo = (await stats()).filter(o => o.id === fc.obj)[0];
+  ok('closing with a hitbox drawn makes it solid and lets it go', fc.ghost === false && fo.static === false && fo.sensor === false, { ghost: fc.ghost, static: fo.static, sensor: fo.sensor });
+  const mk = await p.evaluate(id => { const g = window.__pg.gadgets().find(g => g.id === id); const o = window.__pg.stats().find(o => o.id === g.obj); return { g: [g.x, g.y], body: o.pos }; }, fc.id);   // read together: it is moving
+  ok('and the creature marker sits in the middle of the drawn hitbox', Math.abs(mk.g[0] - mk.body.x) < 2 && Math.abs(mk.g[1] - mk.body.y) < 2, mk);
+  await p.waitForTimeout(700);
+  fo = (await stats()).filter(o => o.id === fc.obj)[0];
+  ok('now it falls and comes after the player', fo.pos.y > Y - 30 && fo.pos.x < X + 60, fo.pos);
+  ok('standing up straight, whatever happened on the way', Math.abs(fo.angle) < 0.02, fo.angle);
+  await p.evaluate(() => { window.__pg.paused(true); window.__pg.setFlying(true); });
+
+  console.log('');
   console.log('== an empty hitbox means no collision; a creature on the Back layer ==');
   await fresh();
   await rect('wood', 1, X-380, Y+100, X+400, Y+140);

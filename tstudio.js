@@ -204,9 +204,20 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('closing rebuilds the body from the drawn hitbox: narrower than the box, in parts', sz2.w < 30 && sz2.h < 84 && sz2.parts >= 2, sz2);
   ok('while the picture keeps its full size around it', sz2.art && sz2.art.w === 60 && sz2.art.h === 84, sz2.art);
   ok('the hitbox is remembered', (await p.evaluate(() => JSON.parse(localStorage.getItem('pg_char_hit')).length)) === 1);
+  // a drawn body still stands on the ground and jumps: the engine reports its parts, not it
+  await p.evaluate(() => window.__pg.playerTo(400, 2200)); await p.waitForTimeout(900);
+  const y0 = (await p.evaluate(() => window.__pg.playerPos())).y;
+  await p.keyboard.press('Space'); await p.waitForTimeout(250);
+  const y1 = (await p.evaluate(() => window.__pg.playerPos())).y;
+  ok('with a drawn hitbox the character still jumps off the floor', y1 < y0 - 30, { before: y0, after: y1 });
   await p.evaluate(() => window.__pg.setCharHit([])); await p.waitForTimeout(100);
   const sz3 = await p.evaluate(() => window.__pg.playerSize());
   ok('with no hitbox drawn it is the rounded box again', sz3.w === 60 && sz3.h === 84 && sz3.parts === 1, sz3);
+  // the frame strip keeps its size however full the left column is
+  await st('open'); await p.waitForTimeout(150); await st('click', 'Animated'); await st('go', 'idle', 0); await p.waitForTimeout(100);
+  const frH = await p.evaluate(() => { const f = document.querySelector('.ceFrameStrip .fr'); return f ? f.getBoundingClientRect().height : 0; });
+  ok('the frame thumbnails on the left keep their full height', frH >= 40, frH);
+  await st('close');
 
   console.log('');
   console.log(fail ? `FAILED ${fail} of ${pass+fail} checks` : `ALL ${pass} checks`);

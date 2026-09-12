@@ -1068,6 +1068,7 @@
   #ceKeysPanel[hidden]{ display:none; }
   #ceKeysPanel h4{ font-family:'Patrick Hand',cursive; margin:0; font-size:1rem; color:var(--ink); }
   #ceKeysPanel .btn.ghost{ color:var(--ink); border-color:var(--ink); }
+  #ceHeader #ceKeysBtn.ghost{ color:var(--stitch); border-color:var(--stitch); }
   #ceHeader{
     display:flex; align-items:center; gap:.6rem; flex-wrap:wrap;
     padding:.5rem .7rem; background:var(--desk-dark); border-bottom:3px dashed var(--stitch);
@@ -1078,6 +1079,9 @@
     flex:0 0 12.5rem; min-width:0; overflow-y:auto;
     display:flex; flex-direction:column; gap:.5rem;
   }
+  /* the columns scroll; nothing in them shrinks — the frame strip was
+     being crushed to a sliver as the left column filled with steps */
+  #ceLeft > *, #ceRight > *{ flex-shrink:0; }
   #ceStage{
     flex:1; min-width:0; display:flex; flex-direction:column; align-items:center;
     justify-content:center; gap:.4rem;
@@ -2375,6 +2379,19 @@
     for (var i = 0; i < gadgets.length; i++) if ((gadgets[i].kind === "anim" || gadgets[i].kind === "creature") && gadgets[i].obj === obj && gadgets[i].ghost) return true;
     return false;
   }
+  // a drawn creature or object whose studio is open, or with no hitbox yet, is held still
+  function objectHeldStill(obj){
+    if (obj.studioHold) return true;
+    for (var i = 0; i < gadgets.length; i++){
+      var g = gadgets[i];
+      if ((g.kind === "anim" || g.kind === "creature") && g.obj === obj && g.art && g.ghost) return true;
+    }
+    return false;
+  }
+  function objectIsDrawnCreature(obj){
+    for (var i = 0; i < gadgets.length; i++) if (gadgets[i].kind === "creature" && gadgets[i].obj === obj && gadgets[i].art) return true;
+    return false;
+  }
   function refreshObjectPhysics(obj){
     if (!obj.body) return;                 // still waiting on a batched rebuild
     applyObjectWeight(obj);
@@ -2403,9 +2420,11 @@
     // creating it is still in progress — nothing you are mid-way through
     // painting should sag, roll away or explode out from under the brush.
     // It goes live the moment the mouse button comes up.
-    setBodyStatic(obj.body, (decorative || obj.drawing) ? true : !!obj.holdsStill);
+    setBodyStatic(obj.body, (decorative || obj.drawing || objectHeldStill(obj)) ? true : !!obj.holdsStill);
     var ghost = decorative || (allGlow && !obj.lightSolid) || objectWalkThrough(obj);
     obj.body.isSensor = ghost;
+    // a drawn creature stands as it was drawn: it never tumbles, like the player
+    if (!obj.body.isStatic && objectIsDrawnCreature(obj)) Body.setInertia(obj.body, Infinity);
     obj.body.collisionFilter = ghost ? { category: CAT_LAYER[obj.layer], mask: 0, group: 0 } : layerFilter(obj.layer);
     obj.body.label = "object";
   }
@@ -2570,7 +2589,7 @@
     reanchorGadgets(obj);
     maskW.forEach(function(m){
       m.g.weak = m.weak ? maskToLocal(newBody, m.weak) : null; m.g.danger = m.danger ? maskToLocal(newBody, m.danger) : null;
-      if (m.art){ var lc = toBodyLocal(newBody, { x: m.art.cx, y: m.art.cy }); m.g.art = { x: lc.x - m.art.w/2, y: lc.y - m.art.h/2, w: m.art.w, h: m.art.h }; }
+      if (m.art){ var lc = toBodyLocal(newBody, { x: m.art.cx, y: m.art.cy }); m.g.art = { x: lc.x - m.art.w/2, y: lc.y - m.art.h/2, w: m.art.w, h: m.art.h, a: (m.g.art.a || 0) + oldAngle }; }
     });
     relinkAfterRebuild(obj, oldBody, newBody);
     if (typeof grabConstraint !== "undefined" && grabConstraint){
@@ -2993,7 +3012,7 @@
       g.actT0 = 0; g.wasOn = false;
       g.visible = extra.visible != null ? !!extra.visible : false;   // the glyph is the maker's; the drawing is what players see
       g.hitbox = normalizeDrawing(extra.hitbox, 10, 14);
-      g.art = extra.art && isFinite(+extra.art.w) ? { x:+extra.art.x, y:+extra.art.y, w:Math.max(8, +extra.art.w), h:Math.max(8, +extra.art.h) } : null;
+      g.art = extra.art && isFinite(+extra.art.w) ? { x:+extra.art.x, y:+extra.art.y, w:Math.max(8, +extra.art.w), h:Math.max(8, +extra.art.h), a:+extra.art.a || 0 } : null;
       if (kind === "creature"){
         g.range = extra.range != null ? Math.max(60, Math.min(4000, +extra.range)) : 700;
         g.speed = extra.speed != null ? Math.max(5, Math.min(1500, +extra.speed)) : 90;
@@ -3135,8 +3154,9 @@
           // the art box: its centre through the map, its size by the scale; a flip mirrors which way it was drawn facing
           var ac0 = toWorldPoint(bd, { x: g.art.x + g.art.w/2, y: g.art.y + g.art.h/2 }), ac1 = mapPt(ac0), lc1 = toBodyLocal(bd, ac1);
           var kk = k && k !== 1 ? k : 1;
-          g.art = { x: lc1.x - g.art.w * kk / 2, y: lc1.y - g.art.h * kk / 2, w: g.art.w * kk, h: g.art.h * kk };
-          if (!k || k === 1){ var probe = mapPt({ x: ac0.x + 10, y: ac0.y }); if (probe.x < ac1.x && g.kind === "creature") g.drawnFacing = -g.drawnFacing; }
+          var wasA = g.art.a || 0;
+          g.art = { x: lc1.x - g.art.w * kk / 2, y: lc1.y - g.art.h * kk / 2, w: g.art.w * kk, h: g.art.h * kk, a: wasA };
+          if (!k || k === 1){ var probe = mapPt({ x: ac0.x + 10, y: ac0.y }); if (probe.x < ac1.x){ g.art.a = -wasA; if (g.kind === "creature") g.drawnFacing = -g.drawnFacing; } }
         }
       }
       g.local = toBodyLocal(g.obj.body, g.pos);
@@ -3313,9 +3333,11 @@
     if (sees){ var lx = player.position.x - g.pos.x, ly = player.position.y - g.pos.y, ll = Math.hypot(lx, ly) || 1; g.look = { x: lx / ll, y: ly / ll }; }
     var v = g.speed / STEPS_PER_SEC;              // px per step
     var dx = player ? player.position.x - b.position.x : 0, dy = player ? player.position.y - b.position.y : 0;
-    if (o.decorative){
-      // a Back or Front creature has no physics to walk with: it is moved
-      // by hand toward the player, floating whichever way it is set
+    if (o.studioHold) return;                     // being drawn on: it holds still
+    if (o.decorative || b.isSensor){
+      // a Back or Front creature has no physics to walk with, and neither
+      // has one with no collision: it is moved by hand toward the player,
+      // floating whichever way it is set
       if (!sees) return;
       var sx0 = (b.bounds.max.x - b.bounds.min.x) / 2 + PW / 2 + 8, sy0 = (b.bounds.max.y - b.bounds.min.y) / 2 + PH / 2 + 8;
       var mx = Math.abs(dx) > sx0 ? (dx > 0 ? v : -v) : 0, my = g.fly && Math.abs(dy) > sy0 ? (dy > 0 ? v : -v) : 0;
@@ -5117,10 +5139,14 @@
     }
     if (player) lastFallSpeed = player.velocity.y;
   });
+  // A drawn hitbox makes the player a compound body, and Matter reports a
+  // compound's collisions at the PART level: pair.bodyA is the convex piece
+  // that touched, whose .parent is the player. A plain box is its own part.
+  function isPlayerPart(b){ return !!b && (b === player || b.parent === player); }
   onStep("collisionActive", function(ev){
     if (!player) return;
     ev.pairs.forEach(function(p){
-      if (p.bodyA !== player && p.bodyB !== player) return;
+      if (!isPlayerPart(p.bodyA) && !isPlayerPart(p.bodyB)) return;
       // Sensors overlap without holding anything up — a rope, a Back-layer
       // decoration, a walk-through light. Only a solid counts as ground.
       if (p.bodyA.isSensor || p.bodyB.isSensor) return;
@@ -5137,13 +5163,13 @@
       for (var si = 0; si < sup.length; si++){ if (sup[si]){ sy += sup[si].y; sn++; } }
       if (sn && sy / sn < player.position.y + PH * 0.2) return;
       groundedNext = true;
-      var gb = p.bodyA === player ? p.bodyB : p.bodyA; groundBodyNext = gb.parent || gb;
+      var gb = isPlayerPart(p.bodyA) ? p.bodyB : p.bodyA; groundBodyNext = gb.parent || gb;
     });
   });
   onStep("collisionStart", function(ev){
     if (!player || mode !== "play") return;
     ev.pairs.forEach(function(p){
-      var other = p.bodyA === player ? p.bodyB : (p.bodyB === player ? p.bodyA : null);
+      var other = isPlayerPart(p.bodyA) ? p.bodyB : (isPlayerPart(p.bodyB) ? p.bodyA : null);
       if (!other) return;
       // Matter reports compound collisions at the PART level — pair.bodyA/
       // bodyB are the individual circle that actually touched, not the
@@ -5711,7 +5737,7 @@
                weak: g.weak ? pgPack(g.weak) : null, danger: g.danger ? pgPack(g.danger) : null,
                skin: g.skin ? packSkin(g.skin) : null, actionMode: g.actionMode, ghost: g.ghost,
                hitbox: g.hitbox && g.hitbox.length ? g.hitbox : null, weakD: g.weakD && g.weakD.length ? g.weakD : null, dangerD: g.dangerD && g.dangerD.length ? g.dangerD : null,
-               art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
+               art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h, a:g.art.a || 0 } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
                rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin };
     });
     var linkSnaps = links.map(function(l){
@@ -6045,6 +6071,8 @@
   function noteCamEdit(){ camEditUntil = performance.now() + 900; }
   window.addEventListener("pointerup", function(){ camEditHeld = false; if (camEditUntil) noteCamEdit(); });
   function worldPagePreviewWanted(){ return mode === "build" && pmOpen && pmActiveSection === "world" && !!player && (camEditHeld || performance.now() < camEditUntil); }
+  // the studio's Size step looks at the character in the level as Play would
+  function sizeStagePreviewWanted(){ return mode === "build" && !!player && !charEditorOverlay.hidden && !!ceSubject && !!ceSubject.stage && !!ceSubject.isSize && ceSubject.isSize(pmEditState); }
   function beginEditorHold(){
     if (edCam) return;
     var visW = viewRectW / camScale, visH = viewRectH / camScale;
@@ -6065,7 +6093,7 @@
     var visW = viewRectW / camScale, visH = viewRectH / camScale;
     if (camFollow && player && mode === "play"){
       updatePlayCamera();
-    } else if (worldPagePreviewWanted()){
+    } else if (worldPagePreviewWanted() || sizeStagePreviewWanted()){
       beginEditorHold();
       var pz = worldNum("playZoom");
       if (Math.abs(camZoom - pz) > 1e-6){ camZoom = pz; applyCamScale(); visW = viewRectW / camScale; visH = viewRectH / camScale; }
@@ -6720,6 +6748,8 @@
     ctx.translate(b.position.x, b.position.y);
     ctx.rotate(b.angle);
     ctx.globalAlpha = depth.a;
+    // the art box's own turn (a rebuild bakes the body's angle into the polygons; the picture keeps up)
+    if (g.art && g.art.a){ ctx.translate(box.x + w/2, box.y + h/2); ctx.rotate(g.art.a); ctx.translate(-(box.x + w/2), -(box.y + h/2)); }
     // a creature is drawn facing one way; it is mirrored when it faces the other
     if ((g.kind === "eye" || g.kind === "creature") && g.face !== (g.drawnFacing || 1)){ ctx.translate(box.x + w/2, 0); ctx.scale(-1, 1); ctx.translate(-(box.x + w/2), 0); }
     ctx.drawImage(cv, box.x, box.y, w, h);
@@ -8843,7 +8873,7 @@
       aspect: function(){ return CHAR_ASPECT; },
       persist: function(){ persistCharSprites(); persistCharFrameCounts(); persistCharFps(); persistCharHit(); },
       hint: function(){
-        if (pmEditState === "size") return "How big you are on the level, shown to scale. Slide the height and watch; the level shows the change when you close.";
+        if (pmEditState === "size") return "How big you are, in your level as Play shows it. Slide the height and watch.";
         if (pmEditState === "hitbox") return "Draw your hitbox — the part of you that touches things. Leave it empty for the rounded box.";
         return charMode === "simple" ? "One look for your character." : "A pose per state, as many frames as you like. Ctrl+Z undoes, Ctrl+Y redoes.";
       },
@@ -8872,78 +8902,64 @@
         });
         el.appendChild(pr);
         var n = document.createElement("div"); n.className = "noteText";
-        n.textContent = "The stage shows you to scale on a bit of level, next to a 100px crate. Everything about you — jumps, reach, what you can carry — is worked out from your size.";
+        n.textContent = "The stage is your level, live, as Play shows it — with the old size beside you. Everything about you — jumps, reach, what you can carry — is worked out from your size.";
         el.appendChild(n);
         return true;
       },
-      previewLabel: "To scale, with a 100px crate",
+      previewLabel: "Next to the old size",
       // the size step's stage: a bit of level at one pixel to one — a floor, a 100px crate, you beside it, and the old size for comparison
       stage: function(c2, w, h){
+        // the level itself, live, around the character, at the zoom Play
+        // uses — the camera is on them for as long as this step is open
         var artW = Math.round(CHAR_BASE_W * charScale), artH = Math.round(CHAR_BASE_H * charScale);
-        var floorH = 46, top = 34;
-        var fit = Math.min(1, (h - floorH - top) / Math.max(artH, 100));
-        var floorY = h - floorH;
-        // sky and floor, in the level's own colours
-        var sky = c2.createLinearGradient(0, 0, 0, floorY);
-        sky.addColorStop(0, "#BFE3F5"); sky.addColorStop(1, "#EAF6FB");
-        c2.fillStyle = sky; c2.fillRect(0, 0, w, floorY);
-        c2.fillStyle = "#7DBB5E"; c2.fillRect(0, floorY, w, 8);
-        c2.fillStyle = "#8B5E3C"; c2.fillRect(0, floorY + 8, w, floorH - 8);
-        c2.fillStyle = "rgba(0,0,0,0.12)"; c2.fillRect(0, floorY + 8, w, 3);
-        var scaleNote = fit < 1 ? " (shown at " + Math.round(fit * 100) + "%)" : "";
-        // the crate
-        var cs = 100 * fit, cx = Math.max(16, w * 0.5 - cs - 30 - artW * fit / 2), cy = floorY - cs;
-        c2.fillStyle = "#D2A86A"; c2.fillRect(cx, cy, cs, cs);
-        c2.strokeStyle = "#8B5E3C"; c2.lineWidth = 3; c2.strokeRect(cx + 1.5, cy + 1.5, cs - 3, cs - 3);
-        c2.lineWidth = 1.5; c2.beginPath(); c2.moveTo(cx, cy); c2.lineTo(cx + cs, cy + cs); c2.moveTo(cx + cs, cy); c2.lineTo(cx, cy + cs); c2.stroke();
-        c2.fillStyle = "rgba(43,27,18,0.7)"; c2.font = "bold 12px sans-serif"; c2.textAlign = "center";
-        c2.fillText("a 100px crate", cx + cs / 2, cy - 8);
-        // you
-        var pw = artW * fit, ph = artH * fit, px = cx + cs + 30, py = floorY - ph;
-        var f = pickCharFrame("idle", 0);
-        if (f) c2.drawImage(drawingCanvas(f, Math.max(1, Math.round(pw * 2)), Math.max(1, Math.round(ph * 2))), px, py, pw, ph);
-        else {
-          c2.fillStyle = charColor; c2.beginPath();
-          if (c2.roundRect) c2.roundRect(px, py, pw, ph, Math.min(12, pw * 0.3)); else c2.rect(px, py, pw, ph);
-          c2.fill();
-          // a face, so the placeholder reads as a person
-          c2.fillStyle = "#fff"; c2.beginPath(); c2.arc(px + pw * 0.35, py + ph * 0.28, Math.max(2, pw * 0.09), 0, Math.PI * 2); c2.arc(px + pw * 0.65, py + ph * 0.28, Math.max(2, pw * 0.09), 0, Math.PI * 2); c2.fill();
-          c2.fillStyle = "#2B1B12"; c2.beginPath(); c2.arc(px + pw * 0.37, py + ph * 0.29, Math.max(1, pw * 0.045), 0, Math.PI * 2); c2.arc(px + pw * 0.67, py + ph * 0.29, Math.max(1, pw * 0.045), 0, Math.PI * 2); c2.fill();
-          c2.strokeStyle = "#2B1B12"; c2.lineWidth = Math.max(1, pw * 0.03); c2.beginPath(); c2.arc(px + pw * 0.5, py + ph * 0.4, pw * 0.16, 0.15 * Math.PI, 0.85 * Math.PI); c2.stroke();
+        c2.fillStyle = "#BFE3F5"; c2.fillRect(0, 0, w, h);
+        if (!player) return;
+        var ps = worldToScreen(player.position.x, player.position.y);
+        // the window onto the level is centred on you unless that runs off the screen's edge (the camera stops at the map's)
+        var d2 = dpr || 1, cw = canvas.width / d2, chh = canvas.height / d2;
+        var ox0 = Math.max(0, Math.min(cw - w, ps.x - w/2)), oy0 = Math.max(0, Math.min(chh - h, ps.y - h/2));
+        try { c2.drawImage(canvas, ox0 * d2, oy0 * d2, w * d2, h * d2, 0, 0, w, h); } catch(e){}
+        // where the feet are on this stage
+        var fx = ps.x - ox0, feetY = ps.y - oy0 + (PH/2) * camScale, k = camScale;
+        // the old size beside you, for comparison
+        var ow = CHAR_BASE_W * k, oh = CHAR_BASE_H * k, ox = fx + (artW/2) * k + 24 * k, oy = feetY - oh;
+        c2.save();
+        if (Math.abs(charScale - 1) > 0.01){
+          c2.setLineDash([4, 3]); c2.strokeStyle = "rgba(255,255,255,0.9)"; c2.lineWidth = 1.5; c2.strokeRect(ox, oy, ow, oh);
+          c2.setLineDash([]); c2.strokeStyle = "rgba(43,27,18,0.7)"; c2.lineWidth = 1; c2.strokeRect(ox + 1, oy + 1, ow - 2, oh - 2);
+          c2.fillStyle = "#2B1B12"; c2.font = "bold 12px sans-serif"; c2.textAlign = "center";
+          c2.strokeStyle = "rgba(255,255,255,0.8)"; c2.lineWidth = 3; c2.strokeText("the old size", ox + ow/2, oy - 6);
+          c2.fillText("the old size", ox + ow/2, oy - 6);
         }
-        c2.fillStyle = "rgba(43,27,18,0.8)"; c2.font = "bold 12px sans-serif"; c2.textAlign = "center";
-        c2.fillText("you — " + artH + "px tall" + scaleNote, px + pw / 2, py - 8);
-        // a measuring line beside you
-        var mx = px + pw + 14;
-        c2.strokeStyle = "rgba(43,27,18,0.55)"; c2.lineWidth = 1; c2.setLineDash([]);
-        c2.beginPath(); c2.moveTo(mx, py); c2.lineTo(mx, floorY); c2.moveTo(mx - 5, py); c2.lineTo(mx + 5, py); c2.moveTo(mx - 5, floorY); c2.lineTo(mx + 5, floorY); c2.stroke();
-        // the old size, for comparison
-        var ow = CHAR_BASE_W * fit, oh = CHAR_BASE_H * fit, ox = mx + 40, oy = floorY - oh;
-        if (ox + ow + 10 < w && Math.abs(charScale - 1) > 0.01){
-          c2.setLineDash([4, 3]); c2.strokeStyle = "rgba(43,27,18,0.5)"; c2.lineWidth = 1.5;
-          c2.strokeRect(ox, oy, ow, oh); c2.setLineDash([]);
-          c2.fillStyle = "rgba(43,27,18,0.6)"; c2.font = "11px sans-serif"; c2.textAlign = "center";
-          c2.fillText("the old size", ox + ow / 2, oy - 6);
-        }
-        c2.textAlign = "left";
+        // a measuring line beside you, and the height — on your left if there is room for it, else past the old size
+        var top = feetY - artH * k, mx = fx - (artW/2) * k - 14, onLeft = mx > 90;
+        if (!onLeft) mx = ox + ow + 14;
+        c2.setLineDash([]); c2.strokeStyle = "rgba(43,27,18,0.75)"; c2.lineWidth = 1.5;
+        c2.beginPath(); c2.moveTo(mx, top); c2.lineTo(mx, feetY); c2.moveTo(mx - 5, top); c2.lineTo(mx + 5, top); c2.moveTo(mx - 5, feetY); c2.lineTo(mx + 5, feetY); c2.stroke();
+        c2.fillStyle = "#2B1B12"; c2.font = "bold 12px sans-serif"; c2.textAlign = onLeft ? "right" : "left";
+        var lx = onLeft ? mx - 6 : mx + 6;
+        c2.strokeStyle = "rgba(255,255,255,0.8)"; c2.lineWidth = 3; c2.strokeText(artH + "px tall", lx, (top + feetY) / 2 + 4);
+        c2.fillText(artH + "px tall", lx, (top + feetY) / 2 + 4);
+        c2.textAlign = "left"; c2.font = "11px sans-serif";
+        c2.strokeText("your level, as Play shows it", 10, 16); c2.fillText("your level, as Play shows it", 10, 16);
+        c2.restore();
       },
       preview: function(pctx, w, h){
-        // the character at its real size beside a 100px crate, both scaled to fit
+        // the character at its size beside the old size, both scaled to fit
         var artW = Math.round(CHAR_BASE_W * charScale), artH = Math.round(CHAR_BASE_H * charScale);
-        var fit = Math.min((h - 12) / Math.max(artH, 100), (w - 12) / (artW + 100 + 10));
-        var cw = 100 * fit, ch = 100 * fit, pw = artW * fit, ph = artH * fit;
+        var fit = Math.min((h - 12) / Math.max(artH, CHAR_BASE_H), (w - 12) / (artW + CHAR_BASE_W + 10));
+        var ow = CHAR_BASE_W * fit, oh = CHAR_BASE_H * fit, pw = artW * fit, ph = artH * fit;
         var baseY = h - 6;
         pctx.save();
         pctx.strokeStyle = "rgba(43,27,18,0.5)"; pctx.lineWidth = 1.5; pctx.setLineDash([3, 3]);
-        pctx.strokeRect(6, baseY - ch, cw, ch);
-        pctx.setLineDash([]); pctx.fillStyle = "rgba(43,27,18,0.5)"; pctx.font = "9px sans-serif"; pctx.fillText("100px", 8, baseY - ch - 2);
-        var f = pickCharFrame("idle", 0), x0 = 6 + cw + 10, y0 = baseY - ph;
+        pctx.strokeRect(6, baseY - oh, ow, oh);
+        pctx.setLineDash([]); pctx.fillStyle = "rgba(43,27,18,0.5)"; pctx.font = "9px sans-serif"; pctx.fillText("old", 8, baseY - oh - 2);
+        var f = pickCharFrame("idle", 0), x0 = 6 + ow + 10, y0 = baseY - ph;
         if (f) pctx.drawImage(drawingCanvas(f, pw*2, ph*2), x0, y0, pw, ph);
         else { pctx.fillStyle = charColor; pctx.beginPath(); if (pctx.roundRect) pctx.roundRect(x0, y0, pw, ph, 6 * fit); else pctx.rect(x0, y0, pw, ph); pctx.fill(); }
         if (drawingHasArt(charHit) && pmEditState !== "size"){ pctx.save(); pctx.globalAlpha = 0.5; pctx.drawImage(drawingCanvas(charHit, pw*2, ph*2), x0, y0, pw, ph); pctx.restore(); }
         pctx.restore();
       },
-      extraRight: function(el){ ceCharacterExtras(el); },
       onClose: function(){ persistCharHit(); respawnSameSpot(); }
     };
     return sub;
@@ -9018,7 +9034,7 @@
         return i + 1 < ids.length ? ids[i + 1] : null;         // then step by step; null means done
       },
       extraRight: function(el){ ceSkinExtras(el, g); },
-      onClose: function(){ applyDrawnSteps(g); renderSelBar(); }
+      onClose: function(){ if (host){ host.studioHold = false; } applyDrawnSteps(g); if (host && host.body && objects.indexOf(host) >= 0) refreshObjectPhysics(host); renderSelBar(); }
     };
     return sub;
   }
@@ -9036,14 +9052,25 @@
     var hit = drawingToPoly(g.hitbox, art.w, art.h, 1.2);
     var empty = !hit.length;
     if (empty) hit = [[[[-art.w/2, -art.h/2], [art.w/2, -art.h/2], [art.w/2, art.h/2], [-art.w/2, art.h/2]]]];
-    g.ghost = empty ? true : g.ghost;
-    var hitLocal = toLocal(hit);
-    // the host's frame stays: the polygon goes to the world through the body as it is, then the rebuild bakes it in
-    var worldPoly = pgTransform(hitLocal, b.angle, b.position.x, b.position.y);
+    // no hitbox, no collision; the first hitbox drawn makes it solid unless it was set to no collision on purpose
+    if (empty){ g.ghost = true; g.ghostAuto = true; }
+    else if (g.ghostAuto){ g.ghost = false; g.ghostAuto = false; }
+    // the hitbox is drawn over the picture upright, so it goes on upright:
+    // at the art box's world centre with no turn at all. A creature that
+    // had tumbled while it was drawn on came out with its picture upright
+    // over a rotated body — "the hitbox was way lower, it fell through".
+    var artCentreWorld = toWorldPoint(b, artCentreLocal);
+    var worldPoly = pgTranslate(hit, artCentreWorld.x, artCentreWorld.y);
     o.pieces = [{ m: o.pieces.length ? o.pieces[0].m : (g.kind === "creature" ? "creature" : "drawn"), poly: pgClean(worldPoly, GEOM_TOL) }];
-    if (!o.pieces[0].poly.length){ o.pieces = [{ m: g.kind === "creature" ? "creature" : "drawn", poly: pgTransform(toLocal([[[[-art.w/2, -art.h/2], [art.w/2, -art.h/2], [art.w/2, art.h/2], [-art.w/2, art.h/2]]]]), b.angle, b.position.x, b.position.y) }]; }
+    if (!o.pieces[0].poly.length){ o.pieces = [{ m: g.kind === "creature" ? "creature" : "drawn", poly: pgTranslate([[[[-art.w/2, -art.h/2], [art.w/2, -art.h/2], [art.w/2, art.h/2], [-art.w/2, art.h/2]]]], artCentreWorld.x, artCentreWorld.y) }]; }
+    Body.setAngle(b, 0); Body.setAngularVelocity(b, 0);
     rebuildFromPieces(o, { a: 0, x: 0, y: 0 });   // the art rect rides through this (maskW) to the new centre
     if (objects.indexOf(o) < 0) return;
+    var nbody = o.body, acl = toBodyLocal(nbody, artCentreWorld);
+    g.art = { x: acl.x - art.w/2, y: acl.y - art.h/2, w: art.w, h: art.h, a: 0 };
+    // the gadget itself sits in the middle of the drawn hitbox
+    if (!empty){ g.local = { x: 0, y: 0 }; g.pos = { x: nbody.position.x, y: nbody.position.y }; }
+    g.homeAngle = 0;
     if (g.kind === "creature"){
       var nb = o.body, na = g.art, nc = { x: na.x + na.w/2, y: na.y + na.h/2 };
       var wk = drawingToPoly(g.weakD, na.w, na.h, 1.2), dg = drawingToPoly(g.dangerD, na.w, na.h, 1.2);
@@ -9082,6 +9109,9 @@
   function openSkinStudio(g, step){
     if (!g.skin) g.skin = newSkin(g.kind);
     pushUndo("drawing on a " + GADGET_LABEL[g.kind].toLowerCase());
+    // the host holds still while it is drawn on — a creature used to
+    // walk off after the player, and fall, while its picture was painted
+    if (g.obj && g.obj.body && (g.kind === "creature" || g.kind === "anim")){ g.obj.studioHold = true; refreshObjectPhysics(g.obj); }
     if (step) pmEditState = step; else pmEditState = "idle";
     pmEditFrame = 0;
     ceOpenWith(ceSkinSubject(g));
@@ -9124,7 +9154,11 @@
     var arr = ceFramesOf(pmEditState);
     while (arr.length <= pmEditFrame) arr.push(blankDrawing());
     var d = JSON.parse(useAfter ? entry.after : entry.before);
-    arr[pmEditFrame] = d; touchDrawing(d);
+    // through the subject: a drawn step (the hitbox, the weak spot) hands
+    // out a fresh one-element array each time, so writing into `arr`
+    // would change nothing — that was "Ctrl+Z does nothing on the hitbox"
+    if (ceSubject.setFrame) ceSubject.setFrame(pmEditState, d); else arr[pmEditFrame] = d;
+    touchDrawing(d);
     cePersist(); renderCharEditorPanels(); ceLayout();
   }
   function ceUndo(){
@@ -9449,6 +9483,7 @@
       }
     }
     cePlayLast = now;
+    if (ceSubject && ceSubject.stage && ceSubject.isSize && ceSubject.isSize(pmEditState)) ceRedraw();   // the live level
     requestAnimationFrame(ceTick);
   }
 
@@ -10086,9 +10121,11 @@
       var hs = DRAWN_DEFAULT_SIZE / 2;
       var host0 = newObjectFromPoly(kind === "creature" ? "creature" : "drawn", [[[[pt.x - hs, pt.y - hs], [pt.x + hs, pt.y - hs], [pt.x + hs, pt.y + hs], [pt.x - hs, pt.y + hs]]]], buildLayer);
       if (!host0){ showToast("No room for it there."); sfx("deny"); return; }
-      host0.forcedStatic = kind === "anim"; refreshObjectPhysics(host0);
+      host0.forcedStatic = kind === "anim";
       var g0 = addGadget(kind, host0, { x: pt.x, y: pt.y });
       g0.art = { x: -hs, y: -hs, w: DRAWN_DEFAULT_SIZE, h: DRAWN_DEFAULT_SIZE };
+      g0.ghost = true; g0.ghostAuto = true;   // nothing touches it until a hitbox is drawn
+      refreshObjectPhysics(host0);
       selectGadget(g0);
       sfx("bolt");
       openSkinStudio(g0);
@@ -11008,8 +11045,12 @@
         opBtn(dr, "🔥 Redraw the danger", "", function(){ openSkinStudio(g, "dangerD"); }, "wide");
       }
       var hb = opSection("Body");
-      opBtn(hb, g.ghost ? "👻 No collision — nothing touches it" : "🧱 Solid — the drawn hitbox", g.ghost ? "Click to make it solid" : "Click to make it decoration that nothing touches",
-        function(){ pushUndo("changing a " + GADGET_LABEL[g.kind].toLowerCase()); g.ghost = !g.ghost; if (g.obj) refreshObjectPhysics(g.obj); renderSelBar(); sfx("tick"); }, "wide" + (g.ghost ? " on" : ""));
+      if (!drawingHasArt(g.hitbox)){
+        opBtn(hb, "👻 No hitbox yet — nothing touches it", "Draw a hitbox to make it solid", function(){ openSkinStudio(g, "hitbox"); }, "wide on");
+      } else {
+        opBtn(hb, g.ghost ? "👻 No collision — nothing touches it" : "🧱 Solid — the drawn hitbox", g.ghost ? "Click to make it solid" : "Click to make it decoration that nothing touches",
+          function(){ pushUndo("changing a " + GADGET_LABEL[g.kind].toLowerCase()); g.ghost = !g.ghost; g.ghostAuto = false; if (g.obj) refreshObjectPhysics(g.obj); renderSelBar(); sfx("tick"); }, "wide" + (g.ghost ? " on" : ""));
+      }
       if (g.kind === "anim" && g.obj){
         var ho = g.obj, hMatGrab = ho.pieces.some(function(pc){ var m = matOf(pc.m); return m && m.grabbable; });
         var hGrab = ho.grabbable === true || (ho.grabbable !== false && hMatGrab);
@@ -12746,7 +12787,7 @@
                weak: g.weak ? pgPack(g.weak) : null, danger: g.danger ? pgPack(g.danger) : null,
                skin: g.skin ? packSkin(g.skin) : null, actionMode: g.actionMode, ghost: g.ghost,
                hitbox: g.hitbox && g.hitbox.length ? g.hitbox : null, weakD: g.weakD && g.weakD.length ? g.weakD : null, dangerD: g.dangerD && g.dangerD.length ? g.dangerD : null,
-               art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
+               art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h, a:g.art.a || 0 } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
                rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin };
     });
     var linkSnaps = links.map(function(l){

@@ -27,7 +27,8 @@ HOOK = """
         return { id:o.id, layer:o.layer, pieces:o.pieces.map(function(p){ return p.m+':'+pgVertexCount(p.poly)+'v/'+p.poly.length+'i'; }),
                  rings:o.pieces.map(function(p){ return p.poly.map(function(pl){ return pl.length; }); }),
                  parts:o.parts.length, corners:objCorners(o), static:o.body.isStatic, area:Math.round(objArea(o)),
-                 pos:{x:Math.round(o.body.position.x),y:Math.round(o.body.position.y)} };
+                 pos:{x:Math.round(o.body.position.x),y:Math.round(o.body.position.y)}, angle:+o.body.angle.toFixed(3),
+                 bounds:{x:Math.round(o.body.bounds.min.x),y:Math.round(o.body.bounds.min.y),x2:Math.round(o.body.bounds.max.x),y2:Math.round(o.body.bounds.max.y)}, sensor:!!o.body.isSensor };
       });
     },
     regionAt: regionAt, objectAt: objectAt,
