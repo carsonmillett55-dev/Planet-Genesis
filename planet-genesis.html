@@ -837,6 +837,9 @@
   .modebar button.active{ background:var(--yellow); color:var(--ink); }
 
   .filebar{ display:flex; align-items:center; gap:.4rem; }
+  #myWorldBtn{ font-family:'Patrick Hand',cursive; font-size:.95rem; background:rgba(43,27,18,.55); color:var(--stitch); border:2px solid var(--stitch); border-radius:999px; padding:.25rem .7rem; cursor:pointer; white-space:nowrap; }
+  #myWorldBtn:hover{ background:var(--desk-dark); }
+  #myWorldBtn.active{ background:var(--yellow); color:var(--ink); border-color:var(--yellow-dark); }
   #levelNameInput, #nameInput{
     font-family:'Patrick Hand',cursive;
     font-size:1rem;
@@ -1250,6 +1253,7 @@
     background:var(--stitch); border-radius:10px; padding:.4rem .6rem;
   }
   .musicGrid{ display:block; border:2px solid var(--ink); border-radius:8px; cursor:crosshair; touch-action:none; background:#F6ECD9; }
+  #objPanel input.opText{ width:100%; box-sizing:border-box; font-family:'Patrick Hand',cursive; font-size:1rem; padding:.3rem .45rem; border:2px solid var(--ink); border-radius:8px; background:#FFFDF6; color:var(--ink); }
   #objPanel textarea.opText{ width:100%; box-sizing:border-box; font-family:'Patrick Hand',cursive; font-size:1rem; padding:.3rem .45rem; border:2px solid var(--ink); border-radius:8px; background:#FFFDF6; color:var(--ink); resize:vertical; }
   .levelRow .lthumb{ flex:none; width:5.2rem; height:2.9rem; border-radius:6px; border:2px solid var(--ink); background:var(--desk-dark) center/cover no-repeat; }
   .levelRow .lthumb.none{ background:var(--desk-dark); opacity:.5; }
@@ -1330,6 +1334,7 @@
       <button id="modePlay">▶ Play</button>
     </div>
     <div class="filebar">
+      <button id="myWorldBtn" title="Go to My World — your own place, where your level doors live">🏠 My World</button>
       <input id="levelNameInput" maxlength="40" value="Untitled Level" />
     </div>
     <div id="cloudStatus">☁ checking…</div>
@@ -1723,6 +1728,7 @@
     "tool:objemitter": ["Object emitter", "Fires copies of something you saved — pick which in its box — at a rate, up to a limit. Wire a switch to it to fire on demand. To save something, right-click it: Save as object."],
     "tool:gun":        ["Launcher", "A pickup: walk into it in Play and the cursor becomes a gun. Click to fire. Its box picks what it shoots — a bullet, a ray, a projectile you drew, or something you saved."],
     "tool:fan":        ["Fan", "Blows upward and lifts the player. Its size and strength are in its box, and a wire switches it on and off."],
+    "tool:door":       ["Level door", "A way into another level. Put it down, pick which level it leads to in its box — or make a new one for it — and in Play, walk up and press F to go in. Finishing that level brings you back here. Put doors in My World to keep everything you make in one place."],
     "tool:rocket":     ["Rocket", "Stick it to something loose and it pushes that thing the way it points — a car, a lift, a flying machine. Strength and direction are in its box; wire a switch to it to fire it on demand. Off the middle of a thing, it spins it."],
     "tool:spot":       ["Spotlight", "Put it on something and it shines a cone of light the way it points — turn the thing to aim it, or set the direction, width and reach in its box. Wire a switch to it to turn it on and off. Best with World Light turned down."],
     "tool:speech":     ["Speech bubble", "Put it on something and type what it says. It speaks while the player is within reach — or, wired, while the signal is on. A sign, a talking creature, a hint."],
@@ -3151,7 +3157,7 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter","gun","projsensor","speech","destroyer","sound","gate","spot","rocket"];
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter","gun","projsensor","speech","destroyer","sound","gate","spot","rocket","door"];
   // LBP's tag colours, and the names the box shows for them
   var TAG_COLORS = ["#E4574B","#E8891D","#F2B705","#5F9E5A","#2A7B8C","#8E5BB5","#E85A9E","#F6ECD9"];
   var TAG_NAMES = ["red","orange","yellow","green","blue","purple","pink","white"];
@@ -3365,8 +3371,8 @@
     if (matOf(currentTool) && matOf(currentTool).isMask){ currentTool = "move"; canvas.dataset.tool = "move"; }
     renderSelBar();
   }
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter", gun:"Launcher", projsensor:"Projectile sensor", speech:"Speech bubble", destroyer:"Destroyer", sound:"Sound", gate:"Gate", spot:"Spotlight", rocket:"Rocket" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter", gun:"gun", projsensor:"projsensor", speech:"speech", destroyer:"destroyer", sound:"sound", gate:"gate", spot:"spot", rocket:"rocket" };
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter", gun:"Launcher", projsensor:"Projectile sensor", speech:"Speech bubble", destroyer:"Destroyer", sound:"Sound", gate:"Gate", spot:"Spotlight", rocket:"Rocket", door:"Level door" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter", gun:"gun", projsensor:"projsensor", speech:"speech", destroyer:"destroyer", sound:"sound", gate:"gate", spot:"spot", rocket:"rocket", door:"door" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   // the sticker in hand: a saved drawing to place copies of; the size and turn it goes on at
   var stickerPick = null, stickerSize = parseFloat(localStorage.getItem("pg_sticker_size") || "120") || 120, stickerRot = 0;
@@ -3383,7 +3389,7 @@
   /* A camera is the one gadget that does not need a host: put it in empty
      air and it stays there, on the layer it was placed. Everything else
      sits on an object. */
-  function gadgetNeedsHost(kind){ return kind !== "camera" && kind !== "anim" && kind !== "creature" && kind !== "gun"; }   // a sticker sticks to material; a launcher floats where it is put
+  function gadgetNeedsHost(kind){ return kind !== "camera" && kind !== "anim" && kind !== "creature" && kind !== "gun" && kind !== "door"; }   // a sticker sticks to material; a launcher floats where it is put
   function addGadget(kind, obj, pt, extra){
     if (GADGET_KINDS.indexOf(kind) < 0) return null;
     if (!obj || !obj.body){ if (gadgetNeedsHost(kind)) return null; obj = null; }
@@ -3565,6 +3571,17 @@
       g.target = extra.target != null ? Math.max(1, Math.min(9999, +extra.target | 0)) : 3;
       g.count = 0; g.wasOn = false; g.inputReset = null; g.wasReset = false;
       g.visible = extra.visible != null ? !!extra.visible : false;
+    }
+    if (kind === "door"){
+      /* A level door, the roadmap's: put it in your world (or any level),
+         point it at a level, and in Play the interact key at the door
+         takes you into that level; finishing it, or leaving from the
+         pause menu, brings you back to the door. `target` is `{ local: id }`
+         or `{ cloud: id }`; `targetName` what the door says. */
+      g.target = extra.target && typeof extra.target === "object" && (typeof extra.target.local === "string" || typeof extra.target.cloud === "string") ? { local: extra.target.local, cloud: extra.target.cloud } : null;
+      g.targetName = typeof extra.targetName === "string" ? extra.targetName.slice(0, 40) : "";
+      g.label = typeof extra.label === "string" ? extra.label.slice(0, 40) : "";
+      g.visible = true;
     }
     if (kind === "rocket"){
       /* LBP's rocket: stuck to a thing, it pushes the thing — `angle`
@@ -3794,7 +3811,7 @@
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
   function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter" || t.kind === "speech" || t.kind === "destroyer" || t.kind === "sound" || t.kind === "gate" || t.kind === "spot" || t.kind === "rocket"); }
   function hasResetPort(t){ return !!t && (t.kind === "timer" || t.kind === "counter"); }
-  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun" && g.kind !== "speech" && g.kind !== "destroyer" && g.kind !== "sound" && g.kind !== "spot" && g.kind !== "rocket"; }
+  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun" && g.kind !== "speech" && g.kind !== "destroyer" && g.kind !== "sound" && g.kind !== "spot" && g.kind !== "rocket" && g.kind !== "door"; }
   function addWire(from, to, port){
     if (!from || !to || from === to) return false;
     port = port === "reset" && hasResetPort(to) ? "reset" : "in";
@@ -3825,11 +3842,15 @@
     if (!player) return null;
     var best = null, bestD = 80;
     gadgets.forEach(function(g){
-      if (g.kind !== "lever") return;
+      if (g.kind !== "lever" && !(g.kind === "door" && g.target && mode === "play")) return;
       var d = dist(gadgetWorld(g), player.position);
       if (d < bestD){ bestD = d; best = g; }
     });
     return best;
+  }
+  function doorNearPlayer(){
+    var g = leverNearPlayer();
+    return g && g.kind === "door" ? g : null;
   }
   function useLever(){
     // Works whenever the world is running — Play, or Build unpaused.
@@ -6646,7 +6667,101 @@
     sfx("complete");
     if (player) puff(player.position.x, player.position.y, 30,
       { color:"#F2B705", speed:4, g:0.08, r:3, shape:"spark", life:40 });
-    setTimeout(function(){ respawnPlayer(); }, 900);
+    if (doorVisit) setTimeout(function(){ if (doorVisit) leaveDoor("Back through the door."); }, 1400);
+    else setTimeout(function(){ respawnPlayer(); }, 900);
+  }
+  /* ---- Through a door and back. `doorVisit` is the level you came from,
+     kept whole — its file, its ids, where its door stands — while you are
+     in the one the door leads to. Entering: Build first (Play's snapshot
+     puts the world back), the file of what you are leaving, then the
+     target loaded and Play. Leaving — the goal reached, or the pause
+     menu's Leave — is the same the other way, with you put down at the
+     door. No autosave while visiting: what is running is not what is
+     being built. ---- */
+  var doorVisit = null;
+  function levelRecordById(target, done){
+    if (!target){ done(null); return; }
+    if (target.local){
+      var rec = localLevels().filter(function(l){ return l.id === target.local; })[0];
+      done(rec ? rec.data : null); return;
+    }
+    if (target.cloud){
+      dbPromise.then(function(db){
+        if (!db){ done(null); return; }
+        db.collection("levels").doc(target.cloud).get().then(function(snap){
+          var d = snap && snap.exists ? snap.data() : null;
+          var parsed = null; try { parsed = d && d.payload ? JSON.parse(d.payload) : null; } catch (e){ parsed = null; }
+          done(parsed);
+        }).catch(function(){ done(null); });
+      });
+      return;
+    }
+    done(null);
+  }
+  function enterDoor(g){
+    if (!g || !g.target || doorEntering) return;
+    doorEntering = true;
+    var at = gadgetWorld(g), from = { x: at.x, y: at.y };
+    levelRecordById(g.target, function(data){
+      doorEntering = false;
+      if (!data){ showToast("That door leads nowhere now — the level is gone."); sfx("deny"); return; }
+      var wasPlay = mode === "play";
+      if (wasPlay) setMode("build");
+      var fromData = serializeLevel(document.getElementById("levelNameInput").value || "Untitled Level");
+      var stack = doorVisit ? doorVisit : null;   // a door inside a visited level: back is one step
+      doorVisit = { from: fromData, ids: { cloud: cloudLevelId, local: localLevelId }, at: from, name: fromData.name, outer: stack };
+      loadLevelData(data);
+      setLevelIds(g.target.cloud || null, g.target.local || null);
+      document.getElementById("levelNameInput").value = data.name || "Untitled Level";
+      buildFrozen = snapshotFull();
+      setMode("play");
+      showToast("Through the door: " + (data.name || "a level") + ". Finish it, or leave from the pause menu, to come back.");
+      sfx("mode");
+    });
+  }
+  var doorEntering = false;
+  function leaveDoor(msg){
+    if (!doorVisit) return;
+    var v = doorVisit; doorVisit = v.outer || null;
+    if (mode === "play") setMode("build");
+    loadLevelData(v.from);
+    setLevelIds(v.ids.cloud, v.ids.local);
+    document.getElementById("levelNameInput").value = v.from.name || "Untitled Level";
+    buildFrozen = snapshotFull();
+    playFrom = { x: v.at.x, y: v.at.y - 10 };
+    setMode("play");
+    showToast(msg || ("Back to " + (v.name || "where you were") + "."));
+    sfx("mode");
+  }
+  /* My World: the hub, a level of your own kept on this device
+     (`pg_myworld_id`), flagged `hub` in its file. No start and no finish
+     needed; it is walked around in, and doors in it lead to your levels. */
+  var levelIsHub = false;
+  function openMyWorld(){
+    if (doorVisit){ leaveDoor(); }
+    var id = localStorage.getItem("pg_myworld_id"), rec = id ? localLevels().filter(function(l){ return l.id === id; })[0] : null;
+    if (mode === "play") setMode("build");
+    if (rec && rec.data){
+      loadLevelData(rec.data);
+      setLevelIds(null, rec.id);
+      document.getElementById("levelNameInput").value = rec.data.name || "My World";
+    } else {
+      starterLevel();
+      levelIsHub = true;
+      document.getElementById("levelNameInput").value = "My World";
+      setLevelIds(null, null);
+      var data = serializeLevel("My World");
+      if (saveLocalLevel(data)){ localStorage.setItem("pg_myworld_id", localLevelId); showToast("Welcome to My World — build it as you like, and put level doors in it."); }
+      else showToast("My World could not be saved on this device — it is out of room.");
+    }
+    buildFrozen = snapshotFull();
+    setMode("play");
+    updateHubButton();
+  }
+  function updateHubButton(){
+    var b = document.getElementById("myWorldBtn"); if (!b) return;
+    b.classList.toggle("active", !!levelIsHub);
+    b.title = levelIsHub ? "You are in My World" : "Go to My World — your own place, where your level doors live";
   }
 
   /* ============================================================
@@ -6738,7 +6853,7 @@
       e.preventDefault();
       if (!e.repeat) handleJumpOrFlyToggle();
     }
-    if (isAction("interact", e.code) && !e.repeat && runner.enabled){ if (useLever()) e.preventDefault(); }
+    if (isAction("interact", e.code) && !e.repeat && runner.enabled){ var dn = doorNearPlayer(); if (dn){ e.preventDefault(); enterDoor(dn); } else if (useLever()) e.preventDefault(); }
     if (isAction("grab", e.code)){ e.preventDefault(); setGrabHeld(true); }
     if (isAction("sprint", e.code)){ input.sprint = true; }
     if (isAction("pauseMenu", e.code) && !e.repeat){
@@ -7169,7 +7284,7 @@
                emit: g.emit ? packEmit(g.emit) : undefined, freq: g.freq, life: g.life, maxAlive: g.maxAlive, maxTotal: g.maxTotal, pulse: g.pulse,
                ammo: g.ammoDef ? packProjDef(g.ammoDef) : undefined, ammo_n: g.ammo,
                text: g.text, once: g.once, explode: g.explode, blast: g.blast, sound: g.sound, pitch: g.pitch, volume: g.volume, every: g.every,
-               cone: g.cone, bright: g.bright,
+               cone: g.cone, bright: g.bright, target: g.target ? { local: g.target.local, cloud: g.target.cloud } : undefined, targetName: g.targetName,
                fireKind: g.fireKind, pgrav: g.pgrav, plife: g.plife, pbreaks: g.pbreaks, phurts: g.phurts,
                hits: g.hits, only: g.only, useZone: g.useZone, useSpots: g.useSpots, destroy: g.destroy };
   }
@@ -8527,6 +8642,21 @@
       ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2); ctx.fillStyle = on ? sc : "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, 5, Math.PI * 0.75, Math.PI * 2.25); ctx.strokeStyle = "#F6ECD9"; ctx.lineWidth = 2; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI*2); ctx.fillStyle = sc; ctx.fill();
+    } else if (g.kind === "door"){
+      // a door with an arch, big enough to walk into, its knob lit when it leads somewhere
+      ctx.save(); ctx.translate(0, -30); ctx.scale(2.4, 2.4);
+      ctx.beginPath(); ctx.moveTo(-14, 22); ctx.lineTo(-14, -8); ctx.arc(0, -8, 14, Math.PI, 0); ctx.lineTo(14, 22); ctx.closePath();
+      ctx.fillStyle = g.target ? "#8E5BB5" : "#8B8374"; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-9, 22); ctx.lineTo(-9, -6); ctx.arc(0, -6, 9, Math.PI, 0); ctx.lineTo(9, 22); ctx.closePath();
+      ctx.fillStyle = g.target ? "#C89BD9" : "#A39B8C"; ctx.fill(); ctx.lineWidth = 0.8; ctx.stroke();
+      ctx.beginPath(); ctx.arc(5, 8, 2, 0, Math.PI*2); ctx.fillStyle = g.target ? "#F2B705" : "#2B1B12"; ctx.fill();
+      ctx.restore();
+      var dl = g.label || g.targetName;
+      if (dl){
+        ctx.font = "bold 14px 'Patrick Hand', cursive"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+        ctx.lineWidth = 3; ctx.strokeStyle = "rgba(246,236,217,0.9)"; ctx.strokeText(dl, 0, -86); ctx.fillStyle = "#2B1B12"; ctx.fillText(dl, 0, -86);
+        ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      }
     } else if (g.kind === "rocket"){
       // a little rocket, its nose the way it pushes, lit while it fires
       ctx.save(); ctx.rotate((g.angle || 0) * Math.PI / 180);
@@ -8888,14 +9018,14 @@
     var g = leverNearPlayer();
     if (!g) return;
     var wp = gadgetWorld(g);
-    var key = keyLabel((keyBinds.interact && keyBinds.interact[0]) || "KeyF");
+    var key = keyLabel((keyBinds.interact && keyBinds.interact[0]) || "KeyF"), word = g.kind === "door" ? ("enter " + (g.targetName || "the level")) : "use";
     ctx.save();
-    ctx.translate(wp.x, wp.y - 38/camScale);
+    ctx.translate(wp.x, wp.y - (g.kind === "door" ? 104 : 38)/camScale);
     ctx.scale(1/camScale, 1/camScale);
     var bob = Math.sin(performance.now()/260) * 2;
     ctx.translate(0, bob);
     ctx.font = "bold 11px 'Baloo 2', sans-serif";
-    var w = ctx.measureText(key).width + 12, tw = ctx.measureText("use").width;
+    var w = ctx.measureText(key).width + 12, tw = ctx.measureText(word).width;
     var total = w + 6 + tw;
     ctx.globalAlpha = 0.95;
     // key cap
@@ -8906,7 +9036,7 @@
     // the word
     ctx.font = "11px 'Patrick Hand', cursive";
     ctx.fillStyle = "#F6ECD9"; ctx.strokeStyle = "rgba(43,27,18,0.75)"; ctx.lineWidth = 3; ctx.lineJoin = "round";
-    ctx.strokeText("use", total/2 - tw/2, 0); ctx.fillText("use", total/2 - tw/2, 0);
+    ctx.strokeText(word, total/2 - tw/2, 0); ctx.fillText(word, total/2 - tw/2, 0);
     ctx.restore();
   }
   /* Speech bubbles: every speech gadget that is showing says its line
@@ -10796,7 +10926,7 @@
                   note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
     logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["impact","💥","Impact sensor"],["projsensor","🎯","Projectile sensor"],["tag","🏷","Tag"],["tagsensor","📡","Tag sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["timer","⏱","Timer"],["counter","🔢","Counter"],["gate","🔀","Gate"],["changer","🌗","World changer"]],
                   note:"Put them on something. Right-click one and Connect it to a motor, a piston, a camera, a mover or a world changer — it drives that while it is on." },
-    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["rocket","🚀","Rocket"],["spot","🔦","Spotlight"],["speech","💬","Speech bubble"],["destroyer","💣","Destroyer"],["sound","🔊","Sound"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
+    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["rocket","🚀","Rocket"],["spot","🔦","Spotlight"],["door","🚪","Level door"],["speech","💬","Speech bubble"],["destroyer","💣","Destroyer"],["sound","🔊","Sound"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
                   note:"A camera shows its shot while the player is in its zone. A mover carries an object along a line. A creature eye makes an object chase the player." }
   };
   function renderToolsTab(el, pageId){
@@ -14274,6 +14404,42 @@
       cnote.style.flexBasis = "100%"; opSection(null).appendChild(cnote);
       opBtn(opSection(null), "↺ Back to nought now", "", function(){ g.count = 0; renderSelBar(); sfx("tick"); }, "wide");
     }
+    if (g.kind === "door"){
+      var dsec = opSection("Leads to");
+      var dn0 = document.createElement("div"); dn0.className = "noteText"; dn0.style.flexBasis = "100%";
+      dn0.textContent = g.target ? ("This door leads to '" + (g.targetName || "a level") + "'. In Play, walk up and press " + keyLabel((keyBinds.interact && keyBinds.interact[0]) || "KeyF") + " to go in.") : "Nowhere yet — pick a level below, or make a new one for it.";
+      dsec.appendChild(dn0);
+      opBtn(dsec, "✨ Make a new level for this door", "A fresh level of its own, saved on this device", function(){
+        askName("Name the new level", "New level", function(name){
+          if (!name) return;
+          pushUndo("making a level for a door");
+          var here = serializeLevel(document.getElementById("levelNameInput").value || "Untitled Level"), hereIds = { cloud: cloudLevelId, local: localLevelId }, hereHub = levelIsHub;
+          starterLevel(); levelIsHub = false;
+          setLevelIds(null, null);
+          var fresh = serializeLevel(name);
+          var okSave = saveLocalLevel(fresh), newId = localLevelId;
+          loadLevelData(here); setLevelIds(hereIds.cloud, hereIds.local); levelIsHub = hereHub; updateHubButton();
+          var gd = gadgets.filter(function(q){ return q.kind === "door"; })[0];   // the door as it is after the reload: its id changed, its spot did not
+          gadgets.forEach(function(q){ if (q.kind === "door" && Math.abs(q.pos.x - g.pos.x) < 1 && Math.abs(q.pos.y - g.pos.y) < 1) gd = q; });
+          if (okSave && gd){ gd.target = { local: newId }; gd.targetName = name; selectGadget(gd); opWanted = true; renderSelBar(); showToast("'" + name + "' is behind this door now. Go in from Play to build it — or open it from Load."); }
+          else showToast("No room on this device for a new level.");
+          buildFrozen = snapshotFull();
+        });
+      }, "wide");
+      var locals = localLevels().filter(function(l){ return l.id !== localLevelId; });
+      locals.forEach(function(l){
+        var nm = (l.data && l.data.name) || "Untitled";
+        opBtn(dsec, "💾 " + nm, "Lead to this level", function(){ pushUndo("pointing a door"); g.target = { local: l.id }; g.targetName = nm; renderSelBar(); sfx("tick"); }, "wide" + (g.target && g.target.local === l.id ? " on" : ""));
+      });
+      if (!locals.length){ var dn1 = document.createElement("div"); dn1.className = "noteText"; dn1.textContent = "No other levels on this device yet."; dn1.style.flexBasis = "100%"; dsec.appendChild(dn1); }
+      if (g.target) opBtn(dsec, "✕ Leads nowhere", "", function(){ pushUndo("pointing a door"); g.target = null; g.targetName = ""; renderSelBar(); sfx("tick"); }, "wide");
+      var dl = opSection("Sign");
+      var dInp = document.createElement("input"); dInp.type = "text"; dInp.className = "opText"; dInp.maxLength = 40; dInp.value = g.label || ""; dInp.placeholder = g.targetName || "What the door says";
+      var dPushed = false;
+      dInp.addEventListener("input", function(){ if (!dPushed){ pushUndo("naming a door"); dPushed = true; } g.label = dInp.value.slice(0, 40); });
+      dInp.addEventListener("keydown", function(e){ e.stopPropagation(); });
+      dl.appendChild(dInp);
+    }
     if (g.kind === "rocket"){
       var rk = opSection("Push");
       slider(rk, "Pushes", g.angle, -180, 180, 5, function(v){ g.angle = v; }, function(v){ return v === 0 ? "up" : (Math.abs(v) === 180 ? "down" : (v === 90 ? "right" : (v === -90 ? "left" : Math.round(v) + "°"))); }, "changing a rocket");
@@ -15898,6 +16064,7 @@
     } else {
       menuBtn("🔨 Back to Build", "ghost", function(){ closePauseMenu(); setMode("build"); });
     }
+    if (doorVisit) menuBtn("🚪 Leave this level — back to " + (doorVisit.name || "the door"), "ghost", function(){ closePauseMenu(); leaveDoor(); });
     menuBtn("💾 Save level", "ghost", function(){ doSave(); });
     menuBtn("📂 Load level", "ghost", function(){ closePauseMenu(); openLoad(); });
     if (mode === "build") menuBtn("✨ New level", "ghost", function(){ closePauseMenu(); doNew(); });
@@ -16109,6 +16276,7 @@
   }
   modeBuildBtn.addEventListener("click", function(){ setMode("build"); });
   modePlayBtn.addEventListener("click", function(){ setMode("play"); });
+  document.getElementById("myWorldBtn").addEventListener("click", function(){ if (levelIsHub && !doorVisit){ if (mode !== "play") setMode("play"); return; } openMyWorld(); });
   document.getElementById("playHereBtn").addEventListener("click", function(){ playFromHere(); });
 
   /* ============================================================
@@ -16265,7 +16433,8 @@
       water: packWaterSparse(), waterCell: WATER_CELL, worldW: WORLD_W, worldH: WORLD_H,
       world: packWorldSettings(),
       materials: usedCustomMats(),
-      thumb: lastThumb || undefined
+      thumb: lastThumb || undefined,
+      hub: levelIsHub || undefined
     };
   }
   /* A level built on a smaller map is placed at the bottom-left of this
@@ -16295,6 +16464,8 @@
   }
   function loadLevelData(data){
     lastThumb = (data && typeof data.thumb === "string" && data.thumb.slice(0, 11) === "data:image/") ? data.thumb : null;
+    levelIsHub = !!(data && data.hub);
+    updateHubButton();
     clearAllObjects();
     if (!data || typeof data !== "object") data = {};
     var version = +data.version || 0;
@@ -16524,6 +16695,7 @@
   function doNew(){
     askConfirm("Start a brand new level? Unsaved changes will be lost.", function(){
       starterLevel();
+      levelIsHub = false; updateHubButton();
       document.getElementById("levelNameInput").value = "Untitled Level";
       /* A new level is not the old one — drop the ids or the first save
          would overwrite whatever was last open. */
@@ -16638,7 +16810,7 @@
      always writes: that is you, on purpose. */
   var AUTOSAVE_MS = 15000, AUTOSAVE_OTHER_MS = 90000, autosaveSeen = 0, autosaveStoodBack = false, autosaveNoRoom = false;
   function autosaveNow(){
-    if (mode !== "build" || !objects.length) return false;
+    if (mode !== "build" || !objects.length || doorVisit) return false;
     var other = null;
     try { other = JSON.parse(localStorage.getItem("pg_autosave") || "null"); } catch(e){ other = null; }
     var otherAt = other && +other.updatedAt || 0;

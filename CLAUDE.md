@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1148 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1170 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1148 checks + checkgeom, in order
+npm test                   # all 1170 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -73,7 +73,7 @@ node tlogic.js             # 43 — tags and tag sensors, impact sensors, timers
 node tproj.js              # 42 — the launcher (bullets, shots that run out, a ray, a saved object), a drawn projectile that hurts a creature, an emitter firing bullets, the save tabs; how it flies is the firer's, the Impact drawing, an emitter firing rays, the projectile sensor's every-Nth-hit, named projectile, box, painted spots and destroy; the missile's hole, scorch and launcher
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
-node tui.js                # 97 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider
+node tui.js                # 119 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider; My World and level doors
 node tgame.js              # 85 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -2307,6 +2307,42 @@ rubs out; bars, Clear this track, Tempo, Volume, "Plays in the level",
 "Throw the tune away". A level with no tune shows one button, "Write a
 tune". Not done: a music gadget (LBP2's sequencer as a thing on the
 level), saving tunes to the device, more voices.
+
+## My World and level doors
+
+The roadmap's shell, first cut, opt-in — the game still boots into the
+last level as it did. **My World** is a level of your own on this
+device: `pg_myworld_id` names its local record, its file carries `hub:
+true` (`levelIsHub`, set by `loadLevelData`, written by
+`serializeLevel`, cleared by `doNew`). The header's **🏠 My World**
+button (`openMyWorld`) loads it — making a starter one, named and saved
+locally, the first time — and enters Play, since it is walked around
+in; Build is a click away and edits it like any level. The button lights
+while the hub is open.
+
+**A level door** (`kind:"door"`, Gameplay, host-less like the launcher):
+`target` `{ local: id }` or `{ cloud: id }`, `targetName`, `label` (the
+sign over the arch; the target's name when blank). Its box lists the
+device's other levels to lead to, **✨ Make a new level for this door**
+— which saves a fresh starter level locally and points the door at it,
+round-tripping the current level through `serializeLevel`/`loadLevelData`
+and finding the door again by its spot, since the reload renumbers
+gadgets — and "Leads nowhere". Drawn 2.4× the size of a gadget glyph so
+it can be walked into.
+
+**Through and back** (`enterDoor` / `leaveDoor`, `doorVisit`): in Play,
+a door with a target is what the interact key finds (`leverNearPlayer`
+counts it; the prompt reads "enter <name>"). Entering: `levelRecordById`
+fetches the target (a local record, or the cloud document's payload),
+then Build first (Play's snapshot puts the world back), the current
+level's file, ids, name and the door's spot kept in `doorVisit` (an
+`outer` chain for a door inside a visited level), the target loaded,
+its ids made current (so a save goes there), Play. Leaving — the goal
+reached (`levelComplete`, after 1.4s) or the pause menu's "Leave this
+level" — is the same the other way, `playFrom` set to the door so Play
+starts there. `autosaveNow` does nothing while visiting: what is
+running is not what is being built. A target that is gone says so and
+stays put.
 
 ## Tips
 

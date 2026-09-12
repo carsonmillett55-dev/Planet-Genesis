@@ -400,18 +400,26 @@ Tabs:
 A **Loot Boxes** tab was in the original list and is parked; see "Parked" at
 the end. Leave room for it in the menu layout rather than designing it out.
 
-### My World
+### My World — first cut DONE 2026-09-12
 
-A persistent, customisable hub where all your level creation lives.
+A persistent, customisable hub where all your level creation lives. Built
+opt-in: the 🏠 My World button in the header opens it (makes it the first
+time), a level of your own on the device, flagged as the hub, entered in
+Play; Build edits it like any level. No main-menu screen yet — the game
+still boots into the last level.
 
 - Like a level, but **no start and no finish.**
 - You walk around in it.
 - Customisable through a **paintbrush-style customiser**, the same way
   characters and levels are.
 
-### Level doors
+### Level doors — first cut DONE 2026-09-12
 
-In the inventory's **Tools tab**, a **"level door"**.
+In the inventory's **Tools tab**, a **"level door"**. Built: the Level door
+tool on the Gameplay page; its box picks a level on the device or makes a
+new one for it; in Play, F at the door goes in, finishing the level or the
+pause menu's Leave comes back to the door. Still to do: the level options
+asked before entering, the door's own look, cloud levels in the picker.
 
 - Place it in My World, then right-click for options including **"create
   level"**.

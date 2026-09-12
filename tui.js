@@ -31,6 +31,11 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   };
   const build = async () => { await p.evaluate(() => { window.__pg.setMode('build'); window.__pg.paused(true); }); await camHome(); await p.waitForTimeout(300); };
   const mode = () => p.evaluate(() => window.__pg.mode());
+  const play = async () => { await p.evaluate(() => { window.__pg.paused(false); window.__pg.setMode('play'); }); await p.waitForTimeout(400); };
+  const standAt = async (x, y) => { await p.evaluate(([x,y]) => window.__pg.playerTo(x,y), [x,y]); await p.waitForTimeout(350); };
+  const gadgets = () => p.evaluate(() => window.__pg.gadgets());
+  const kinds = (k) => gadgets().then(gs => gs.filter(g => g.kind === k));
+  const place = async (k, x, y) => { await p.evaluate(kk => { window.__pg.setLayer(1); window.__pg.setTool(kk); }, k); await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [x,y]); return kinds(k).then(gs => gs[gs.length - 1]); };
 
   console.log('== Play from here: Play starts where you are working, the start marker is untouched ==');
   await fresh();
@@ -379,6 +384,73 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('the map\'s right button puts the character there', Math.abs(ppM.x - (frM.x + frM.w * 0.6)) < frM.w * 0.03 && Math.abs(ppM.y - (frM.y + frM.h * 0.3)) < frM.h * 0.06, { ppM, frM });
   const vM = await p.evaluate(() => window.__pg.view());
   ok('and the camera goes with them', Math.abs((vM.x + vM.w/2) - ppM.x) < vM.w * 0.5 && Math.abs((vM.y + vM.h/2) - ppM.y) < vM.h, { vM, ppM });
+
+  console.log('== My World and level doors: a door leads into a level and back; a new level from a door ==');
+  await fresh();
+  await p.evaluate(() => { localStorage.removeItem('pg_local_levels'); localStorage.removeItem('pg_myworld_id'); localStorage.removeItem('pg_level_id'); window.__pg.setLevelIds(null, null); });
+  // a level to lead to, saved on the device
+  await rect('wood', 1, X-300, Y+100, X+300, Y+140);
+  await rect('metal', 1, X+200, Y+40, X+260, Y+100);   // something to recognise it by
+  await p.evaluate(() => { document.getElementById('levelNameInput').value = 'The cave'; window.__pg.doSave(); }); await p.waitForTimeout(300);
+  const cave = (await p.evaluate(() => window.__pg.localLevels()))[0];
+  ok('a level is saved on the device', cave && cave.data.name === 'The cave', cave && cave.data.name);
+  // My World
+  const mw = await p.evaluate(() => window.__pg.myWorld()); await p.waitForTimeout(300);
+  ok('My World opens as a hub, in Play, with its own id on the device', mw.hub === true && mw.mode === 'play' && mw.id && (await p.evaluate(() => localStorage.getItem('pg_myworld_id'))) === mw.id, mw);
+  ok('and it is named', (await p.evaluate(() => window.__pg.levelName())) === 'My World');
+  ok('the header button shows it', await p.evaluate(() => document.getElementById('myWorldBtn').classList.contains('active')));
+  await build();
+  ok('My World has no metal in it — it is its own place', (await p.evaluate(() => window.__pg.objects().filter(o => o.pieces[0].m === 'metal').length)) === 0);
+  // a floor and a door in My World, pointed at the cave
+  await p.evaluate(() => window.__pg.setStick(true));
+  await rect('wood', 1, X-300, Y+100, X+300, Y+140);
+  await p.evaluate(() => window.__pg.setStick(false));
+  const door = await place('door', X, Y+60);
+  ok('a door stands on nothing, leading nowhere yet', !!door && door.obj === null && door.target === null, door && { obj: door.obj, target: door.target });
+  await p.evaluate(([id, cid]) => window.__pg.gadgetSet(id, { target: { local: cid }, targetName: 'The cave' }), [door.id, cave.id]);
+  await p.evaluate(() => { document.getElementById('levelNameInput').value = 'My World'; window.__pg.doSave(); }); await p.waitForTimeout(300);
+  const mwFile = (await p.evaluate(() => window.__pg.localLevels())).filter(l => l.data.hub)[0];
+  ok('My World is saved as a hub with its door', mwFile && mwFile.data.gadgets.filter(g => g.kind === 'door' && g.target && g.target.local === cave.id).length === 1);
+  await play();
+  await standAt(X, Y+60);
+  ok('in Play, standing at the door, the prompt is to enter', (await p.evaluate(() => window.__pg.interact())) === 'door');
+  await p.waitForTimeout(500);
+  ok('through the door: the cave is loaded, in Play', (await p.evaluate(() => window.__pg.levelName())) === 'The cave' && (await mode()) === 'play' && (await p.evaluate(() => window.__pg.objects().filter(o => o.pieces[0].m === 'metal').length)) === 1);
+  const visit = await p.evaluate(() => window.__pg.doorVisit());
+  ok('and it remembers where it came from', visit && visit.name === 'My World' && visit.ids.local === mw.id, visit);
+  ok('the ids now point at the cave, so a save goes there', (await p.evaluate(() => window.__pg.levelIds())).local === cave.id);
+  ok('no autosave while visiting', (await p.evaluate(() => window.__pg.autosave())) === false);
+  await p.evaluate(() => window.__pg.complete()); await p.waitForTimeout(1900);
+  ok('finishing the level brings you back to My World, in Play, at the door', (await p.evaluate(() => window.__pg.levelName())) === 'My World' && (await mode()) === 'play' && (await p.evaluate(() => window.__pg.doorVisit())) === null && Math.abs((await pos()).x - X) < 60, { name: await p.evaluate(() => window.__pg.levelName()), pos: await pos() });
+  ok('and the ids point at My World again', (await p.evaluate(() => window.__pg.levelIds())).local === mw.id);
+  // leaving from the pause menu
+  await standAt(X, Y+60); await p.evaluate(() => window.__pg.interact()); await p.waitForTimeout(400);
+  ok('in again', (await p.evaluate(() => window.__pg.levelName())) === 'The cave');
+  await p.evaluate(() => window.__pg.leaveDoor()); await p.waitForTimeout(300);
+  ok('Leave brings you back too', (await p.evaluate(() => window.__pg.levelName())) === 'My World' && (await p.evaluate(() => window.__pg.doorVisit())) === null);
+  await build();
+  // a door to a level that is gone
+  await p.evaluate(id => window.__pg.gadgetSet(id, { target: { local: 'local_nope' }, targetName: 'Gone' }), (await kinds('door'))[0].id);
+  await play(); await standAt(X, Y+60); await p.evaluate(() => window.__pg.interact()); await p.waitForTimeout(300);
+  ok('a door to a level that is gone says so and stays put', (await p.evaluate(() => window.__pg.levelName())) === 'My World' && /gone/.test(await p.evaluate(() => document.getElementById('toast').textContent)));
+  await build();
+  // the My World button from another level
+  await p.evaluate(d => window.__pg.load(d), cave.data); await p.evaluate(([c, l]) => window.__pg.setLevelIds(c, l), [null, cave.id]);
+  ok('in the cave, the header button is plain', !(await p.evaluate(() => document.getElementById('myWorldBtn').classList.contains('active'))));
+  await p.evaluate(() => document.getElementById('myWorldBtn').click()); await p.waitForTimeout(300);
+  ok('the button takes you to My World', (await p.evaluate(() => window.__pg.levelName())) === 'My World' && (await p.evaluate(() => window.__pg.isHub())) && (await kinds('door')).length === 1);
+  await build();
+  // a new level made from the door's box
+  const nLocal = (await p.evaluate(() => window.__pg.localLevels())).length;
+  await p.evaluate(id => window.__pg.selectGadget(id), (await kinds('door'))[0].id); await p.waitForTimeout(100);
+  await p.evaluate(() => { Array.from(document.querySelectorAll('#objPanel button')).filter(b => /Make a new level/.test(b.textContent))[0].click(); }); await p.waitForTimeout(150);
+  await p.evaluate(() => { document.getElementById('nameInput').value = 'Door world'; document.getElementById('nameOk').click(); }); await p.waitForTimeout(400);
+  const locs = await p.evaluate(() => window.__pg.localLevels());
+  const made = locs.filter(l => l.data.name === 'Door world')[0];
+  ok('a new level is saved on the device for it', locs.length === nLocal + 1 && !!made, locs.map(l => l.data.name));
+  const d2 = (await kinds('door'))[0];
+  ok('the door now leads to it, and My World is still what is open', d2.target && d2.target.local === made.id && d2.targetName === 'Door world' && (await p.evaluate(() => window.__pg.levelName())) === 'My World' && (await p.evaluate(() => window.__pg.isHub())), d2 && d2.target);
+  ok('and My World still has its floor', (await p.evaluate(() => window.__pg.objects().length)) >= 2);
 
   ok('no page errors', errs.length === 0, errs);
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
