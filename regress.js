@@ -236,6 +236,20 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('and saving it stores a second level rather than overwriting the first', (await settleTo(2)) === 2, await storedCount());
 
   console.log('');
+  console.log('== two tabs: the autosave is not overwritten by a stale one ==');
+  await reset();
+  await p.evaluate(() => window.__pg.setMode('build'));
+  ok('a lone tab autosaves', await p.evaluate(() => window.__pg.autosave()));
+  const myStamp = await p.evaluate(() => JSON.parse(localStorage.getItem('pg_autosave')).updatedAt);
+  // another tab writes something newer, and is alive
+  await p.evaluate(t => { const d = JSON.parse(localStorage.getItem('pg_autosave')); d.updatedAt = t + 5000; d.name = 'the other tab'; localStorage.setItem('pg_autosave', JSON.stringify(d)); }, myStamp);
+  ok('while another tab is writing, this one stands back', (await p.evaluate(() => window.__pg.autosave())) === false);
+  ok('and leaves the other save alone', (await p.evaluate(() => JSON.parse(localStorage.getItem('pg_autosave')).name)) === 'the other tab');
+  // the other tab has gone quiet for a long time: this one takes over
+  await p.evaluate(() => { const d = JSON.parse(localStorage.getItem('pg_autosave')); d.updatedAt = Date.now() - 200000; localStorage.setItem('pg_autosave', JSON.stringify(d)); });
+  ok('once the other tab has been quiet for a while, this one saves again', (await p.evaluate(() => window.__pg.autosave())) === true && (await p.evaluate(() => JSON.parse(localStorage.getItem('pg_autosave')).name)) !== 'the other tab');
+
+  console.log('');
   console.log('== the map has edges ==');
   await reset();
   const W = await p.evaluate(() => window.__pg.worldSize());

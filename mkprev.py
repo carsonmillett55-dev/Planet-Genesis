@@ -20,7 +20,7 @@ HOOK = """
     freezeCam: function(){ camFollow = false; },
     zoomTo: function(z, x, y){ camFollow = false; camZoom = z; applyCamScale(); camX = x - viewRectW/camScale/2; camY = y - viewRectH/camScale/2; clampCamNow(); },
     setMode: setMode, mode: function(){ return mode; },
-    load: loadLevelData, serialize: serializeLevel,
+    load: loadLevelData, serialize: serializeLevel, autosave: autosaveNow,
     clear: function(){ clearAllObjects(); clearWater(); }, starter: starterLevel,
     stats: function(){
       return objects.map(function(o){

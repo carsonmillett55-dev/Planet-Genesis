@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` | Playwright suites, 718 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` | Playwright suites, 722 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,14 +42,14 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 718 checks + checkgeom, in order
+npm test                   # all 722 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
 Or one suite at a time:
 
 ```
-node regress.js            # 35 — geometry, save/load, play mode, loop and save safety, map edges
+node regress.js            # 39 — geometry, save/load, play mode, loop and save safety, two tabs and the autosave, map edges
 node tsel.js               # 38 — selection, marquee, group transforms, resize, detach, the number row
 node tlayer.js             # 12 — layer accuracy, ranked picking, the hover label
 node tmat.js               # 17 — materials, colours, glass, light
@@ -1540,6 +1540,19 @@ a copy — which is most of the original bug back.
 Anything that changes which level is open must set them: loading a row sets
 one and clears the other, `doNew()` clears both, and deleting the open level
 clears whichever matched. `regress.js` covers all four paths.
+
+**Two tabs, one autosave.** Every open tab of the game wrote `pg_autosave`
+every 15 seconds, so an older tab left open in the background kept
+writing its stale copy of the level over the one being worked on, and the
+next reload came up with whichever tab had written last — Carson's "did
+you revert way back to an old save?" (nothing had been reverted; a
+second tab had been opened for him after every batch). `autosaveNow`:
+`autosaveSeen` is the stamp of the last autosave this tab loaded at boot
+or wrote; a newer stamp in storage means another tab is writing, and
+while that tab is alive — its write within `AUTOSAVE_OTHER_MS` (90s,
+since a background tab's timer is throttled to once a minute) — this one
+stands back and says so, once; a tab quiet for longer is closed, and this
+one takes over and says that too. The Save button always writes.
 
 ## Known hazards
 

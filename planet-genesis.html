@@ -12961,6 +12961,7 @@
     var name = document.getElementById("levelNameInput").value.trim() || "Untitled Level";
     var data = serializeLevel(name);
     localStorage.setItem("pg_autosave", JSON.stringify(data));
+    autosaveSeen = data.updatedAt; autosaveStoodBack = false;
     sfx("save");
     dbPromise.then(function(db){
       if (db){
@@ -13079,11 +13080,37 @@
     return Math.floor(s/86400)+"d ago";
   }
 
-  setInterval(function(){
-    if (mode === "build" && objects.length){
-      localStorage.setItem("pg_autosave", JSON.stringify(serializeLevel(document.getElementById("levelNameInput").value || "Untitled Level")));
+  /* The autosave, and the one thing that can quietly lose work: two tabs.
+     Every open tab of the game wrote pg_autosave every 15 seconds, so a
+     second tab — an older one left open in the background, say — kept
+     writing its stale copy of the level over the one being worked on,
+     and the next reload came up with whichever tab had written last.
+     Carson: "did you revert way back to an old save?"
+
+     So a tab only autosaves while it holds the autosave: `autosaveSeen`
+     is the stamp of the last autosave this tab loaded or wrote, and a
+     newer stamp in storage means another tab is writing. While that
+     other tab is alive — its write within AUTOSAVE_OTHER_MS — this one
+     stands back and says so, once; a tab that has been quiet longer than
+     that is closed, and this one takes over. `doSave` (the Save button)
+     always writes: that is you, on purpose. */
+  var AUTOSAVE_MS = 15000, AUTOSAVE_OTHER_MS = 90000, autosaveSeen = 0, autosaveStoodBack = false;
+  function autosaveNow(){
+    if (mode !== "build" || !objects.length) return false;
+    var other = null;
+    try { other = JSON.parse(localStorage.getItem("pg_autosave") || "null"); } catch(e){ other = null; }
+    var otherAt = other && +other.updatedAt || 0;
+    if (otherAt > autosaveSeen && Date.now() - otherAt < AUTOSAVE_OTHER_MS){
+      if (!autosaveStoodBack){ autosaveStoodBack = true; showToast("This level is open in another tab, which is doing the saving — close one of them."); }
+      return false;
     }
-  }, 15000);
+    var data = serializeLevel(document.getElementById("levelNameInput").value || "Untitled Level");
+    localStorage.setItem("pg_autosave", JSON.stringify(data));
+    autosaveSeen = data.updatedAt;
+    if (autosaveStoodBack){ autosaveStoodBack = false; showToast("Autosaving here again."); }
+    return true;
+  }
+  setInterval(autosaveNow, AUTOSAVE_MS);
 
   (function restoreAutosave(){
     /* Pick the level identity back up before anything can save, so a reload
@@ -13099,6 +13126,7 @@
         if (data && ((data.objects && data.objects.length) || (data.blocks && data.blocks.length))){
           loadLevelData(data);
           document.getElementById("levelNameInput").value = data.name || "Untitled Level";
+          autosaveSeen = +data.updatedAt || 0;
         }
       }
     } catch(e){}
