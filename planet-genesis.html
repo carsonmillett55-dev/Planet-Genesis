@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Planet Genesis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Baloo+2:wght@500;600;700&display=swap">
@@ -1456,8 +1457,12 @@
     // else floats or sinks against.
     water:     { label:"Water",        color:"#4FA9D6", dark:"#2F86A6", friction:0.02,restitution:0,    density:0.009, grabbable:false, hazard:false, floatForce:0, tex:"wave", isFluid:true },
     // the bodies of drawn things — a creature's, a drawn object's — never in the catalogue; the drawing covers them
-    creature:  { label:"Creature",     color:"#8CD17D", dark:"#5F9E5A", friction:0.9, restitution:0.05, density:0.004, grabbable:false, hazard:false, floatForce:0 },
-    drawn:     { label:"Drawn object", color:"#C9C2B4", dark:"#8B8374", friction:0.8, restitution:0.05, density:0.006, grabbable:false, hazard:false, floatForce:0 },
+    // the bodies of drawn things — never in the catalogue. Not "creature" and
+    // "drawn": those are TOOL names too, and matOf(currentTool) finding a
+    // material for the Custom creature tool sent a click in a drag-out shape
+    // mode down the painting path — a green square instead of a creature
+    creaturebody: { label:"Creature",     color:"#8CD17D", dark:"#5F9E5A", friction:0.9, restitution:0.05, density:0.004, grabbable:false, hazard:false, floatForce:0 },
+    drawnbody:    { label:"Drawn object", color:"#C9C2B4", dark:"#8B8374", friction:0.8, restitution:0.05, density:0.006, grabbable:false, hazard:false, floatForce:0 },
     // pseudo-materials for painting a creature's areas — never in the catalogue, never a body
     maskweak:  { label:"Weak spot",    color:"#F6ECD9", dark:"#B3870A", friction:0, restitution:0, density:0.001, grabbable:false, hazard:false, floatForce:0, isMask:true },
     maskdanger:{ label:"Danger",       color:"#E4574B", dark:"#B3261E", friction:0, restitution:0, density:0.001, grabbable:false, hazard:false, floatForce:0, isMask:true }
@@ -5658,11 +5663,13 @@
     var pieces = [], i;
     for (i = 0; i < os.pieces.length && i < 64; i++){
       var pc = os.pieces[i];
-      if (!pc || !matOf(pc.m) || matOf(pc.m).isFluid) continue;
+      if (!pc) continue;
+      var pm = pc.m === "creature" ? "creaturebody" : (pc.m === "drawn" ? "drawnbody" : pc.m);   // the old names for a drawn thing's body
+      if (!matOf(pm) || matOf(pm).isFluid) continue;
       var poly = pgClean(pgUnpack(pc.g, Math.min(loadBudget, MAX_OBJ_CORNERS)), GEOM_TOL);
       if (!poly.length) continue;
       loadBudget -= pgVertexCount(poly);
-      pieces.push({ m: pc.m, poly: poly });
+      pieces.push({ m: pm, poly: poly });
       if (loadBudget <= 0) break;
     }
     if (!pieces.length) return null;
@@ -7452,7 +7459,7 @@
     return pmOpen || !pauseOverlay.hidden || !charEditorOverlay.hidden ||
            !confirmOverlay.hidden || !loadOverlay.hidden || !nameOverlay.hidden;
   }
-  function isMaterialTool(){ return !!matOf(currentTool); }
+  function isMaterialTool(){ return !!matOf(currentTool) && !GADGET_TOOL_KIND[currentTool]; }
   function drawCursorOverlay(){
     var showCustom = false;
     if (mouseOnCanvas && !anyOverlayOpen() && !camPan && !shapeDrag){
@@ -9061,8 +9068,8 @@
     // over a rotated body — "the hitbox was way lower, it fell through".
     var artCentreWorld = toWorldPoint(b, artCentreLocal);
     var worldPoly = pgTranslate(hit, artCentreWorld.x, artCentreWorld.y);
-    o.pieces = [{ m: o.pieces.length ? o.pieces[0].m : (g.kind === "creature" ? "creature" : "drawn"), poly: pgClean(worldPoly, GEOM_TOL) }];
-    if (!o.pieces[0].poly.length){ o.pieces = [{ m: g.kind === "creature" ? "creature" : "drawn", poly: pgTranslate([[[[-art.w/2, -art.h/2], [art.w/2, -art.h/2], [art.w/2, art.h/2], [-art.w/2, art.h/2]]]], artCentreWorld.x, artCentreWorld.y) }]; }
+    o.pieces = [{ m: o.pieces.length ? o.pieces[0].m : (g.kind === "creature" ? "creaturebody" : "drawnbody"), poly: pgClean(worldPoly, GEOM_TOL) }];
+    if (!o.pieces[0].poly.length){ o.pieces = [{ m: g.kind === "creature" ? "creaturebody" : "drawnbody", poly: pgTranslate([[[[-art.w/2, -art.h/2], [art.w/2, -art.h/2], [art.w/2, art.h/2], [-art.w/2, art.h/2]]]], artCentreWorld.x, artCentreWorld.y) }]; }
     Body.setAngle(b, 0); Body.setAngularVelocity(b, 0);
     rebuildFromPieces(o, { a: 0, x: 0, y: 0 });   // the art rect rides through this (maskW) to the new centre
     if (objects.indexOf(o) < 0) return;
@@ -10119,7 +10126,7 @@
       // layer, that the hitbox step will reshape — then the studio opens
       pushUndo("placing a " + GADGET_LABEL[kind].toLowerCase());
       var hs = DRAWN_DEFAULT_SIZE / 2;
-      var host0 = newObjectFromPoly(kind === "creature" ? "creature" : "drawn", [[[[pt.x - hs, pt.y - hs], [pt.x + hs, pt.y - hs], [pt.x + hs, pt.y + hs], [pt.x - hs, pt.y + hs]]]], buildLayer);
+      var host0 = newObjectFromPoly(kind === "creature" ? "creaturebody" : "drawnbody", [[[[pt.x - hs, pt.y - hs], [pt.x + hs, pt.y - hs], [pt.x + hs, pt.y + hs], [pt.x - hs, pt.y + hs]]]], buildLayer);
       if (!host0){ showToast("No room for it there."); sfx("deny"); return; }
       host0.forcedStatic = kind === "anim";
       var g0 = addGadget(kind, host0, { x: pt.x, y: pt.y });
@@ -12044,6 +12051,19 @@
         }
       }
       var gh = gadgetAt(pt.x, pt.y);
+      if (gh && (gh.kind === "creature" || gh.kind === "anim") && gh.art && gh.obj && objects.indexOf(gh.obj) >= 0){
+        // the marker IS the creature or object: dragging it moves the whole
+        // thing, as if you had taken hold of the drawing. It used to come
+        // off like any gadget and leave the body behind — Carson: "there
+        // will just be a square in my level"
+        selectGadget(gh); renderSelBar();
+        var dh = gh.obj;
+        dragging = { type:"object", objs:[dh], last:pt, start:{x:pt.x,y:pt.y} };
+        dragMoved = false;
+        dragOrigStatic = [dh.body.isStatic];
+        setBodyStatic(dh.body, true);
+        return;
+      }
       if (gh){ dragging = null; selectGadget(gh); renderSelBar(); beginAttachDrag("gadget", gh, pt); return; }
       var bh = boltAt(pt.x, pt.y);
       if (bh){ dragging = null; selectBolt(bh); renderSelBar(); beginAttachDrag("bolt", bh, pt); return; }

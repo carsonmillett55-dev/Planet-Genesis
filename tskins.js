@@ -240,6 +240,37 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(() => { window.__pg.paused(true); window.__pg.setFlying(true); });
 
   console.log('');
+  console.log('== the tool places a creature whatever paint shape is picked; the marker moves the whole thing ==');
+  await fresh();
+  await rect('wood', 1, X-380, Y+100, X+400, Y+140);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.setPaintMode('rect'); window.__pg.setLayer(1); window.__pg.setTool('creature'); });
+  const cs0 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+100, Y-40]);
+  await p.mouse.move(cs0.x, cs0.y); await p.mouse.down(); await p.mouse.move(cs0.x + 60, cs0.y + 40, { steps: 4 }); await p.mouse.up();
+  await p.waitForTimeout(250);
+  const mc = await kind('creature');
+  const objsNow = await stats();
+  ok('a press in the drag-out box mode still places a creature, not a green box of material', !!mc && objsNow.filter(o => o.pieces.some(pc => /^creature/.test(pc))).length === 1, { creature: !!mc, n: objsNow.length });
+  ok('and opens the studio for it', !(await p.evaluate(() => document.getElementById('charEditorOverlay').hidden)));
+  await st('setColor', '#C89BD9'); await stroke(0.2, 0.3, 0.8, 0.7);
+  await st('go', 'hitbox', 0); await stroke(0.3, 0.3, 0.7, 0.7);
+  await st('close'); await p.waitForTimeout(200);
+  await p.evaluate(() => { window.__pg.setPaintMode('brush'); window.__pg.setTool('move'); window.__pg.deselect(); });
+  const before = await p.evaluate(id => { const g = window.__pg.gadgets().find(g => g.id === id); const o = window.__pg.stats().find(o => o.id === g.obj); return { g: [g.x, g.y], body: o.pos, obj: g.obj }; }, mc.id);
+  const ms = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [before.g[0], before.g[1]]);
+  await p.mouse.move(ms.x, ms.y); await p.mouse.down(); await p.mouse.move(ms.x + 60, ms.y - 30, { steps: 6 }); await p.mouse.move(ms.x + 150, ms.y - 60, { steps: 6 }); await p.mouse.up();
+  await p.waitForTimeout(200);
+  const after = await p.evaluate(id => { const g = window.__pg.gadgets().find(g => g.id === id); const o = window.__pg.stats().find(o => o.id === g.obj); return { g: [g.x, g.y], body: o.pos, obj: g.obj }; }, mc.id);
+  ok('dragging the marker moves the creature, body and all', after.obj === before.obj && after.body.x > before.body.x + 100 && after.body.y < before.body.y - 30, { before, after });
+  ok('with the marker still on it', Math.abs(after.g[0] - after.body.x) < 2 && Math.abs(after.g[1] - after.body.y) < 2, after);
+  // a level saved before the body materials were renamed still loads whole
+  const svOld = await p.evaluate(() => window.__pg.serialize('old names'));
+  svOld.objects.forEach(o => o.pieces.forEach(pc => { if (pc.m === 'creaturebody') pc.m = 'creature'; if (pc.m === 'drawnbody') pc.m = 'drawn'; }));
+  await p.evaluate(d => window.__pg.load(d), svOld); await p.waitForTimeout(300);
+  const ld = await p.evaluate(() => ({ pieces: window.__pg.stats().map(o => o.pieces[0]), g: window.__pg.gadgets().find(g => g.kind === 'creature') }));
+  ok('a save with the old body names loads with its creature body and marker intact', ld.pieces.some(pc => /^creaturebody/.test(pc)) && ld.g && ld.g.obj, ld);
+
+  console.log('');
   console.log('== an empty hitbox means no collision; a creature on the Back layer ==');
   await fresh();
   await rect('wood', 1, X-380, Y+100, X+400, Y+140);

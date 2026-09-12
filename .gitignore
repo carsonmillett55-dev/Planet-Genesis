@@ -11,3 +11,6 @@ __pycache__/
 *.png
 *.gif
 nohup.out
+
+# the desktop app's preview-server config, personal to this machine
+.claude/

@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` | Playwright suites, 722 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` | Playwright suites, 727 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 722 checks + checkgeom, in order
+npm test                   # all 727 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -66,7 +66,7 @@ node tworld.js             # 22 — the Water sensor (touching, not a pool above
 node tcreature.js          # 32 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, painted weak spot and danger, colour, a Back-layer creature, save/load
 node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
 node tstudio.js            # 61 — the studio: strokes, undo/redo, the tools, frames, playback, no rig; the brush ring, filled shapes, nudge and flip, the Settings card's keys; the character's size and drawn hitbox
-node tskins.js             # 59 — the Custom creature and Custom object wizards (look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle, death and attack animations, facing, no-collision, particles with pictures and their opacity
+node tskins.js             # 64 — the Custom creature and Custom object wizards (look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -1011,7 +1011,7 @@ its own thing (a googly eye on any painted object); these two tools make
 their own object.
 
 **Placing** (`placeGadgetAt` for `creature` / `anim`): a box
-`DRAWN_DEFAULT_SIZE` (120px) square of the `creature` / `drawn`
+`DRAWN_DEFAULT_SIZE` (120px) square of the `creaturebody` / `drawnbody`
 material — two materials never in the catalogue — is made at the click on
 the build layer (any layer: on Back or Front it is decoration that floats
 after the player), the gadget goes on it with `art = {-60,-60,120,120}`,
@@ -1021,6 +1021,23 @@ stretched over `art` (`skinBox`), not over the body's bounds, so
 reshaping the hitbox never distorts the picture. It rides rebuilds (its
 world centre through `maskW`), resize and flip (`carryGadgets`: centre
 through the map, size by the scale; a flip also turns `drawnFacing`).
+
+**Those two materials must never share a name with a tool.** They were
+`creature` and `drawn`, and `creature` is also the tool's id: with a
+drag-out shape mode picked on the Materials page, `matOf(currentTool)`
+found a material for the Custom creature tool and the pointerdown went
+down the shape-painting path — a green square of creature material, no
+gadget, no studio. Carson: "it literally just drew a green square".
+Renamed, `unpackObject` maps the old names *before* the material check
+(after it, the piece was dropped and the level came up without its
+creatures), and `isMaterialTool()` refuses any gadget tool as well.
+
+**The marker cannot come off.** With the Move tool, pressing a creature's
+or object's marker starts an *object* drag of its host (`beginDrag`,
+before the general gadget case) — the marker is the thing, so dragging
+it moves the whole thing, body and picture. It used to lift off like any
+gadget and leave the body behind: "there will just be a square in my
+level".
 
 **The wizard** is the studio with steps: `SKIN_STEPS[kind]` are extra
 "states" flagged `mask:true` — `hitbox` (blue), `weakD` (gold), `dangerD`
