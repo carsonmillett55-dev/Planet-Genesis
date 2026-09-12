@@ -48,7 +48,11 @@ async function launch(){
   const newPage = b.newPage.bind(b);
   b.newPage = async function(opts){
     const p = await newPage(opts);
-    await p.addInitScript(() => { try { if (!localStorage.getItem('pg_char_scale') && !localStorage.getItem('pg_test_real_size')) localStorage.setItem('pg_char_scale', '1'); } catch(e){} });
+    await p.addInitScript(() => { try {
+      if (!localStorage.getItem('pg_char_scale') && !localStorage.getItem('pg_test_real_size')) localStorage.setItem('pg_char_scale', '1');
+      // and the map the suites' scenes were laid out on (the preview reads these; the game never does)
+      if (!localStorage.getItem('pg_test_real_world')){ localStorage.setItem('pg_test_world_w', '4800'); localStorage.setItem('pg_test_world_h', '2400'); }
+    } catch(e){} });
     return p;
   };
   return b;

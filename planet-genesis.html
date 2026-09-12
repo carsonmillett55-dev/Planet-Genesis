@@ -1423,7 +1423,13 @@
   /* ============================================================
      1. Constants & materials
      ============================================================ */
-  var WORLD_W = 4800, WORLD_H = 2400;
+  /* The map: sixteen times the area it had (4800 × 2400 until 2026-09-11).
+     Carson: "it needs to be SO MUCH BIGGER". Both a multiple of the water
+     cell, and a level saved on the old map is put at the bottom-left of
+     this one when it loads (`migrateWorldSize`), so its ground is still
+     the ground and the new room is above and to the right. */
+  var WORLD_W = 19200, WORLD_H = 9600;
+  var OLD_WORLD_W = 4800, OLD_WORLD_H = 2400;   // what a level file without worldW/worldH was built on
   var VIEW_W = 1400, VIEW_H = 800;
   var START_FLOOR_W = 1600;
   var PLACED_CAP = 1500;
@@ -4541,23 +4547,35 @@
   }
 
   // ---- save / restore ----
+  /* A snapshot carries only the box of cells the water is in — on a map
+     this size the whole grid is nearly three million cells, and undo
+     takes a snapshot per edit. */
   function packWaterBytes(){
-    var out = new Uint8Array(WCELLS);
-    for (var i = 0; i < WCELLS; i++){
-      var v = waterLevels[i];
-      out[i] = v <= 0 ? 0 : Math.min(255, Math.round(v*200));
+    if (waterCount === 0 || wMaxRow < wMinRow) return null;
+    var r0 = wMinRow, r1 = wMaxRow, c0 = wMinCol, c1 = wMaxCol, w = c1 - c0 + 1, h = r1 - r0 + 1;
+    var out = new Uint8Array(w * h);
+    for (var row = r0; row <= r1; row++){
+      for (var col = c0; col <= c1; col++){
+        var v = waterLevels[row*WCOLS + col];
+        out[(row - r0)*w + (col - c0)] = v <= 0 ? 0 : Math.min(255, Math.round(v*200));
+      }
     }
-    return out;
+    return { r0: r0, c0: c0, w: w, h: h, bytes: out };
   }
-  function unpackWaterBytes(bytes){
+  function unpackWaterBytes(box){
     clearWater();
-    if (!bytes) return;
-    var n = 0;
-    for (var i = 0; i < WCELLS && i < bytes.length; i++){
-      if (!bytes[i]) continue;
-      waterLevels[i] = bytes[i]/200;
-      noteWaterCell(i % WCOLS, (i / WCOLS) | 0);
-      n++;
+    if (!box || !box.bytes) return;
+    var n = 0, bytes = box.bytes;
+    for (var row = 0; row < box.h; row++){
+      for (var col = 0; col < box.w; col++){
+        var b = bytes[row*box.w + col];
+        if (!b) continue;
+        var R = row + box.r0, C = col + box.c0;
+        if (R < 0 || R >= WROWS || C < 0 || C >= WCOLS) continue;
+        waterLevels[R*WCOLS + C] = b/200;
+        noteWaterCell(C, R);
+        n++;
+      }
     }
     waterCount = n;
     recomputeWaterTops();
@@ -4565,18 +4583,24 @@
   // JSON-safe form for saved levels: only the wet cells, as index/value pairs.
   function packWaterSparse(){
     var out = [];
-    for (var i = 0; i < WCELLS; i++){
-      var v = waterLevels[i];
-      if (v <= W_MIN) continue;
-      out.push(i, Math.min(255, Math.round(v*200)));
+    if (waterCount === 0 || wMaxRow < wMinRow) return out;
+    for (var row = wMinRow; row <= wMaxRow; row++){
+      for (var col = wMinCol; col <= wMaxCol; col++){
+        var i = row*WCOLS + col, v = waterLevels[i];
+        if (v <= W_MIN) continue;
+        out.push(i, Math.min(255, Math.round(v*200)));
+      }
     }
     return out;
   }
-  function unpackWaterSparse(arr, savedCell){
+  function unpackWaterSparse(arr, savedCell, savedW, savedH){
     clearWater();
     if (!arr || !arr.length) return;
     var n = 0, cell = savedCell || WATER_CELL;
-    if (cell === WATER_CELL){
+    var oldW = savedW || WORLD_W, oldH = savedH || WORLD_H;
+    // a file from a smaller map sits at the bottom-left of this one: its rows move down by the difference
+    var dRows = Math.round((WORLD_H - oldH) / WATER_CELL);
+    if (cell === WATER_CELL && oldW === WORLD_W && dRows === 0){
       for (var k = 0; k + 1 < arr.length; k += 2){
         var i = arr[k];
         if (i < 0 || i >= WCELLS) continue;
@@ -4585,14 +4609,15 @@
         n++;
       }
     } else {
-      // a level saved on a coarser or finer grid: every old cell covers
-      // a block of new ones (or a fraction of one), at the same fullness
-      var oldCols = Math.ceil(WORLD_W / cell), ratio = cell / WATER_CELL;
+      // a level saved on a coarser or finer grid, or a smaller map: every
+      // old cell covers a block of new ones (or a fraction of one), at the
+      // same fullness, moved down to the bottom of this map
+      var oldCols = Math.ceil(oldW / cell), ratio = cell / WATER_CELL;
       for (var k2 = 0; k2 + 1 < arr.length; k2 += 2){
         var oi = arr[k2], lv = arr[k2+1]/200;
         var oc = oi % oldCols, orow = (oi / oldCols) | 0;
         var c0 = Math.floor(oc * ratio), c1 = Math.max(c0, Math.ceil((oc + 1) * ratio) - 1);
-        var r0 = Math.floor(orow * ratio), r1 = Math.max(r0, Math.ceil((orow + 1) * ratio) - 1);
+        var r0 = Math.floor(orow * ratio) + dRows, r1 = Math.max(r0, Math.ceil((orow + 1) * ratio) - 1 + dRows);
         for (var rr = r0; rr <= r1; rr++) for (var cc = c0; cc <= c1; cc++){
           if (cc < 0 || cc >= WCOLS || rr < 0 || rr >= WROWS) continue;
           var ni = rr*WCOLS + cc;
@@ -7902,9 +7927,10 @@
     ctx.save();
     ctx.strokeStyle = "rgba(255,255,255,.6)"; ctx.lineWidth = 2.5;
     ctx.beginPath();
-    for (var x = 0; x <= WORLD_W; x += 40){
+    var vx0 = Math.max(0, Math.floor(camX / 40) * 40 - 40), vx1 = Math.min(WORLD_W, camX + viewRectW / camScale + 40);
+    for (var x = vx0; x <= vx1; x += 40){
       var y = wl + Math.sin(x*0.011 + t)*3.5;
-      if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      if (x === vx0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.stroke();
     ctx.restore();
@@ -13150,14 +13176,41 @@
       goal: goalPoint,
       bubbles: bubbles.map(function(b){ return { x:b.x, y:b.y }; }),
       objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps, links: linkSnaps,
-      water: packWaterSparse(), waterCell: WATER_CELL,
+      water: packWaterSparse(), waterCell: WATER_CELL, worldW: WORLD_W, worldH: WORLD_H,
       world: packWorldSettings()
     };
+  }
+  /* A level built on a smaller map is placed at the bottom-left of this
+     one: every world coordinate in the file moves down by the difference
+     in height (and right by the difference in width, which is 0 — the map
+     grew to the right). Its ground stays the ground and the new room is
+     sky. Offsets (a camera's zone, a mover's line, a glide) need nothing. */
+  function migrateWorldSize(data){
+    var ow = +data.worldW || OLD_WORLD_W, oh = +data.worldH || OLD_WORLD_H;
+    var dx = 0, dy = WORLD_H - oh;
+    if (!dx && !dy) return;
+    var mv = function(o, kx, ky){ if (o && isFinite(+o[kx]) && isFinite(+o[ky])){ o[kx] = +o[kx] + dx; o[ky] = +o[ky] + dy; } };
+    (data.objects || []).forEach(function(os){
+      if (os && Array.isArray(os.parts)) os.parts.forEach(function(pt){ mv(pt, "x", "y"); });   // a v2 level: a pile of dabs, each with its own spot
+      else mv(os, "x", "y");
+    });
+    (data.bolts || []).forEach(function(b){ mv(b, "x", "y"); });
+    (data.gadgets || []).forEach(function(g){ mv(g, "x", "y"); });
+    (data.links || []).forEach(function(l){ mv(l, "ax", "ay"); mv(l, "bx", "by"); });
+    (data.checkpoints || []).forEach(function(c){ mv(c, "x", "y"); });
+    (data.bubbles || []).forEach(function(b){ mv(b, "x", "y"); });
+    (data.blocks || []).forEach(function(b){ mv(b, "x", "y"); });
+    if (data.goal) mv(data.goal, "x", "y");
+    if (data.spawn) mv(data.spawn, "x", "y");
+    if (data.world && data.world.waterLevel != null && isFinite(+data.world.waterLevel)) data.world.waterLevel = +data.world.waterLevel + dy;
+    data.worldW = WORLD_W; data.worldH = WORLD_H;
   }
   function loadLevelData(data){
     clearAllObjects();
     if (!data || typeof data !== "object") data = {};
     var version = +data.version || 0;
+    var fileW = +data.worldW || OLD_WORLD_W, fileH = +data.worldH || OLD_WORLD_H;
+    migrateWorldSize(data);
     if ((version === 2 || version === 3 || version === 4) && Array.isArray(data.objects)){
       beginBulk();
       loadBudget = MAX_LEVEL_CORNERS;
@@ -13223,7 +13276,7 @@
     goalPoint = data.goal || null;
     bubbles = (data.bubbles||[]).map(function(b){ return { x:b.x, y:b.y, collected:false }; });
     activeCheckpoint = 0;
-    unpackWaterSparse(data.water, data.waterCell != null ? +data.waterCell : 16);   // levels before the cell size was saved were built at 16
+    unpackWaterSparse(data.water, data.waterCell != null ? +data.waterCell : 16, fileW, fileH);   // levels before the cell size was saved were built at 16
   }
 
   onStep("beforeUpdate", function(){

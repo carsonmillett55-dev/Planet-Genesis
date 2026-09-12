@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 776 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 782 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,14 +42,14 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 776 checks + checkgeom, in order
+npm test                   # all 782 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
 Or one suite at a time:
 
 ```
-node regress.js            # 39 — geometry, save/load, play mode, loop and save safety, two tabs and the autosave, map edges
+node regress.js            # 45 — geometry, save/load, play mode, loop and save safety, two tabs and the autosave, map edges, the big map and an old level's move to its bottom
 node tsel.js               # 46 — selection, marquee, group transforms, resize, detach, the number row, the transforms as keys
 node tlayer.js             # 17 — layer accuracy, ranked picking, the hover label, peek
 node tmat.js               # 17 — materials, colours, glass, light
@@ -1316,6 +1316,37 @@ non-sensor object bodies, narrowed first with `Query.region`. Gravity is
 applied in 4px steps so a fast fall still lands on the surface. Before
 this, paused-and-not-flying slid sideways through everything and hung in
 the air.
+
+## The map is 19200 × 9600
+
+Sixteen times the area it had (4800 × 2400 until 2026-09-11; Carson: "it
+needs to be SO MUCH BIGGER"). Both dimensions are multiples of the water
+cell. **A level file carries `worldW` / `worldH`; one without them was
+built on the old map**, and `migrateWorldSize` puts it at the bottom-left
+of this one on load: every world coordinate — objects (a v2 level's
+dabs each), bolts, gadgets, link ends, checkpoints, bubbles, goal, spawn,
+the flooded-world line — moves down by the difference in height; offsets
+(a camera's zone and view, a mover's line, a glide) need nothing;
+`unpackWaterSparse` decodes the painted water with the old map's column
+count and moves its rows down. So an old level's ground is still the
+ground and the new room is sky above and land to the right.
+
+The water grid is nearly three million cells now, so nothing walks the
+whole grid per frame or per snapshot: `stepWater` and `evictTrappedWater`
+already worked in the box of cells with water in it (`wMinRow` …), and
+now `packWaterSparse` (the level file) does too, and **a snapshot's water
+is that box** (`packWaterBytes` → `{r0, c0, w, h, bytes}`) rather than a
+byte per cell — undo takes a snapshot per edit, and a byte per cell would
+have been 3MB each. `rebuildWaterSolid` still clears the whole `Uint8Array`
+when there is water (a `fill(0)`, ~0.3ms). The water line and the dune
+bank draw only across the screen.
+
+**The suites are pinned to the old map.** Their scenes sit where the old
+floor was and read `pos.y < 2300` and the like, so `mkprev.py` rewrites
+the size line in the preview to read `pg_test_world_w/h` from storage
+and `tenv.js` sets 4800 × 2400 unless `pg_test_real_world` is set — the
+shipping file has no such switch. `regress.js` unpins for one section
+and checks the real size and the migration.
 
 ## The map has edges
 

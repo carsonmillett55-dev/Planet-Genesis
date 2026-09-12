@@ -80,7 +80,7 @@ the whole object. Covered by `tsel.js`.
 
 - **Water material** needs work and polish. 2026-09-11: thin water dries up, a pool draws as one calm surface, a Vacuum tool takes water only, the eraser works by layer; then 8px cells and splashes. More to come.
 - **Ice must get slipperier on a slope.** DONE 2026-09-11 — ice is skated on: the keys accelerate rather than set your speed, letting go coasts, and a slope takes you down it.
-- **Level size at least 4x larger** than now — as large as possible.
+- **Level size at least 4x larger** than now — as large as possible. DONE 2026-09-11 — 19200 × 9600, sixteen times the area. Old levels land at the bottom-left of the new map with the new room above and to the right.
 - **Replace "rope grab" with a proper LBP-style grab.** DONE — see below.
 - **Temporarily hide an object in a layer**, the way LBP does.
 - **Double jump toggle** in world settings. DONE 2026-09-11 — World → Player, saved with the level.

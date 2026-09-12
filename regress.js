@@ -281,6 +281,30 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(() => { window.__pg.zoomTo(1, 640, 1900); window.__pg.freezeCam(); });
   await p.waitForTimeout(200);
 
+  console.log('');
+  console.log('== the map is sixteen times the size it was; an old level lands at its bottom-left ==');
+  // a small level on the old map: a plank, a checkpoint, a bolt, a gadget, water in a basin, a flooded world
+  await reset();
+  await tool('wood', 2.4, 'circle');
+  await drag([[X, Y],[X+300, Y]]);
+  const oldLevel = await p.evaluate(() => { const d = window.__pg.serialize('old map'); delete d.worldW; delete d.worldH; d.world.waterLevel = 2000; d.water = [ (2000/8|0) * Math.ceil(4800/8) + 100, 200 ]; return d; });
+  const oldY = oldLevel.objects.filter(o => o.pieces[0].m.indexOf('wood') === 0 && o.forcedStatic).map(o => o.y);   // the anchored floor: a loose plank would fall while we look
+  await p.evaluate(() => { localStorage.setItem('pg_test_real_world', '1'); localStorage.removeItem('pg_test_world_w'); localStorage.removeItem('pg_test_world_h'); localStorage.removeItem('pg_autosave'); });
+  await p.reload(); await p.waitForTimeout(1200);
+  const big = await p.evaluate(() => window.__pg.worldSize());
+  ok('the map is 19200 by 9600', big.w === 19200 && big.h === 9600, big);
+  await p.evaluate(() => window.__pg.paused(true));
+  await p.evaluate(d => window.__pg.load(d), oldLevel); await p.waitForTimeout(400);
+  const moved = (await stats()).filter(o => o.pieces[0].indexOf('wood') === 0 && o.static).map(o => o.pos.y);
+  ok('a level from the old map loads with everything 7200px further down — at the bottom, where its ground was', moved.length === oldY.length && moved.every((y, i) => Math.abs(y - (oldY[i] + 7200)) < 2), { before: oldY, after: moved });
+  const cp = await p.evaluate(() => window.__pg.serialize('x').checkpoints[0]);
+  ok('the start moved with it', Math.abs(cp.y - (oldLevel.checkpoints[0].y + 7200)) < 1, { was: oldLevel.checkpoints[0], now: cp });
+  ok('the flooded world line moved with it', (await p.evaluate(() => window.__pg.worldGet('waterLevel'))) === 2000 + 7200);
+  const wc = await p.evaluate(() => { const d = window.__pg.serialize('x'); return d.water.length ? [d.water[0] % Math.ceil(19200/8), Math.floor(d.water[0] / Math.ceil(19200/8))] : null; });
+  ok('and the painted water: the same column, 900 rows down', wc && wc[0] === 100 && wc[1] === 250 + 900, wc);
+  ok('the file now says which map it is on', (await p.evaluate(() => { const d = window.__pg.serialize('x'); return [d.worldW, d.worldH]; })).join('x') === '19200x9600');
+  await p.evaluate(() => { localStorage.removeItem('pg_test_real_world'); });
+
   if (process.argv[2] === 'perf'){
     console.log('\n== migration + frame time on the real level ==');
     const lv = JSON.parse(JSON.parse(fs.readFileSync(__dirname+'/level.json','utf8')).payload);

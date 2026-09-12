@@ -4,6 +4,13 @@ import re
 s = open('planet-genesis.html', encoding='utf-8').read()
 s = s.replace('https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js', 'matter.min.js')
 s = re.sub(r'<link[^>]*fonts\.(googleapis|gstatic)\.com[^>]*>', '', s)
+# The suites were written on the 4800 x 2400 map and their scenes sit where
+# that map's floor was; tenv.js pins every suite page to it through these
+# two keys (pg_test_world_w / _h) unless pg_test_real_world is set. The
+# shipping file has no such switch: it is rewritten into the preview only.
+WORLD_LINE = 'var WORLD_W = 19200, WORLD_H = 9600;'
+assert WORLD_LINE in s, 'the world size line moved'
+s = s.replace(WORLD_LINE, "var WORLD_W = +localStorage.getItem('pg_test_world_w') || 19200, WORLD_H = +localStorage.getItem('pg_test_world_h') || 9600;")
 HOOK = """
   window.__pg = {
     objects: function(){ return objects; },
