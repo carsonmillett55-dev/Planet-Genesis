@@ -130,6 +130,27 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
      {before:vb, after:JSON.stringify(va)});
   ok('world light comes back', Math.abs(await p.evaluate(()=>window.__pg.worldLight()) - 0.4) < 0.001);
 
+  console.log('');
+  console.log('== opacity: on new paint, and on an object after ==');
+  await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setStick(true); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
+  await p.waitForTimeout(150);
+  await p.evaluate(() => window.__pg.setPaintAlpha(0.4));
+  await tool('wood');
+  await drag([[X, Y],[X+120, Y+60]]);
+  const ghostly = (await stats()).filter(o => o.pos.y < 2300)[0];
+  ok('paint drawn at 40% opacity makes an object at 40%', ghostly && Math.abs(ghostly.alpha - 0.4) < 0.001, ghostly && ghostly.alpha);
+  await p.evaluate(() => window.__pg.setPaintAlpha(1));
+  await tool('sponge');
+  await drag([[X+200, Y],[X+320, Y+60]]);
+  const solid = (await stats()).filter(o => o.pos.y < 2300 && o.pieces[0].indexOf('sponge') === 0)[0];
+  ok('paint at 100% makes a solid one', solid && solid.alpha === 1, solid && solid.alpha);
+  await p.evaluate(id => window.__pg.objAlpha(id, 0.25), solid.id);
+  ok('an object can be made see-through after the fact', (await p.evaluate(id => window.__pg.objAlpha(id), solid.id)) === 0.25);
+  const saved = await p.evaluate(() => window.__pg.serialize('op'));
+  ok('the level file carries it, and not for a solid object', saved.objects.some(o => o.alpha === 0.25) && saved.objects.some(o => Math.abs(o.alpha - 0.4) < 0.001) && saved.objects.filter(o => o.alpha != null).length === 2, saved.objects.map(o => o.alpha));
+  await p.evaluate(d => window.__pg.load(d), saved); await p.waitForTimeout(200);
+  ok('and it comes back', (await stats()).filter(o => o.alpha < 1).length === 2, (await stats()).map(o => o.alpha));
+
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join('\n') : 'none');
   await b.close();

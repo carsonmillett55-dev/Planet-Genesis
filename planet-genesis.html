@@ -1734,6 +1734,9 @@
   // their own right-click menu.
   var GLOW_MIN = 0.1, GLOW_MAX = 12;      // 10% to 1200% — up to ~1800px of reach
   var newGlow = parseFloat(localStorage.getItem("pg_glow") || "1") || 1;
+  // how see-through new paint is: 1 solid, down to a ghost of itself. An object's own is `alpha`.
+  var ALPHA_MIN = 0.05, paintAlpha = parseFloat(localStorage.getItem("pg_paint_alpha") || "1") || 1;
+  function objectAlpha(o){ return o.alpha == null ? 1 : o.alpha; }
   function clampGlow(v){ return Math.max(GLOW_MIN, Math.min(GLOW_MAX, +v || 1)); }
   function persistPaintBrush(){
     localStorage.setItem("pg_stick", stickPaint ? "1" : "0");
@@ -1741,6 +1744,7 @@
     localStorage.setItem("pg_paint_shape", paintShape);
     localStorage.setItem("pg_paint_scale", String(paintScale));
     localStorage.setItem("pg_paint_mode", paintMode);
+    localStorage.setItem("pg_paint_alpha", String(paintAlpha));
   }
 
   /* ---- Grid snapping -------------------------------------------------
@@ -2679,6 +2683,7 @@
     var obj = { id:"o"+(objCounter++), body:null, parts:[], pieces:pieces, layer:layer,
                 darkMatter:false, decorative: layer !== MID_LAYER, glow: newGlow,
                 forcedStatic: !!forcedStatic, drawing:false, geomRev:0 };
+    if (paintAlpha < 1) obj.alpha = paintAlpha;
     objects.push(obj);
     if (!rebuildFromPieces(obj, frame)) return null;
     return objects.indexOf(obj) >= 0 ? obj : null;
@@ -2694,6 +2699,7 @@
                 pieces:[ { m: materialId, poly: pgTranslate(worldPoly, -body.position.x, -body.position.y) } ],
                 layer:layer, darkMatter: matOf(materialId).isDarkMatter, glow: newGlow,
                 decorative: layer !== MID_LAYER, forcedStatic:false, drawing:false, geomRev:0 };
+    if (paintAlpha < 1) obj.alpha = paintAlpha;
     body.plugin = { isObject:true, obj:obj };
     World.add(world, body);
     objects.push(obj);
@@ -5791,6 +5797,7 @@
     if (o.lightFalls) d.lightFalls = 1;
     if (o.grabbable === true) d.grab = 1; else if (o.grabbable === false) d.grab = 0;
     if (o.weight != null && o.weight !== 1) d.weight = o.weight;
+    if (o.alpha != null && o.alpha !== 1) d.alpha = o.alpha;
     return d;
   }
   /* Corners left in this load's budget. A level file is untrusted input
@@ -5820,6 +5827,7 @@
     if (made && os.glow != null) made.glow = clampGlow(os.glow);
     if (made && os.grab != null) made.grabbable = !!os.grab;
     if (made && os.weight != null && isFinite(+os.weight)){ made.weight = Math.max(WEIGHT_MIN, Math.min(WEIGHT_MAX, +os.weight)); applyObjectWeight(made); }
+    if (made && os.alpha != null && isFinite(+os.alpha)) made.alpha = Math.max(ALPHA_MIN, Math.min(1, +os.alpha));
     if (made){
       made.lightSolid = !!os.lightSolid;
       made.lightFalls = !!os.lightFalls;
@@ -6917,6 +6925,7 @@
   }
   function drawObject(obj){
     var b = obj.body, g = objectPaths(obj), depth = layerDepth(obj.layer);
+    if (obj.alpha != null && obj.alpha < 1) depth = { a: depth.a * obj.alpha, s: depth.s, off: depth.off, shade: depth.shade };   // its own opacity, on top of the layer's fade
     if (!g.regions.length) return;
     var sg = objectSkinGadget(obj);
     if (sg && drawSkinOn(obj, sg, depth)) return;
@@ -8712,6 +8721,13 @@
         el.appendChild(colGrid);
       }
 
+      // How see-through new paint is.
+      if (!isErase && !isFluid){
+        el.appendChild(sliderRow("Opacity", paintAlpha, ALPHA_MIN, 1, 0.01,
+          function(v){ paintAlpha = v; persistPaintBrush(); },
+          function(v){ return Math.round(v*100) + "%"; }));
+      }
+
       // How far newly painted Light throws.
       if (!isErase && matOf(currentTool) && matOf(currentTool).emitter){
         el.appendChild(sliderRow("Glow", newGlow, GLOW_MIN, GLOW_MAX, 0.05,
@@ -10496,6 +10512,7 @@
     } else {
       var mat = matOf(stroke.mat);
       var depth = layerDepth(stroke.layer);
+      if (paintAlpha < 1) depth = { a: depth.a * paintAlpha, s: depth.s, off: depth.off, shade: depth.shade };
       ctx.globalAlpha = depth.a;
       ctx.fillStyle = mat.color; ctx.fill(path);
       ctx.save();
@@ -11717,6 +11734,17 @@
       wt.appendChild(wNote);
     }
 
+    // Opacity — how see-through it is drawn. Physics never changes.
+    if (many === 1){
+      var op = opSection("Opacity");
+      var pushedAlpha = false;
+      var asl = sliderRow("◐ Opacity", objectAlpha(o), ALPHA_MIN, 1, 0.01,
+        function(v){ if (!pushedAlpha){ pushUndo("changing an object's opacity"); pushedAlpha = true; } o.alpha = v >= 0.995 ? undefined : v; },
+        function(v){ return Math.round(v * 100) + "%"; });
+      asl.style.flexBasis = "100%";
+      op.appendChild(asl);
+    }
+
     // Light, only when there is one.
     if (many === 1 && objectLights(o).length){
       var lt = opSection("Light");
@@ -12258,6 +12286,7 @@
         copy.lightFalls = !!src.lightFalls;
         if (src.grabbable != null) copy.grabbable = src.grabbable;   // and the same grip and weight
         if (src.weight != null) copy.weight = src.weight;
+        if (src.alpha != null) copy.alpha = src.alpha;
         rebuildFromPieces(copy);
         if (objects.indexOf(copy) >= 0) refreshObjectPhysics(copy);
         Body.setVelocity(copy.body, {x:0,y:0});

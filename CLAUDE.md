@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 788 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 793 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 788 checks + checkgeom, in order
+npm test                   # all 793 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -52,7 +52,7 @@ Or one suite at a time:
 node regress.js            # 45 — geometry, save/load, play mode, loop and save safety, two tabs and the autosave, map edges, the big map and an old level's move to its bottom
 node tsel.js               # 52 — selection, marquee, group transforms, resize, detach, the number row, the transforms as keys, dragging with physics on
 node tlayer.js             # 17 — layer accuracy, ranked picking, the hover label, peek
-node tmat.js               # 17 — materials, colours, glass, light
+node tmat.js               # 22 — materials, colours, glass, light, opacity
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
 node tmenu.js              # 31 — the personal menu's sections, the Tools bag's four pages, the number keys, the gradient
@@ -282,6 +282,19 @@ something not moving. A static body with no `_original` is left alone.
 
 The buoyancy safety rail (2.5× own weight) scales with it, or a
 feather-light block could not float.
+
+## Opacity
+
+Every object has an **Opacity** slider in its box (`o.alpha`, 5%–100%,
+undefined = solid; saved as `alpha` only when under 1, carried by
+duplicate, snapshots and the level file), and the Materials page has an
+Opacity slider for **new paint** (`paintAlpha`, `pg_paint_alpha`): an
+object made while it is under 100% is born at that opacity, and the
+stroke preview shows it. It is drawing only — `drawObject` multiplies
+the layer's fade by the object's own (`depth.a`), which is applied at
+the blit, so the bitmap cache is untouched — the physics never changes.
+Paint welded into an existing object takes that object's opacity; an
+object has one.
 
 ## The physics step
 

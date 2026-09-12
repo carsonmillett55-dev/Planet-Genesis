@@ -29,6 +29,8 @@ HOOK = """
     setMode: setMode, mode: function(){ return mode; },
     load: loadLevelData, serialize: serializeLevel, autosave: autosaveNow,
     charState: function(){ return { crouching: crouching, sliding: sliding, anim: charPoseId() }; },
+    setPaintAlpha: function(v){ paintAlpha = v; },
+    objAlpha: function(id, v){ var o = objects.find(function(o){ return o.id === id; }); if (!o) return null; if (v != null) o.alpha = v; return o.alpha == null ? 1 : o.alpha; },
     peek: function(v){ if (v != null && !!v !== layerPeek) togglePeek(); return layerPeek; },
     layerAlpha: function(l){ return layerDepth(l).a; },
     enclosedArea: function(x, y){ var r = enclosedRegionAt(x, y, buildLayer); return r ? Math.round(Math.abs(pgArea(r))) : 0; },
@@ -39,6 +41,7 @@ HOOK = """
         return { id:o.id, layer:o.layer, pieces:o.pieces.map(function(p){ return p.m+':'+pgVertexCount(p.poly)+'v/'+p.poly.length+'i'; }),
                  rings:o.pieces.map(function(p){ return p.poly.map(function(pl){ return pl.length; }); }),
                  parts:o.parts.length, corners:objCorners(o), static:o.body.isStatic, area:Math.round(objArea(o)),
+                 alpha:o.alpha == null ? 1 : o.alpha,
                  areaBy:o.pieces.reduce(function(acc,p){ var k = p.m.split(':')[0]; acc[k] = (acc[k]||0) + Math.abs(pgArea(p.poly)); return acc; }, {}),
                  pos:{x:Math.round(o.body.position.x),y:Math.round(o.body.position.y)}, angle:+o.body.angle.toFixed(3),
                  bounds:{x:Math.round(o.body.bounds.min.x),y:Math.round(o.body.bounds.min.y),x2:Math.round(o.body.bounds.max.x),y2:Math.round(o.body.bounds.max.y)}, sensor:!!o.body.isSensor };
