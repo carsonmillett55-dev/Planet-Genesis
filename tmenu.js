@@ -46,9 +46,9 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('it opens on Materials', /Materials/.test(await p.evaluate(() => document.getElementById('pmBody').innerText)));
   await clickPage('My Objects'); await p.waitForTimeout(300);
   ok('switching page changes the body', !/painting on/.test(await p.evaluate(() => document.getElementById('pmBody').innerText)));
-  // A bag with one page should not show a page row at all.
+  // World has its settings and the Background page.
   await clickSection('World'); await p.waitForTimeout(300);
-  ok('a one-page section hides the page row', await p.evaluate(() => document.getElementById('pmPages').hidden));
+  ok('World holds World Settings and Background', JSON.stringify(await pageNames()) === JSON.stringify(['World Settings','Background']) && !(await p.evaluate(() => document.getElementById('pmPages').hidden)), await pageNames());
 
   console.log('\n== the Tools bag: editing tools apart from the connectors, logic and gameplay ==');
   await clickSection('Tools'); await p.waitForTimeout(300);

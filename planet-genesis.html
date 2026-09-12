@@ -894,6 +894,23 @@
     pointer-events:none; z-index:20; white-space:nowrap;
   }
   #toast.show{ transform:translate(-50%,0); opacity:1; }
+  /* the tip card: one tip at a time, the first time you try something */
+  #tipCard{
+    position:absolute; left:50%; bottom:1rem; transform:translate(-50%, 130%); z-index:9;
+    display:flex; align-items:flex-start; gap:.7rem; width:min(34rem, 86%);
+    background:var(--paper); color:var(--ink); border:3px solid var(--stitch); border-radius:14px;
+    padding:.7rem .9rem; box-shadow:0 8px 22px rgba(0,0,0,.45);
+    opacity:0; transition:transform .3s ease, opacity .3s ease;
+  }
+  #tipCard.show{ transform:translate(-50%, 0); opacity:1; }
+  #tipCard[hidden]{ display:none; }
+  #tipCard .tipIcon{ font-size:1.6rem; line-height:1; margin-top:.1rem; }
+  #tipCard .tipBody{ flex:1; min-width:0; }
+  #tipCard .tipTitle{ font-family:'Patrick Hand',cursive; font-size:1.2rem; line-height:1.1; margin-bottom:.2rem; }
+  #tipCard .tipText{ font-size:.8rem; line-height:1.35; }
+  #tipCard .tipBtns{ display:flex; flex-direction:column; align-items:stretch; gap:.3rem; }
+  #tipCard .quiet{ background:none; border:none; color:var(--ink); opacity:.6; font-size:.68rem; cursor:pointer; text-decoration:underline; padding:0; }
+  #tipCard .quiet:hover{ opacity:1; }
 
   .chip{
     flex:0 0 auto;
@@ -1320,6 +1337,11 @@
     <div id="canvasWrap">
       <canvas id="game"></canvas>
       <div id="toast"></div>
+      <div id="tipCard" hidden>
+        <div class="tipIcon">💡</div>
+        <div class="tipBody"><div class="tipTitle"></div><div class="tipText"></div></div>
+        <div class="tipBtns"><button id="tipOk" class="btn small">Got it</button><button id="tipOff" class="quiet">No more tips</button></div>
+      </div>
 
       <div id="hoverLayer" hidden></div>
       <div id="viewHud">
@@ -1657,6 +1679,56 @@
     light:      "A glow rather than a solid: it holds itself up, and you walk straight through it. On its own it stays put; painted into something else it comes along for the ride. Turn World Light down in World Settings and your lights are what you'll see by — and a light takes colour like any other material, so you can light a level any way you want.",
     water:      "Real flowing water. Pour it anywhere and it falls, runs downhill, spreads out and pools at the lowest point it can reach, held in by whatever you've built. Only lives on the Mid layer. Timber, Sponge, Bounce, Ice and Floaty bob on top of it; Heavy Metal sinks. For a whole flooded world instead, use World Water in World Settings."
   };
+  /* ---- Tips: one card the first time you try something — a tool, a
+     material, Play, a selection, the studio — and never again for that
+     thing. `pg_tips` is the switch, `pg_tips_seen` what has been shown.
+     Materials use MATERIAL_INFO; everything else is here. Offered from
+     `tipWatch`, which looks at what changed each frame, so every path that
+     picks a tool is covered without touching any of them. ---- */
+  var TIPS = {
+    welcome:   ["Welcome to your world", "Paint with the left mouse button; the right button cuts. E opens your menu — materials, tools and the world's settings all live there. Tips like this one show the first time you try something; Settings turns them off."],
+    play:      ["Playing", "Arrow keys or WASD walk, Space jumps, S ducks — and slides at a run. Hold the right mouse button on sponge to grab it. Build takes you back, and the level is put back exactly as you built it."],
+    select:    ["You picked something up", "Drag it to move it, pull a corner to resize it, Z and X turn it, H flips it. Del takes the piece you clicked — double-click first to take the whole thing. Right-click opens its box."],
+    box:       ["The object box", "Everything about what you picked, in one place: lock it in place or let it fall, its layer, its weight, whether it can be grabbed, its opacity. It follows whatever you select until you close it."],
+    studio:    ["The studio", "B is the brush, E erases, L draws a straight line, I picks a colour from the drawing, the bucket fills a closed shape. Ctrl+Z takes a stroke back. The frames down the left make an animation — P plays it."],
+    "tool:move":       ["Move & Select", "Click anything to select it and drag to move it. Drag across empty space to select everything the band touches; Shift-click adds one more. Middle-drag looks around, and the wheel zooms on the cursor."],
+    "tool:erase":      ["Erase", "Takes material off the layer you are on, in exactly the shape you sweep. Cut something clean in half and it becomes two things. Water goes too, on the Mid layer."],
+    "tool:vacuum":     ["Vacuum", "Sucks up water and nothing else — nothing you built is touched, on any layer."],
+    "tool:bolt":       ["Bolt", "A pin through two things on different layers — a wheel on a wall, a door on a frame. Point at something with something behind or in front of it and click. Right-click the bolt for its tightness and limits."],
+    "tool:sprungbolt": ["Sprung bolt", "A bolt that springs back to the angle you placed it at — a flap, a bouncing sign. Its strength is in its box."],
+    "tool:motorbolt":  ["Motor bolt", "A bolt that turns whatever is on it: wheels, windmills, spinning platforms. Speed and direction are in its box, and a wire from a switch turns it on and off."],
+    "tool:wobblebolt": ["Wobble bolt", "Swings to an angle either side and back — a seesaw that rocks itself. Wired, it swings out while the signal is on and back when it stops."],
+    "tool:piston":     ["Piston", "Two clicks, one on each thing. A rod that pushes and pulls between two lengths; stiff, it holds its angle. Reach, timing and what a wire does are in its box."],
+    "tool:rope":       ["Rope", "Two clicks, one on each thing. It hangs, swings and sags, and holds when pulled tight — hang a sponge from it and swing."],
+    "tool:sensor":     ["Player sensor", "Put it on something. It is on while the player is within its reach. Right-click it and Connect it to a motor, a piston, a mover, a camera — anything that takes a signal."],
+    "tool:watersensor":["Water sensor", "On while water is touching it — a float switch, a flood alarm."],
+    "tool:impact":     ["Impact sensor", "On for a moment when something hits its object hard enough — a dropped crate, the player landing on it. A knock-over switch."],
+    "tool:projsensor": ["Projectile sensor", "On when a bullet or a launched object hits it. Pair it with the Launcher: a target that opens a door."],
+    "tool:tag":        ["Tag", "A coloured label on an object. A tag sensor of the same colour notices it — the way to make one thing react to another."],
+    "tool:tagsensor":  ["Tag sensor", "On while an object wearing a tag of its colour is within its reach. Put a tag on a crate and a sensor by a door, and the crate opens the door."],
+    "tool:button":     ["Button", "On while the player stands on it. Sticky keeps it on once pressed."],
+    "tool:lever":      ["Lever", "Stand next to it and press F to flip it. It can spring back when you let go, or stay."],
+    "tool:timer":      ["Timer", "Fills while its input is on and switches on when full — a delay, a fuse, a time limit. The time, and what its reset port does, are in its box."],
+    "tool:counter":    ["Counter", "Counts each time its input turns on and switches on at the target — three buttons for one door. Reset clears it."],
+    "tool:changer":    ["World changer", "Changes the whole world's light or water level while it is on — a flood, nightfall — over as many seconds as you like."],
+    "tool:camera":     ["Camera", "Takes over the view while the player is in its blue zone. Drag the zone and the gold frame to where you want them; zoom, tracking, speed and a glide are in its box."],
+    "tool:mover":      ["Mover", "Put it on something, then click where it should go. The object travels that line and stops, or bounces back and forth. A wire starts and stops it."],
+    "tool:eye":        ["Creature eye", "Put it on any object and the object comes alive: it watches the player and chases when they come within sight. Paint where it is weak and where it is dangerous from its box."],
+    "tool:creature":   ["Custom creature", "Draw it, then its hitbox, then its weak spot and its danger. It chases and faces the player, and plays its Attack and Death drawings when the time comes."],
+    "tool:anim":       ["Custom object", "Draw it, then draw its collision. A wire plays its Action drawing — a door that opens, a machine that turns over."],
+    "tool:emitter":    ["Particles", "Put it on something and draw a particle in the studio. It sprays them at the rate, speed and spread in its box; wired, only while on."],
+    "tool:objemitter": ["Object emitter", "Fires copies of something you saved — pick which in its box — at a rate, up to a limit. Wire a switch to it to fire on demand. To save something, right-click it: Save as object."],
+    "tool:gun":        ["Launcher", "A pickup: walk into it in Play and the cursor becomes a gun. Click to fire. Its box picks what it shoots — a bullet, a ray, a projectile you drew, or something you saved."],
+    "tool:fan":        ["Fan", "Blows upward and lifts the player. Its size and strength are in its box, and a wire switches it on and off."],
+    "tool:sticker":    ["Stickers", "Draw a sticker in the studio, then click on any material to stick it there. It takes the shape of what it lands on."],
+    "tool:spawn":      ["Start", "Where the player begins. Play from here (Ctrl+P) lets you test from wherever you are working instead."],
+    "tool:checkpoint": ["Checkpoint", "Touch it in Play and it becomes where you come back to."],
+    "tool:bubble":     ["Bubble", "A point to collect. Several in a quick chain multiply the score."],
+    "tool:goal":       ["Goal", "Reach it in Play to finish the level."],
+    "mode:fill":       ["Fill", "Click inside a closed outline and the inside fills with your material, up to the walls — water too."],
+    "mode:rect":       ["Drag-out shapes", "Drag out the shape at the size you want and let go — it arrives as one exact piece. Hold Shift to keep it square or round."]
+  };
+  TIPS["mode:ellipse"] = TIPS["mode:rect"]; TIPS["mode:triangle"] = TIPS["mode:rect"];
   var TOOL_INFO = [
     ["move","🕹","Move & Select","Click anything you've built to select it — a bar appears above it to rotate, flip, duplicate, anchor, change its layer, save or delete it. Drag it to move it. DRAG ACROSS EMPTY SPACE to rubber-band everything it touches: the whole group then turns, copies, anchors and deletes as one, and rotating turns it about the group's own middle. Shift-click adds or removes one piece, and Shift-drag adds a whole band. To move the camera instead, middle-drag, or right-drag on empty space."],
     ["shape","▭","Drag-out shapes","On the Materials tab, switch 'Draw with' from Freehand to Rectangle, Ellipse or Triangle. Then drag out the shape at the size you want and let go — it arrives as one exact piece, corners and all. Hold Shift to keep it regular."],
@@ -2277,7 +2349,8 @@
   /* grabReach px; walkSpeed and sprintSpeed are multipliers (sprint on top
      of walk); playZoom is the camera's zoom in Play, set from Build. */
   var WORLD_DEFAULTS = { gravity: 1, waterLevel: null, ropeLength: 220, motorSpeed: 0.06, light: 1,
-                         grabReach: 16, walkSpeed: 1, sprintSpeed: 1.45, playZoom: 1, camHeight: -70, doubleJump: false };   // camHeight: px above (negative) the character the view centres
+                         grabReach: 16, walkSpeed: 1, sprintSpeed: 1.45, playZoom: 1, camHeight: -70, doubleJump: false,   // camHeight: px above (negative) the character the view centres
+                         bg: null, bgPlain: null, bgSlide: 0.25 };   // a drawn background, what is behind it (null: the usual scenery, else a colour), how much it slides with the level
   var worldSettings = {};
   function resetWorldSettings(){ for (var k in WORLD_DEFAULTS) worldSettings[k] = WORLD_DEFAULTS[k]; }
   resetWorldSettings();
@@ -2985,7 +3058,8 @@
     emitter:  [{ id:"particle", label:"Particle", emoji:"✨" }],
     sticker:  [{ id:"sticker", label:"Sticker", emoji:"🏷️" }],
     material: [{ id:"tile", label:"Tile", emoji:"🧱" }],
-    projectile: [{ id:"idle", label:"Look", emoji:"🚀" }]
+    projectile: [{ id:"idle", label:"Look", emoji:"🚀" }],
+    background: [{ id:"scene", label:"Scene", emoji:"🏞️" }]
   };
   /* The drawn steps after the look: the hitbox (physics), then for a
      creature its weak spot and its danger. Each is one drawing in the
@@ -2998,7 +3072,7 @@
     eye: [], emitter: [], sticker: [], material: [],
     projectile: [{ id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" }]
   };
-  var SKIN_TITLE = { eye:"🐾 Creature", creature:"🐉 Custom creature", anim:"🎨 Custom object", emitter:"✨ Particle", sticker:"🏷️ Sticker", material:"🧱 Material", projectile:"🚀 Projectile" };
+  var SKIN_TITLE = { eye:"🐾 Creature", creature:"🐉 Custom creature", anim:"🎨 Custom object", emitter:"✨ Particle", sticker:"🏷️ Sticker", material:"🧱 Material", projectile:"🚀 Projectile", background:"🏞️ Background" };
   var DRAWN_DEFAULT_SIZE = 120;   // the box a fresh drawn thing starts in, world px
   function newSkin(kind){
     var st = {}, fps = {};
@@ -6646,7 +6720,21 @@
   function packWorldSettings(){
     var w = {}; for (var k in WORLD_DEFAULTS) w[k] = worldSettings[k]; return w;
   }
+  /* A level's drawn background: `{ id, name, art }` — art a studio
+     drawing, a copy of the one in My Backgrounds so the level carries
+     it. `bgPlain` is a colour to paint behind it instead of the usual
+     scenery, or null; `bgSlide` how much of the camera's movement it
+     follows (0: nailed to the glass like the sky, 1: part of the level). */
+  function normalizeBg(b){
+    if (!b || typeof b !== "object" || !Array.isArray(b.art)) return null;
+    var art = normalizeDrawing(b.art);
+    if (!art.length) return null;
+    return { id: typeof b.id === "string" ? b.id : ("bg" + Date.now()), name: typeof b.name === "string" ? b.name : "Background", art: art };
+  }
   function unpackPlayerSettings(w){
+    worldSettings.bg = normalizeBg(w.bg);
+    worldSettings.bgPlain = (typeof w.bgPlain === "string" && /^#[0-9a-fA-F]{6}$/.test(w.bgPlain)) ? w.bgPlain : null;
+    worldSettings.bgSlide = w.bgSlide != null && isFinite(+w.bgSlide) ? Math.max(0, Math.min(1, +w.bgSlide)) : WORLD_DEFAULTS.bgSlide;
     worldSettings.grabReach = w.grabReach != null ? Math.max(2, Math.min(200, +w.grabReach)) : WORLD_DEFAULTS.grabReach;
     worldSettings.walkSpeed = w.walkSpeed != null ? Math.max(0.1, Math.min(5, +w.walkSpeed)) : WORLD_DEFAULTS.walkSpeed;
     worldSettings.sprintSpeed = w.sprintSpeed != null ? Math.max(1, Math.min(5, +w.sprintSpeed)) : WORLD_DEFAULTS.sprintSpeed;
@@ -8842,21 +8930,53 @@
      can tell. The buffer is also reused between frames while the camera
      is still, which is most of the time you spend building. */
   var bgBuf = null, bgKey = "", bgAt = 0;
+  /* The level's drawn background, over the scenery (or the plain colour)
+     and under everything built. Rasterised once at BG_ART_W × BG_ART_H
+     (`drawingCanvas` keeps it by the strokes' own revision) and drawn
+     full-resolution, the screen's height tall and twice that
+     wide, its bottom on the bottom of the view — sliding sideways by
+     `bgSlide` of the camera's movement, and mirrored copy by copy across
+     the width so the join never shows. Climbing lifts it down a touch,
+     as the scenery's horizon sinks; it never lifts far enough to show
+     what is above it. */
+  var BG_ART_W = 2048, BG_ART_H = 1024;
+  function drawLevelBackground(){
+    var bg = worldSettings.bg; if (!bg || !bg.art || !bg.art.length) return;
+    var cv = drawingCanvas(bg.art, BG_ART_W, BG_ART_H);
+    var H = viewRectH, ph = H * 1.1, pw = ph * 2, k = worldSettings.bgSlide == null ? 0.25 : worldSettings.bgSlide;
+    var lift = (WORLD_H - H / camScale - camY) * camScale;
+    var y0 = Math.min(0, H - ph + lift * 0.08 * k);
+    var period = pw * 2, x0 = -(((camX * camScale * k) % period) + period) % period;
+    ctx.save();
+    for (var x = x0 - period; x < viewRectW + pw; x += period){
+      if (x + pw > 0 && x < viewRectW) ctx.drawImage(cv, x, y0, pw, ph);
+      // the mirrored copy beside it
+      var mx = x + pw;
+      if (mx + pw > 0 && mx < viewRectW){ ctx.save(); ctx.translate(mx + pw, 0); ctx.scale(-1, 1); ctx.drawImage(cv, 0, y0, pw, ph); ctx.restore(); }
+    }
+    ctx.restore();
+  }
   function drawBackground(){
     var W = Math.max(2, Math.round(viewRectW/2)), H = Math.max(2, Math.round(viewRectH/2));
     var S = camScale/2;
     var now = performance.now();
-    var key = W + "x" + H + "|" + Math.round(camX) + "|" + Math.round(camY) + "|" + camScale.toFixed(3);
-    if (!bgBuf) bgBuf = document.createElement("canvas");
-    if (key !== bgKey || now - bgAt > 140){          // 140ms keeps the clouds drifting
-      if (bgBuf.width !== W || bgBuf.height !== H){ bgBuf.width = W; bgBuf.height = H; }
-      var bc = bgBuf.getContext("2d");
-      bc.setTransform(1,0,0,1,0,0);
-      bc.clearRect(0,0,W,H);
-      paintBackdrop(bc, W, H, S, now);
-      bgKey = key; bgAt = now;
+    if (worldSettings.bgPlain){
+      // a plain colour instead of the scenery: a cave, a room, a night
+      ctx.fillStyle = worldSettings.bgPlain; ctx.fillRect(0, 0, viewRectW, viewRectH);
+    } else {
+      var key = W + "x" + H + "|" + Math.round(camX) + "|" + Math.round(camY) + "|" + camScale.toFixed(3);
+      if (!bgBuf) bgBuf = document.createElement("canvas");
+      if (key !== bgKey || now - bgAt > 140){          // 140ms keeps the clouds drifting
+        if (bgBuf.width !== W || bgBuf.height !== H){ bgBuf.width = W; bgBuf.height = H; }
+        var bc = bgBuf.getContext("2d");
+        bc.setTransform(1,0,0,1,0,0);
+        bc.clearRect(0,0,W,H);
+        paintBackdrop(bc, W, H, S, now);
+        bgKey = key; bgAt = now;
+      }
+      ctx.drawImage(bgBuf, 0, 0, viewRectW, viewRectH);
     }
-    ctx.drawImage(bgBuf, 0, 0, viewRectW, viewRectH);
+    drawLevelBackground();
 
     // The world's edge stays full resolution — it's the one crisp thing
     // back here, and a blurry dashed border looks like a mistake.
@@ -9011,6 +9131,7 @@
     drawGunHud();
     if (mode === "play" && gunHeld && playerGun && mouseOnCanvas) gunFire(mouseWorld);
     drawMinimap(now);
+    tipWatch();
     if (showPerf){ perfDrawMs += (performance.now() - perfDrawT0 - perfDrawMs) * 0.1; drawPerfHud(now); }
     updatePersonalMenuPos();
     updateSelBarPos();
@@ -9205,7 +9326,7 @@
 
   var savedObjects = [];
   try { savedObjects = JSON.parse(localStorage.getItem("pg_my_objects") || "[]"); } catch(e){ savedObjects = []; }
-  function persistSavedObjects(){ localStorage.setItem("pg_my_objects", JSON.stringify(savedObjects)); }
+  function persistSavedObjects(){ if (!storeSet("pg_my_objects", JSON.stringify(savedObjects))) showToast("Couldn't save — this device is out of room. Delete some levels from Load."); }
   // Saved the way it looks, not the way its body happens to be turned:
   // the regions are taken into world space first, so a stamp comes back
   // in the orientation you saved it in.
@@ -9869,6 +9990,97 @@
       if (pmOpen) renderPersonalMenu();
     });
   }
+  /* ---- Backgrounds: a drawn scene behind all three layers. Drawn in
+     the studio (a 2:1 picture), kept in My Backgrounds (`mySkins.background`,
+     `{ id, name, data: { art } }`), and a level that uses one carries its
+     own copy in `worldSettings.bg` so the level is whole on its own.
+     Editing a saved one updates the level's copy when the level is using
+     that one (matched by id). ---- */
+  function openBackgroundDraft(entry){
+    var art = entry ? normalizeDrawing((entry.data && entry.data.art) || []) : blankDrawing();
+    var draft = { id: entry ? entry.id : "draft", kind: "background", obj: null, art: null, skin: { states: { scene: [art] }, fps: { scene: 1 } }, draft: !entry, bgEntry: entry || null, layer: buildLayer, pos: { x: 0, y: 0 } };
+    pmEditState = "scene"; pmEditFrame = 0;
+    ceOpenWith(ceSkinSubject(draft));
+  }
+  function useBackground(entry){
+    worldSettings.bg = entry ? { id: entry.id, name: entry.name, art: normalizeDrawing(JSON.parse(JSON.stringify((entry.data && entry.data.art) || []))) } : null;
+    if (pmOpen) renderPersonalMenu();
+  }
+  function finishBackgroundDraft(draft){
+    var art = draft.skin.states.scene[0];
+    if (draft.bgEntry){
+      draft.bgEntry.data = { art: art }; touchDrawing(art); persistMySkins();
+      if (worldSettings.bg && worldSettings.bg.id === draft.bgEntry.id) useBackground(draft.bgEntry);
+      else if (pmOpen) renderPersonalMenu();
+      return;
+    }
+    if (!drawingHasArt(art)){ showToast("Nothing drawn — no background made."); return; }
+    askName("Name your background", "Background " + ((mySkins.background || []).length + 1), function(name){
+      if (!mySkins.background) mySkins.background = [];
+      var entry = { id: "bg" + Date.now().toString(36), name: name || "My background", data: { art: art } };
+      mySkins.background.push(entry); persistMySkins();
+      useBackground(entry);
+      showToast("'" + entry.name + "' is behind your level now — it is under World too.");
+    });
+  }
+  var BG_PLAIN_COLOURS = ["#0B1026", "#1C2541", "#2B1B12", "#3A5A40", "#6B4E71", "#8FD0E8", "#F3E2AE", "#F6ECD9", "#111111", "#FFFFFF"];
+  function renderBackgroundTab(el){
+    var h = document.createElement("h3"); h.textContent = "Background"; el.appendChild(h);
+    var note = document.createElement("div"); note.className = "noteText";
+    note.textContent = "A picture behind all three layers, drawn by you. It slides a little slower than the level, the way far-off things do.";
+    el.appendChild(note);
+    var nb = document.createElement("button"); nb.className = "btn small"; nb.textContent = "✏️ Draw a new background";
+    nb.addEventListener("click", function(){ closePersonalMenu(); openBackgroundDraft(null); });
+    el.appendChild(nb);
+    var list = mySkins.background || [];
+    var grid = document.createElement("div"); grid.className = "stickerGrid";
+    var none = document.createElement("div"); none.className = "stickerCell" + (!worldSettings.bg ? " active" : "");
+    var ncv = document.createElement("canvas"); ncv.width = 96; ncv.height = 48;
+    (function(){ var c = ncv.getContext("2d"), g2 = c.createLinearGradient(0, 0, 0, 48); g2.addColorStop(0, "#8FD0E8"); g2.addColorStop(1, "#F3E2AE"); c.fillStyle = g2; c.fillRect(0, 0, 96, 48); c.fillStyle = "rgba(134,161,128,.5)"; c.beginPath(); c.moveTo(0, 48); c.lineTo(0, 36); c.quadraticCurveTo(30, 22, 60, 34); c.quadraticCurveTo(80, 40, 96, 30); c.lineTo(96, 48); c.fill(); })();
+    var nn = document.createElement("div"); nn.className = "nm"; nn.textContent = "The usual scenery";
+    none.appendChild(ncv); none.appendChild(nn);
+    none.addEventListener("click", function(){ useBackground(null); sfx("click"); });
+    grid.appendChild(none);
+    list.forEach(function(entry){
+      var cell = document.createElement("div"); cell.className = "stickerCell" + (worldSettings.bg && worldSettings.bg.id === entry.id ? " active" : "");
+      var cv = document.createElement("canvas"); cv.width = 96; cv.height = 48;
+      try { var art = normalizeDrawing((entry.data && entry.data.art) || []); if (art.length) cv.getContext("2d").drawImage(drawingCanvas(art, 256, 128), 0, 0, 96, 48); } catch(err){}
+      var nm = document.createElement("div"); nm.className = "nm"; nm.textContent = entry.name;
+      cell.appendChild(cv); cell.appendChild(nm);
+      cell.addEventListener("click", function(){ useBackground(entry); sfx("click"); });
+      var row = document.createElement("div"); row.className = "ceChips";
+      var eb = document.createElement("button"); eb.className = "btn tiny"; eb.textContent = "Edit";
+      eb.addEventListener("click", function(ev){ ev.stopPropagation(); closePersonalMenu(); openBackgroundDraft(entry); });
+      row.appendChild(eb);
+      var del = document.createElement("button"); del.className = "btn tiny red del"; del.textContent = "✕"; del.title = "Forget it";
+      del.addEventListener("click", function(ev){ ev.stopPropagation(); mySkins.background = list.filter(function(x){ return x !== entry; }); persistMySkins(); renderPersonalMenu(); showToast("Forgotten — a level already using it keeps its copy."); });
+      cell.appendChild(row); cell.appendChild(del);
+      grid.appendChild(cell);
+    });
+    el.appendChild(grid);
+    var bh = document.createElement("h3"); bh.textContent = "Behind the picture"; el.appendChild(bh);
+    var sw = document.createElement("div"); sw.className = "swatchRow";
+    var sceneBtn = document.createElement("button"); sceneBtn.className = "btn tiny" + (worldSettings.bgPlain ? " ghost" : ""); sceneBtn.textContent = "The usual scenery";
+    sceneBtn.addEventListener("click", function(){ worldSettings.bgPlain = null; sfx("click"); renderPersonalMenu(); });
+    sw.appendChild(sceneBtn);
+    BG_PLAIN_COLOURS.forEach(function(col){
+      var b = document.createElement("div"); b.className = "cswatch" + (worldSettings.bgPlain === col ? " sel" : ""); b.style.background = col; b.title = "A plain " + col;
+      b.addEventListener("click", function(){ worldSettings.bgPlain = col; sfx("click"); renderPersonalMenu(); });
+      sw.appendChild(b);
+    });
+    var pick = document.createElement("input"); pick.type = "color"; pick.value = worldSettings.bgPlain || "#0B1026"; pick.title = "Any colour";
+    pick.addEventListener("input", function(){ worldSettings.bgPlain = pick.value; });
+    pick.addEventListener("change", function(){ renderPersonalMenu(); });
+    sw.appendChild(pick);
+    el.appendChild(sw);
+    var pn = document.createElement("div"); pn.className = "noteText";
+    pn.textContent = "The sky, sun, clouds and hills show wherever the picture is blank — or a plain colour does, for a night, a cave, a room.";
+    el.appendChild(pn);
+    el.appendChild(sliderRow("Distance", 1 - worldSettings.bgSlide, 0, 1, 0.05, function(v){ worldSettings.bgSlide = 1 - v; }, function(v){ return v >= 0.995 ? "the sky" : (v <= 0.005 ? "right behind" : Math.round(v * 100) + "%"); }));
+    var dn = document.createElement("div"); dn.className = "noteText";
+    dn.textContent = "How far away the picture is. Far, and it barely moves as you walk; near, and it comes along with the level.";
+    el.appendChild(dn);
+  }
   /* The saved drawn things, a page each: creatures, projectiles, particles
      (drawn objects sit on My Objects). A thumbnail, a name, and what can
      be done with it — placed ready-made, edited, forgotten. */
@@ -10336,6 +10548,7 @@
       fps: function(st){ return g.skin.fps[st]; },
       setFps: function(st, v){ g.skin.fps[st] = v; },
       aspect: function(){
+        if (kind === "background") return 2;
         if (kind === "emitter" || !host || !host.body) return 1;
         var box = skinBox(host, g); if (!box) return 1;
         return Math.max(0.2, Math.min(5, (box.x2 - box.x) / Math.max(1, box.y2 - box.y)));
@@ -10345,6 +10558,7 @@
         if (kind === "emitter") return "Draw one particle. Several frames play over its life.";
         if (kind === "sticker") return "Draw the sticker. Anything left blank is see-through. Done keeps it in My Stickers and puts it in your hand.";
         if (kind === "material") return "Draw one tile. It repeats edge to edge across whatever you paint with it — the faint copies round the edge show how it joins up.";
+        if (kind === "background") return "Draw the sky and everything far behind your level. It sits behind all three layers and slides a little slower than they do. Whatever you leave blank shows the usual scenery — or a plain colour, from the World page.";
         if (kind === "projectile" && !stepOf(pmEditState)) return "Draw the projectile, nose pointing right — it flies the way it is drawn. Then its hitbox.";
         if (pmEditState === "size") return "How big it is on the level. Set the width and height, then draw it in that space.";
         var d = stepOf(pmEditState);
@@ -10357,8 +10571,16 @@
         if (kind === "anim") return "Draw the object: Idle loops; a wire plays the Action. Then draw its hitbox.";
         return "Idle, Moving, and an Action a wire can play. The faint shape is the body — your drawing goes over it.";
       },
-      previewLabel: kind === "emitter" ? "One particle" : (kind === "sticker" ? "The sticker" : (kind === "material" ? "Tiled" : "On the level")),
+      previewLabel: kind === "emitter" ? "One particle" : (kind === "sticker" ? "The sticker" : (kind === "material" ? "Tiled" : (kind === "background" ? "Behind the level" : "On the level"))),
+      oneFrame: kind === "background" || kind === "material",
       backdrop: function(c2, w, h){
+        if (kind === "background"){
+          // the sky it goes over, faint, so the horizon is where it will be
+          var sky = c2.createLinearGradient(0, 0, 0, h);
+          sky.addColorStop(0, "rgba(143,208,232,0.5)"); sky.addColorStop(0.55, "rgba(191,226,230,0.5)"); sky.addColorStop(1, "rgba(243,226,174,0.5)");
+          c2.fillStyle = sky; c2.fillRect(0, 0, w, h);
+          return;
+        }
         if (kind === "material"){
           // the eight neighbours, faint: what the tile joins onto
           var tile = g.skin.states.tile[0];
@@ -10397,7 +10619,7 @@
       },
       useDrawingAsHitbox: function(){ var idle = skinFrame(g.skin, "idle", 0, false); if (!idle || !drawingHasArt(idle)) return false; g.hitbox = idle.map(function(st){ var c = JSON.parse(JSON.stringify(st)); c.c = "#4FA9D6"; return c; }); touchDrawing(g.hitbox); return true; },
       extraRight: function(el){ ceSkinExtras(el, g); },
-      onClose: function(){ if (kind === "material"){ finishMaterialDraft(g); return; } if (kind === "projectile"){ finishProjectileDraft(g); return; } if (g.draft){ finishStickerDraft(g); return; } if (host){ host.studioHold = false; } applyDrawnSteps(g); if (host && host.body && objects.indexOf(host) >= 0) refreshObjectPhysics(host); renderSelBar(); }
+      onClose: function(){ if (kind === "material"){ finishMaterialDraft(g); return; } if (kind === "background"){ finishBackgroundDraft(g); return; } if (kind === "projectile"){ finishProjectileDraft(g); return; } if (g.draft){ finishStickerDraft(g); return; } if (host){ host.studioHold = false; } applyDrawnSteps(g); if (host && host.body && objects.indexOf(host) >= 0) refreshObjectPhysics(host); renderSelBar(); }
     };
     return sub;
   }
@@ -10460,7 +10682,7 @@
   }
   function savedThingSkin(entry, kind){ return normalizeSkin(entry.data && entry.data.skin ? entry.data.skin : entry.data, kind); }
   function ceSkinExtras(el, g){
-    if (g.kind === "material" || g.kind === "projectile") return;   // a material's palette is the Materials page; a projectile is kept when the studio closes
+    if (g.kind === "material" || g.kind === "projectile" || g.kind === "background") return;   // a material's palette is the Materials page; a projectile and a background are kept when the studio closes
     var kind = g.kind, label = kind === "eye" || kind === "creature" ? "My Creatures" : (kind === "anim" ? "My Objects" : (kind === "sticker" ? "My Stickers" : "My Particles"));
     ceH4(label, el);
     el.appendChild(ceBtn("💾 Save this drawing", "", function(){
@@ -11194,6 +11416,7 @@
     }
     var arr = ceFramesOf(pmEditState);
     var maskStep = ceSubject.isMask && ceSubject.isMask(pmEditState);
+    var oneFrame = !!ceSubject.oneFrame;   // a background, a material's tile: one picture, no frames and no onion skin
     if (sizeStep && ceSubject.leftPanel) ceSubject.leftPanel(ceLeftEl);
     if (maskStep){
       // one drawing, no frames: just the way on
@@ -11211,7 +11434,7 @@
         ceLeftEl.appendChild(ub);
       }
     }
-    if (!maskStep && !sizeStep){
+    if (!maskStep && !sizeStep && !oneFrame){
     ceH4("Frames — " + arr.length, ceLeftEl);
     var strip = document.createElement("div"); strip.className = "ceFrameStrip";
     ceFrameStripEl = strip;
@@ -11249,7 +11472,7 @@
       ceLeftEl.appendChild(sliderRow("Speed", ceSubject.fps(pmEditState) || 2, 1, 30, 1, function(v){ ceSubject.setFps(pmEditState, v); }, function(v){ return Math.round(v) + " frames/s"; }));
     }
     }   // (not a mask step)
-    if (!maskStep && !sizeStep){
+    if (!maskStep && !sizeStep && !oneFrame){
     ceH4("Onion skin", ceLeftEl);
     var on = document.createElement("div"); on.className = "ceChips";
     on.appendChild(ceChip("Previous", ceOnion, function(){ ceOnion = !ceOnion; renderCharEditorPanels(); ceRedraw(); }, "The frame before, faint (O)"));
@@ -11565,7 +11788,8 @@
       { id:"gameplay", label:"Gameplay", render:function(el){ renderToolsTab(el, "gameplay"); } }
     ]},
     { id:"world", icon:"🌍", label:"World", pages:[
-      { id:"world", label:"World Settings", render:renderWorldSettingsTab }
+      { id:"world", label:"World Settings", render:renderWorldSettingsTab },
+      { id:"background", label:"Background", render:renderBackgroundTab }
     ]},
     { id:"character", icon:"🧑", label:"Character", pages:[
       { id:"appearance", label:"Appearance", render:renderCharacterTab },
@@ -14506,6 +14730,23 @@
     gNote.textContent = "Grid snap lines up painting, stamps, flags, bolts and anything you drag. " + bindLabel("grid") + " toggles it.";
     el.appendChild(gNote);
 
+    var th = document.createElement("h3"); th.textContent = "Tips"; el.appendChild(th);
+    var tRow = document.createElement("div"); tRow.className = "segRow";
+    [[true,"💡 On"],[false,"Off"]].forEach(function(o){
+      var b = document.createElement("button");
+      b.textContent = o[1];
+      b.className = tipsOn === o[0] ? "active" : "";
+      b.addEventListener("click", function(){ setTipsOn(o[0]); renderPauseMenu(); });
+      tRow.appendChild(b);
+    });
+    var again = document.createElement("button"); again.textContent = "Show them all again";
+    again.addEventListener("click", function(){ resetTips(); setTipsOn(true); renderPauseMenu(); showToast("Tips will show again from the start."); });
+    tRow.appendChild(again);
+    el.appendChild(tRow);
+    var tNote = document.createElement("div"); tNote.className = "noteText";
+    tNote.textContent = "A short note the first time you pick up a tool or a material, and never again for that one.";
+    el.appendChild(tNote);
+
     var kh = document.createElement("h3"); kh.textContent = "Controls"; el.appendChild(kh);
     var note = document.createElement("div"); note.className = "noteText";
     note.textContent = listeningFor
@@ -14541,9 +14782,10 @@
       "<div><b>Pick up a material</b> Alt + click it</div>",
       "<div><b>Undo / Redo</b> Ctrl+Z, Ctrl+Y</div>",
       "<div><b>Duplicate / Delete</b> Ctrl+D, Del. Del takes the piece you clicked; double-click first to take the whole object.</div>",
-      "<div><b>Pick a material</b> 1–9 (Build)</div>",
-      "<div><b>Grapple rope</b> hold Right-click (Play)</div>",
-      "<div><b>Bolt settings</b> right-click a bolt to cycle Tight → Loose → Motor</div>",
+      "<div><b>The editing tools</b> 1 Move, 2 Erase, 3 Vacuum (Build)</div>",
+      "<div><b>Grab</b> hold Right-click on sponge (Play), or " + bindLabel("grab") + "</div>",
+      "<div><b>Play from here</b> Ctrl+P — Play, starting where you are working</div>",
+      "<div><b>Anything placed</b> right-click a bolt, a gadget or a rope for its box</div>",
       "<div><b>Emotes</b> 1 Happy, 2 Sad, 3 Angry, 4 Bored (Play)</div>",
       "<div><b>Save / Load / New</b> Ctrl+S, Ctrl+L, Ctrl+N</div>"
     ].join("");
@@ -14641,6 +14883,64 @@
      ============================================================ */
   var toastEl = document.getElementById("toast");
   var toastTimer = null;
+  var tipCardEl = document.getElementById("tipCard"), tipShowing = null, tipTimer = 0, tipQueue = [], tipsOn = localStorage.getItem("pg_tips") !== "0", tipsSeen = {};
+  try { tipsSeen = JSON.parse(localStorage.getItem("pg_tips_seen") || "{}") || {}; } catch (e){ tipsSeen = {}; }
+  var TIP_MS = 16000;
+  function tipContent(id){
+    if (TIPS[id]) return TIPS[id];
+    if (id.slice(0, 4) === "mat:"){ var m = matOf(id.slice(4)); if (m && MATERIAL_INFO[id.slice(4)]) return [m.label, MATERIAL_INFO[id.slice(4)]]; }
+    return null;
+  }
+  /* Offer a tip: shown now if nothing is up, else queued behind it — a
+     material and then a shape mode are both worth a word — at most three
+     deep, so a burst of tool changes cannot pile up a lecture. Shown
+     means seen. */
+  function offerTip(id){
+    if (!tipsOn || tipsSeen[id] || !tipContent(id)) return false;
+    if (tipShowing){ if (tipQueue.indexOf(id) < 0 && tipQueue.length < 3) tipQueue.push(id); return false; }
+    showTip(id);
+    return true;
+  }
+  function showTip(id){
+    var c = tipContent(id); if (!c) return;
+    tipsSeen[id] = 1; localStorage.setItem("pg_tips_seen", JSON.stringify(tipsSeen));
+    tipShowing = id;
+    tipCardEl.querySelector(".tipTitle").textContent = c[0];
+    tipCardEl.querySelector(".tipText").textContent = c[1];
+    tipCardEl.hidden = false;
+    requestAnimationFrame(function(){ tipCardEl.classList.add("show"); });
+    clearTimeout(tipTimer); tipTimer = setTimeout(hideTip, TIP_MS);
+  }
+  function hideTip(){
+    clearTimeout(tipTimer);
+    tipCardEl.classList.remove("show"); tipShowing = null;
+    setTimeout(function(){ if (!tipShowing) tipCardEl.hidden = true; }, 320);
+    if (tipQueue.length){ var nx = tipQueue.shift(); setTimeout(function(){ if (!tipShowing) offerTip(nx); }, 400); }
+  }
+  function clearTips(){ tipQueue = []; hideTip(); }
+  function setTipsOn(v){ tipsOn = !!v; localStorage.setItem("pg_tips", tipsOn ? "1" : "0"); if (!tipsOn) clearTips(); }
+  function resetTips(){ tipsSeen = {}; localStorage.setItem("pg_tips_seen", "{}"); tipWatch.started = false; tipWatch.tool = null; tipWatch.pm = null; tipWatch.mode = null; tipWatch.sel = false; tipWatch.box = false; tipWatch.studio = false; }
+  tipCardEl.querySelector("#tipOk").addEventListener("click", function(){ hideTip(); sfx("click"); });
+  tipCardEl.querySelector("#tipOff").addEventListener("click", function(){ setTipsOn(false); showToast("Tips are off — Settings brings them back."); });
+  tipCardEl.addEventListener("pointerdown", function(e){ e.stopPropagation(); });
+  /* What changed since last frame — the tool, the paint mode, the mode, a
+     first selection, the box, the studio. One frame late, and covers
+     every way of getting there. */
+  function tipWatch(){
+    if (!tipsOn) return;
+    if (!tipWatch.started){ tipWatch.started = true; if (mode === "build") offerTip("welcome"); }
+    if (currentTool !== tipWatch.tool){
+      tipWatch.tool = currentTool;
+      var base = matBase(currentTool);
+      if (isMaterialTool()){ if (MATERIAL_INFO[base]) offerTip("mat:" + base); }
+      else if (TIPS["tool:" + base]) offerTip("tool:" + base);
+    }
+    if (isMaterialTool() && paintMode !== tipWatch.pm){ tipWatch.pm = paintMode; if (TIPS["mode:" + paintMode]) offerTip("mode:" + paintMode); }
+    if (mode !== tipWatch.mode){ tipWatch.mode = mode; if (mode === "play") offerTip("play"); }
+    if (selected && !tipWatch.sel){ tipWatch.sel = true; offerTip("select"); }
+    if (selected && opWanted && !tipWatch.box){ tipWatch.box = true; offerTip("box"); }
+    if (!charEditorOverlay.hidden && !tipWatch.studio){ tipWatch.studio = true; offerTip("studio"); }
+  }
   function showToast(msg){
     toastEl.textContent = msg;
     toastEl.classList.add("show");
@@ -14907,21 +15207,53 @@
     }
   }
 
+  /* ---- The device's room. localStorage is about 5MB on most browsers
+     and a level is 100–300KB, so thirty of them do not fit — and a
+     setItem that does not fit THROWS, which used to abort a save with no
+     word to anyone. `storeSet` never throws: true if it went in, false if
+     not. `storageUsed()` is the bytes this origin holds, for the load
+     list's readout (UTF-16, so two bytes a character). ---- */
+  function storeSet(key, str){
+    try { localStorage.setItem(key, str); return true; }
+    catch (e){ return false; }
+  }
+  function storageUsed(){
+    var n = 0;
+    try { for (var i = 0; i < localStorage.length; i++){ var k = localStorage.key(i); n += (k.length + (localStorage.getItem(k) || "").length) * 2; } } catch (e){}
+    return n;
+  }
+  function fmtBytes(n){ return n >= 1048576 ? (n / 1048576).toFixed(1) + "MB" : Math.round(n / 1024) + "KB"; }
+  /* Save the level on this device: the newest first, thirty at most —
+     and if the list does not fit, the OLDEST levels other than this one
+     go until it does. That is what a device with a fixed amount of room
+     has to do; it is said out loud when it happens. Returns false only
+     when the level cannot fit on its own. */
   function saveLocalLevel(data){
-    var list = localLevels(), i;
+    var list = localLevels(), i, mine = -1;
     if (localLevelId){
-      for (i = 0; i < list.length; i++){
-        if (list[i].id === localLevelId){
-          list[i] = { id: localLevelId, data: data };
-          localStorage.setItem("pg_local_levels", JSON.stringify(list.slice(0,30)));
-          return;
-        }
-      }
+      for (i = 0; i < list.length; i++) if (list[i].id === localLevelId){ mine = i; break; }
     }
-    localLevelId = "local_" + Date.now();
-    list.unshift({ id: localLevelId, data: data });
-    localStorage.setItem("pg_local_levels", JSON.stringify(list.slice(0,30)));
+    if (mine >= 0){ list[mine] = { id: localLevelId, data: data }; }
+    else {
+      localLevelId = "local_" + Date.now();
+      list.unshift({ id: localLevelId, data: data }); mine = 0;
+    }
+    list = list.slice(0, 30);
+    var dropped = 0;
+    for (;;){
+      if (storeSet("pg_local_levels", JSON.stringify(list))) break;
+      // does not fit: the oldest level that is not this one goes
+      var victim = -1;
+      for (i = list.length - 1; i >= 0; i--) if (list[i].id !== localLevelId){ victim = i; break; }
+      if (victim < 0){
+        if (dropped) showToast("Made room by removing " + dropped + " old level" + (dropped === 1 ? "" : "s") + " — and this one still does not fit on this device.");
+        return false;
+      }
+      list.splice(victim, 1); dropped++;
+    }
+    if (dropped) showToast("This device was out of room: the oldest " + dropped + " level" + (dropped === 1 ? " was" : "s were") + " removed to fit this one.");
     rememberLevelIds();
+    return true;
   }
 
   /* The level's picture: what is on screen at the moment of a save, shrunk
@@ -14949,14 +15281,13 @@
     var name = document.getElementById("levelNameInput").value.trim() || "Untitled Level";
     var data = serializeLevel(name);
     data.thumb = levelThumb() || undefined;
-    localStorage.setItem("pg_autosave", JSON.stringify(data));
-    autosaveSeen = data.updatedAt; autosaveStoodBack = false;
+    if (storeSet("pg_autosave", JSON.stringify(data))){ autosaveSeen = data.updatedAt; autosaveStoodBack = false; }
     sfx("save");
     dbPromise.then(function(db){
       if (db){
         var rec = { name: data.name, updatedAt: data.updatedAt, payload: JSON.stringify(data), thumb: data.thumb || null };
         var saved = function(){ showToast("Saved '"+name+"' to the cloud ☁"); };
-        var fellBack = function(){ saveLocalLevel(data); showToast("Cloud save failed — saved on this device instead."); };
+        var fellBack = function(){ showToast(saveLocalLevel(data) ? "Cloud save failed — saved on this device instead." : "Cloud save failed, and this device has no room for it — delete some levels from Load."); };
         if (cloudLevelId){
           /* set(), not update(): the record is the whole level, and if the
              document has gone (deleted on another device) this recreates it
@@ -14969,8 +15300,7 @@
           }).catch(fellBack);
         }
       } else {
-        saveLocalLevel(data);
-        showToast("Saved '"+name+"' on this device.");
+        showToast(saveLocalLevel(data) ? "Saved '"+name+"' on this device." : "No room on this device for '"+name+"' — delete some levels from Load, or sign in to save to the cloud.");
       }
     });
   }
@@ -15006,6 +15336,10 @@
         if (!all.length){ levelListEl.innerHTML = '<div class="empty-note">No saved levels yet — build something and press Ctrl+S!</div>'; return; }
         all.sort(function(a,b){ return (b.updatedAt||0)-(a.updatedAt||0); });
         all.forEach(function(row){ levelListEl.appendChild(levelRowEl(row)); });
+        var room = document.createElement("div"); room.className = "empty-note storageNote";
+        var used = storageUsed();
+        room.textContent = localList.length + " on this device, using " + fmtBytes(used) + " of about 5MB" + (used > 4 * 1048576 ? " — nearly full; the oldest go first when a save does not fit" : "");
+        levelListEl.appendChild(room);
       };
       if (db){
         db.collection("levels").orderBy("updatedAt","desc").limit(40).get().then(function(snap){
@@ -15055,7 +15389,7 @@
           });
         } else {
           var list = localLevels().filter(function(l){ return l.id !== row.id; });
-          localStorage.setItem("pg_local_levels", JSON.stringify(list));
+          storeSet("pg_local_levels", JSON.stringify(list));   // smaller than what is there: always fits
           renderLevelList();
         }
       });
@@ -15085,7 +15419,7 @@
      stands back and says so, once; a tab that has been quiet longer than
      that is closed, and this one takes over. `doSave` (the Save button)
      always writes: that is you, on purpose. */
-  var AUTOSAVE_MS = 15000, AUTOSAVE_OTHER_MS = 90000, autosaveSeen = 0, autosaveStoodBack = false;
+  var AUTOSAVE_MS = 15000, AUTOSAVE_OTHER_MS = 90000, autosaveSeen = 0, autosaveStoodBack = false, autosaveNoRoom = false;
   function autosaveNow(){
     if (mode !== "build" || !objects.length) return false;
     var other = null;
@@ -15096,7 +15430,12 @@
       return false;
     }
     var data = serializeLevel(document.getElementById("levelNameInput").value || "Untitled Level");
-    localStorage.setItem("pg_autosave", JSON.stringify(data));
+    if (!storeSet("pg_autosave", JSON.stringify(data))){
+      // said once, not every fifteen seconds; tried again every time
+      if (!autosaveNoRoom){ autosaveNoRoom = true; showToast("The autosave no longer fits on this device — delete old levels from Load, or save to the cloud."); }
+      return false;
+    }
+    if (autosaveNoRoom){ autosaveNoRoom = false; showToast("Autosaving again."); }
     autosaveSeen = data.updatedAt;
     if (autosaveStoodBack){ autosaveStoodBack = false; showToast("Autosaving here again."); }
     return true;

@@ -39,10 +39,33 @@ HOOK = """
     saveThing: function(id, name){ var g = gadgetById(id); if (!g) return false; if (!mySkins[g.kind]) mySkins[g.kind] = []; mySkins[g.kind].push({ id: "s" + Date.now(), name: name, data: packDrawnThing(g) }); persistMySkins(); return true; },
     placeSaved: function(kind, entryId){ var e = (mySkins[kind] || []).find(function(x){ return x.id === entryId; }); if (!e) return false; placePreset = { kind: kind, entry: e }; currentTool = kind; canvas.dataset.tool = kind; return true; },
     playHere: function(){ playFromHere(); return mode; },
+    bgDraft: function(){ openBackgroundDraft(null); },
+    bgEdit: function(i){ openBackgroundDraft((mySkins.background || [])[i || 0] || null); },
+    myBackgrounds: function(){ return (mySkins.background || []).map(function(e){ return { id: e.id, name: e.name, strokes: (e.data && e.data.art || []).length }; }); },
+    useBackground: function(id){ var e = (mySkins.background || []).filter(function(x){ return x.id === id; })[0]; useBackground(e || null); },
+    bg: function(){ return worldSettings.bg ? { id: worldSettings.bg.id, name: worldSettings.bg.name, strokes: worldSettings.bg.art.length } : null; },
+    bgPlain: function(v){ if (v !== undefined) worldSettings.bgPlain = v; return worldSettings.bgPlain; },
+    bgSlide: function(v){ if (v != null) worldSettings.bgSlide = v; return worldSettings.bgSlide; },
+    pixel: function(sx, sy){ var d = ctx.getImageData(Math.round(sx * dpr), Math.round(sy * dpr), 1, 1).data; return [d[0], d[1], d[2], d[3]]; },
+    tip: function(){ return tipShowing; },
+    tipPending: function(){ return tipQueue[0] || null; },
+    tipQueue: function(){ return tipQueue.slice(); },
+    tipsClear: function(){ clearTips(); },
+    tipsSeen: function(){ return Object.keys(tipsSeen); },
+    tipsOn: function(v){ if (v != null) setTipsOn(v); return tipsOn; },
+    tipsReset: function(){ resetTips(); },
+    tipOk: function(){ hideTip(); },
+    openSettings: function(){ openPauseMenu(); pauseView = "settings"; renderPauseMenu(); return pauseOverlay.textContent; },
+    closePause: function(){ closePauseMenu(); },
+    tipsTable: function(){ return TIPS; },
     thumb: function(){ return levelThumb(); },
     lastThumb: function(){ return lastThumb; },
     doSave: function(){ doSave(); },
     localLevels: function(){ return localLevels(); },
+    saveLocal: function(d){ return saveLocalLevel(d); },
+    setLevelIds: function(c, l){ setLevelIds(c, l); },
+    storageUsed: function(){ return storageUsed(); },
+    levelIds: function(){ return { cloud: cloudLevelId, local: localLevelId }; },
     openLoad: function(){ openLoad(); },
     respawn: function(){ respawnPlayer(); },
     minimap: function(){ return { hidden: minimapEl.hidden, on: minimapOn, frame: minimapFrame }; },
@@ -147,7 +170,7 @@ HOOK = """
       if (cmd === 'cursor'){ return ceCursor ? { x: +ceCursor.x.toFixed(3), y: +ceCursor.y.toFixed(3) } : null; }
       if (cmd === 'history'){ return { undo: ceHistory.undo.length, redo: ceHistory.redo.length }; }
       if (cmd === 'setColor'){ pmPaintColor = a; return pmPaintColor; }
-      if (cmd === 'set'){ if (a === 'tool') ceTool = b; if (a === 'symmetry') ceSymmetry = !!b; if (a === 'opacity') ceOpacity = b; if (a === 'smooth') ceSmooth = !!b; renderCharEditorPanels(); return true; }
+      if (cmd === 'set'){ if (a === 'tool') ceTool = b; if (a === 'symmetry') ceSymmetry = !!b; if (a === 'opacity') ceOpacity = b; if (a === 'smooth') ceSmooth = !!b; if (a === 'brush') ceBrushW = b; renderCharEditorPanels(); return true; }
       return null;
     },
     menu: function(section){ if (section === null){ closePersonalMenu(); return false; } pmActiveSection = section; pmActivePage = null; openPersonalMenu(); return pmOpen; },

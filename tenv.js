@@ -52,6 +52,8 @@ async function launch(){
       if (!localStorage.getItem('pg_char_scale') && !localStorage.getItem('pg_test_real_size')) localStorage.setItem('pg_char_scale', '1');
       // and the map the suites' scenes were laid out on (the preview reads these; the game never does)
       if (!localStorage.getItem('pg_test_real_world')){ localStorage.setItem('pg_test_world_w', '4800'); localStorage.setItem('pg_test_world_h', '2400'); }
+      // and no tip cards: one over the bottom of the canvas would eat a suite's clicks (tui.js turns them on itself)
+      if (!localStorage.getItem('pg_test_tips')) localStorage.setItem('pg_tips', '0');
     } catch(e){} });
     return p;
   };

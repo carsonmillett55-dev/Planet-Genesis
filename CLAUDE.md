@@ -19,11 +19,11 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 
 | file | what it is |
 | --- | --- |
-| `planet-genesis.html` | **The game.** ~590KB, the source of truth, what gets published. |
+| `planet-genesis.html` | **The game.** ~900KB, the source of truth, what gets published. |
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` | Playwright suites, 910 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` | Playwright suites, 977 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 910 checks + checkgeom, in order
+npm test                   # all 977 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -73,6 +73,7 @@ node tlogic.js             # 43 — tags and tag sensors, impact sensors, timers
 node tproj.js              # 23 — the launcher (bullets, shots that run out, a ray, a saved object), the projectile sensor, a drawn projectile that hurts a creature, an emitter firing bullets, the save tabs
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
+node tui.js                # 67 — Play from here, the minimap, level pictures, the tips, the device's room, backgrounds
 node checkgeom.js          # geom.js vs the inlined copy
 ```
 
@@ -1947,6 +1948,97 @@ as it always did. Carson: "press the middle mouse button down to hide
 the specific object". The roadmap's "temporarily hide an object in a
 layer".
 
+## Play from here
+
+`playFromHere()` (the "▶ Play here" button in the transport, or Ctrl+P):
+Play, but starting where you are working — on a map this size the start
+can be a long walk from the part being built. `playFrom` is the spot:
+the character's own if it is on screen, else the middle of the view.
+`setMode("play")` reads it once, after `respawnPlayer`, and puts the
+character there (clamped inside the map, velocity zeroed, the 900ms
+hazard grace); the start marker and the checkpoints are untouched, so a
+death goes back to the real checkpoint. Plain Play is unchanged.
+
+## The minimap
+
+`#minimap`, a 240×120 canvas at the bottom-right of Build, hidden in
+Play; M (`minimap` in the key table) toggles it, remembered in
+`pg_minimap`. It frames the **level**, not the map: `minimapFit` takes
+the bounds of every object, the water, the character and the view, pads
+them 12%, holds the canvas's 2:1 shape, and clamps to no narrower than
+`MINIMAP_MIN_W` (3200px) and no wider than the world — the whole
+19200×9600 would squash any level into a few pixels of one corner.
+Objects draw as a rectangle of their first piece's material colour
+(Back and Front at half alpha), water as its bounding box, the character
+as a dot in its colour, the view as a gold box, and the world's edge
+dashed where it falls inside the frame. Redrawn at most twice a second
+(`minimapAt`); it is a rough map, not a second view. A click looks
+there — `camFollow` off, the view centred on the point read against
+`minimapFrame`, the frame the last draw used.
+
+## Backgrounds
+
+A drawn scene behind all three layers — the roadmap's "create and save
+custom level backgrounds in a paint mode". Drawn in the studio as a
+2:1 picture (`kind: "background"`, one state `scene`, the sky faint
+under it as the backdrop; `openBackgroundDraft(entry)`), kept in **My
+Backgrounds** (`mySkins.background`, `{ id, name, data: { art } }`, in
+`pg_my_skins` with the rest) and chosen on **World → Background**
+(`renderBackgroundTab`): the usual scenery, or any saved one, with Edit
+and Forget; a plain colour to paint behind the picture instead of the
+scenery (`bgPlain`, a hex or null — a cave, a room, a night); and
+Distance (`bgSlide`, 0–1: how much of the camera's movement the picture
+follows, shown inverted as "the sky … right behind").
+
+**A level carries its own copy** — `worldSettings.bg = { id, name,
+art }`, `useBackground(entry)` deep-copies the strokes — so a level is
+whole on its own and forgetting a background from the device leaves any
+level using it alone. Editing a saved one (`finishBackgroundDraft` with
+`bgEntry`) re-copies it into the level if the level is using that id.
+All three ride `WORLD_DEFAULTS`, so `packWorldSettings` writes them and
+`unpackPlayerSettings` reads them back through `normalizeBg` (anything
+that is not an object with a strokes array is no background), a colour
+check and a clamp — a broken field loads as the usual scenery.
+
+**Drawn full-resolution, over the scenery, under everything built**
+(`drawLevelBackground`, from `drawBackground` after the half-res
+scenery blit or the plain fill): the strokes rasterise once at
+2048×1024 through `drawingCanvas`, and the picture is drawn the view's
+height ×1.1 tall and twice that wide, its bottom on the bottom of the
+view, sliding sideways by `bgSlide` of the camera's movement and
+repeated across the width as mirrored copies so the join never shows;
+climbing lifts it down a touch (`lift * 0.08 * k`, clamped so nothing
+above it ever shows), as the scenery's horizon sinks. Two or three
+`drawImage` calls a frame, GPU-scaled — not painted into the scenery
+buffer, which is half-res and would soften the strokes.
+
+## Tips
+
+The tutorial mode the roadmap asked for, as LBP does it: a short card
+the first time you try something, and never again for that thing.
+`TIPS` is the table — keyed `welcome`, `play`, `select`, `box`,
+`studio`, `tool:<id>` for every tool and gadget, `mode:<paintMode>` for
+the shapes and the fill; materials come from `MATERIAL_INFO` with the
+material's label as the title. `tipWatch`, run once a frame after the
+HUD, looks at what changed — the tool (`matBase(currentTool)`, so a
+tint is the same material), the paint mode while a material is in hand,
+the mode, a first selection, the box opening, the studio opening — and
+`offerTip(id)`. One card at a time (`#tipCard`, bottom centre): while
+one is up, the next is queued behind it, at most three deep, so a burst
+of tool changes cannot pile up a lecture. Shown means seen
+(`pg_tips_seen`); the card goes by itself after `TIP_MS` (16s), on Got
+it, or when the next comes. "No more tips" on the card and the Tips
+row in Settings set `pg_tips`; "Show them all again" clears the seen
+list and the watch's memory (`resetTips`) so the welcome comes round
+again. `tipWatch` reads state one frame late on purpose: every path
+that picks a tool — the menu, the number row, Alt-click, a wizard
+closing — is covered without touching any of them.
+
+**The suites run with tips off.** `tenv.js` sets `pg_tips` to `0` in
+its init script (unless `pg_test_tips` is set): a card over the bottom
+of the canvas would eat a suite's clicks and drags. `tui.js` turns them
+on itself through the hooks.
+
 ## The hover label
 
 `#hoverLayer`, a whisper under the layer pill: "on **Back**" / **Mid** /
@@ -2020,6 +2112,37 @@ Anything that changes which level is open must set them: loading a row sets
 one and clears the other, `doNew()` clears both, and deleting the open level
 clears whichever matched. `regress.js` covers all four paths.
 
+**A level's picture.** A save takes one — what is on screen, drawn as a
+clean frame (`cleanShot` makes `drawFrame` skip the selection ring, the
+brush ring, the previews and the readouts, and return before the HUD),
+copied cover-fit into a 192×108 canvas and kept as a JPEG data URL,
+`thumb`, about 8KB. `levelThumb` never throws: a canvas that will not
+read hands back the last picture. The cloud record carries `thumb` as
+its own field beside `payload` so the load list never parses a level
+to show it. `lastThumb` — set by a save and by `loadLevelData` — rides
+along in every other serialize, so the autosave and a restore keep the
+picture the level had. The list shows it in `.lthumb`, a blank block
+for a level from before this; only a string beginning `data:image/`
+is ever put in a `url()`.
+
+**The device's room.** localStorage is about 5MB on most browsers and
+a level is 100–300KB, so thirty of them do not fit — and a `setItem`
+that does not fit *throws*, which used to abort a save with no word to
+anyone (the throw landed inside the cloud promise) and made the autosave
+timer throw every fifteen seconds. `storeSet(key, str)` never throws:
+true if it went in, false if not. `saveLocalLevel` returns whether the
+level is on the device: the list is written newest first, thirty at
+most, and when it does not fit the *oldest levels other than this one*
+go, one at a time, until it does — said out loud in a toast, with the
+count — and only a level that cannot fit on its own is refused, the
+list untouched. `doSave` words its toast by that result, and so does
+the cloud fallback. The autosave says once per session that it no
+longer fits (`autosaveNoRoom`) and keeps trying; `persistSavedObjects`
+says so too. The load list ends with what the device holds
+(`storageUsed()`, UTF-16 so two bytes a character, "of about 5MB").
+The real fix is IndexedDB, which has no such limit — a change of store
+with a migration, for a quieter day.
+
 **Two tabs, one autosave.** Every open tab of the game wrote `pg_autosave`
 every 15 seconds, so an older tab left open in the background kept
 writing its stale copy of the level over the one being worked on, and the
@@ -2043,8 +2166,8 @@ one takes over and says that too. The Save button always writes.
 - 🟠 **Autosave writes ~140KB synchronously every 15 seconds.**
 - 🟠 Levels have no owner or thumbnail. They *do* now have an id — see
   **Saving** — but nothing ties one to a person.
-- 🟠 Characters and My Objects are localStorage-only.
-- 🟠 590KB in one file is past the edge of comfortable. A split into src files with a build step is the fix, and would retire the geom.js hazard with it.
+- 🟠 Characters, My Objects and the drawn things are localStorage-only — and so are local levels, which is why the device fills up (see **Saving**, "The device's room"). IndexedDB is the fix.
+- 🟠 900KB in one file is well past the edge of comfortable. A split into src files with a build step is the fix, and would retire the geom.js hazard with it.
 
 ## What's next
 

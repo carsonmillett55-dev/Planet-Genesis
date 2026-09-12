@@ -334,9 +334,12 @@ A track **material**, not a gadget:
 A simple music tab where you **draw the music the way you draw materials.**
 Piano, drums, guitar, bass.
 
-### Backgrounds
+### Backgrounds — DONE 2026-09-12
 
 Create and save custom level backgrounds in a paint mode. Eventually sellable.
+Drawn in the studio as a wide picture, kept in My Backgrounds, chosen on
+World → Background with a plain colour or the usual scenery behind it and a
+Distance for how much it moves with the level. A level carries its own copy.
 
 ### Stickers — DONE 2026-09-11
 
@@ -413,16 +416,29 @@ In the inventory's **Tools tab**, a **"level door"**.
   only?"** and other pertinent creation settings. All toggleable later.
 - Customising the door's own appearance comes later.
 
-### Tutorial mode
+### Tutorial mode — DONE 2026-09-12 (as tips)
 
 Decided 2026-09-10, replacing the always-on hint strip and the tagline under
 the header, both now removed. Carson: "later we can add in a tutorial mode
 that slowly shows you stuff and gives tips."
 
 Teaching happens on a curve rather than as a permanent wall of text across the
-top of the screen. The material explanations in `MATERIAL_INFO` are still in
-the code and are the obvious content to draw on, along with whatever the new
-right-hand panel ends up showing.
+top of the screen. Built as **tips**: a short card the first time you pick up
+a tool, a material, a gadget, enter Play, select something, open the box or
+the studio — and never again for that thing. Off with one click on the card
+or in Settings, and "Show them all again" starts over. A guided walkthrough
+(a first level that teaches step by step) would sit on top of this and is
+still open.
+
+### Editor conveniences — DONE 2026-09-12
+
+- **Play from here** — Play starting where you are working, not at the
+  level's start (the button beside Play, or Ctrl+P). The start marker is
+  untouched; a death still goes back to the real checkpoint.
+- **The minimap** — the whole level in the corner of Build, the view a box
+  on it, a click to look there. M hides it.
+- **Level pictures** — a save takes a picture of what is on screen and the
+  load list shows it.
 
 ### Portals
 
