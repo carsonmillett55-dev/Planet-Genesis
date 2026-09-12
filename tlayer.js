@@ -100,6 +100,18 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('the Peek button in the layer pill shows it on', await p.evaluate(() => !!document.querySelector('#layerHud button.peek.active, .peek.active')));
   await p.keyboard.press('v'); await p.waitForTimeout(100);
   ok('V again turns it off', (await p.evaluate(() => window.__pg.layerAlpha(2))) === 1);
+  // the middle button on a thing hides that thing while held
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('move'); });
+  const mm = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+200, Y+110]);   // the ice on Front over the rubber
+  await p.mouse.move(mm.x, mm.y); await p.mouse.down({ button: 'middle' }); await p.waitForTimeout(100);
+  const pk = await p.evaluate(() => window.__pg.peekObj());
+  ok('holding the middle button on a thing hides that thing', pk !== null, pk);
+  await p.mouse.up({ button: 'middle' }); await p.waitForTimeout(100);
+  ok('letting go brings it back', (await p.evaluate(() => window.__pg.peekObj())) === null);
+  const nowhereM = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+600, Y-100]);
+  const v0 = await p.evaluate(() => window.__pg.view());
+  await p.mouse.move(nowhereM.x, nowhereM.y); await p.mouse.down({ button: 'middle' }); await p.mouse.move(nowhereM.x - 60, nowhereM.y, { steps: 4 }); await p.mouse.up({ button: 'middle' }); await p.waitForTimeout(100);
+  ok('on nothing, the middle button still pans', (await p.evaluate(() => window.__pg.peekObj())) === null && (await p.evaluate(() => window.__pg.view())).x !== v0.x);
 
   await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('move'); });
   await p.mouse.move(1180, 700);

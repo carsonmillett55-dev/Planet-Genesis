@@ -41,6 +41,7 @@ HOOK = """
     pickSticker: function(id){ var e = (mySkins.sticker || []).find(function(s){ return s.id === id; }); if (!e) return false; stickerPick = e; currentTool = "sticker"; canvas.dataset.tool = "sticker"; return true; },
     stickerHitAt: function(x, y){ var g = gadgetAt(x, y); return g ? g.id : null; },
     objAlpha: function(id, v){ var o = objects.find(function(o){ return o.id === id; }); if (!o) return null; if (v != null) o.alpha = v; return o.alpha == null ? 1 : o.alpha; },
+    peekObj: function(){ return peekObj ? peekObj.id : null; },
     peek: function(v){ if (v != null && !!v !== layerPeek) togglePeek(); return layerPeek; },
     layerAlpha: function(l){ return layerDepth(l).a; },
     enclosedArea: function(x, y){ var r = enclosedRegionAt(x, y, buildLayer); return r ? Math.round(Math.abs(pgArea(r))) : 0; },

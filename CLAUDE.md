@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` | Playwright suites, 838 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` | Playwright suites, 844 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 838 checks + checkgeom, in order
+npm test                   # all 844 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -50,8 +50,8 @@ Or one suite at a time:
 
 ```
 node regress.js            # 45 — geometry, save/load, play mode, loop and save safety, two tabs and the autosave, map edges, the big map and an old level's move to its bottom
-node tsel.js               # 52 — selection, marquee, group transforms, resize, detach, the number row, the transforms as keys, dragging with physics on
-node tlayer.js             # 17 — layer accuracy, ranked picking, the hover label, peek
+node tsel.js               # 54 — selection, marquee, group transforms, resize, detach, the number row, the transforms as keys, dragging with physics on, the marquee by material
+node tlayer.js             # 20 — layer accuracy, ranked picking, the hover label, peek, the middle button hiding one thing
 node tmat.js               # 33 — materials, colours, glass, light, opacity, a drawn material of your own
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
@@ -68,7 +68,7 @@ node twater.js             # 15 — the eraser by layer, the vacuum, water dryin
 node tstudio.js            # 71 — the studio: strokes, undo/redo, the tools, frames, playback, no rig; the brush ring, filled shapes, nudge and flip, the Settings card's keys; the character's size and drawn hitbox
 node tfill.js              # 14 — the fill: a closed outline fills with material or water; open space, material, a gap and an island
 node tfan.js               # 9 — the Fan: lifts the player and a loose crate, hovers in reach, wired on/off, saved
-node tstickers.js          # 14 — stickers: drawn, kept, stuck on a thing or the background, riding, picked by their picture, size/turn/flip, saved
+node tstickers.js          # 15 — stickers: drawn, kept, stuck on a thing (never on nothing), riding, picked by their picture, size/turn/flip, saved
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
@@ -780,10 +780,16 @@ a weird closed outline in wood, fill the interior with any material".
 fill; otherwise the hole ring containing it, reversed to an outer,
 cleaned, less any island sitting inside it (`pgDiff` with the union).
 The union is cached (`fillCache`) by `layerGeomKey` — every object on
-the layer's id, `geomRev`, rounded position and angle — so hovering
-does not redo it unless something changed; the cursor overlay shows the
-space a click would fill, lit in the material's colour, recomputed at
-most every 120ms.
+the layer's id and `geomRev`, a still object's position and angle
+exactly, **a free object's at 24px and a tenth of a turn** — so hovering
+does not redo it unless something changed. An exact key on a moving
+creature or a falling crate changed every frame and had the union — tens
+of milliseconds on a big level — redone every hover tick, with the Fill
+mode remembered across sessions: Carson's "the game is very laggy now".
+The hover preview is recomputed only when the cursor has moved, at most
+four times a second, and **given up for the session once a union has
+taken over 40ms** (`fillHoverSlow`; a click still fills — `fillAt` gives
+it another chance).
 
 The fill is committed through `paintPolyOnLayer` — the tail of
 `commitShapeDrag`, factored out — with an explicit host list from
@@ -1390,7 +1396,11 @@ box has Size, Turn, Flip, "Edit the drawing" (this one's own copy) and
 **Drawn as the picture, no marker** (`drawStickerHere`, from
 `drawGadgets` in the sticker's frame): turned, flipped, the drawing over
 its square, faded with its layer; selected in Build, a dashed frame.
-**Stuck to a thing, it is trimmed to the thing's shape** (a clip to the
+**Stickers stick to material only** — a click on nothing places nothing
+(`gadgetNeedsHost` true for them; a click finds the build layer's object
+first, then any layer's through `objectAt`), and a drag off onto nothing
+snaps back, as any gadget's does. Carson: "only be able to be placed on
+materials". **Stuck to a thing, it is trimmed to the thing's shape** (a clip to the
 host's `objectPaths` regions, back in the host's frame), as LBP trims a
 sticker to the material it is on. **Picked by its picture**: `gadgetAt`
 tries every marker first, then the stickers topmost-first through
@@ -1524,7 +1534,10 @@ outside it. Now:
   `newObjectFromPoly`, so nothing is ever built outside it.
 - **The zoom floor keeps the view inside the map** on both axes, so zooming
   out never shows the void past the edge. `applyCamScale` raises
-  `CAM_ZOOM_MIN` to whatever that takes.
+  `CAM_ZOOM_MIN` to whatever that takes. `CAM_ZOOM_MIN` itself is 0.04 —
+the whole map can be on screen, if the screen allows — and zoomed out
+past 0.45 the water draws as run rectangles only, no blobs and no
+surface curve, since at that distance nothing of them shows.
 - **Resize cannot make something that does not fit**, per axis.
 
 ## Resizing
@@ -1784,6 +1797,13 @@ What is changed in Play is discarded with Play, like everything else.
 loses the button on a negative page coordinate and the *next* drag ends
 after its first step — an hour of "why is this rect 1/6 the size".
 
+## Frame times: F3
+
+`showPerf`, F3: a readout in the corner — the frame's length averaged
+(`perfAvg`), the worst frame of the last two seconds, the draw's own
+time, physics steps this frame, running or paused, and what is on the
+level. For when the game feels slow on a machine that is not this one.
+
 ## Layer peek
 
 `layerPeek` (the 👁 Peek button in the layer pill, or V — `peek` in the
@@ -1792,9 +1812,14 @@ you are painting on draws at 0.18 alpha (`peekFade` inside `layerDepth`),
 so you can see and work on what is behind it — LBP's peek. Building on
 Back fades Mid and Front; on Mid, Front; on Front, nothing. Only the
 alpha changes and the alpha is applied at the blit, so the bitmap cache
-is untouched. Off in Play, and not saved. From the roadmap's "temporarily
-hide an object in a layer" / "layer peek"; hiding a single object is not
-done.
+is untouched. Off in Play, and not saved. **And one thing at a time: hold the middle
+button on an object** and that whole object is hidden while you hold —
+any layer — drawn as a faint outline only (`peekObj`, set in the
+canvas's pointerdown when the middle button lands on something,
+cleared on the window's pointerup); on nothing, the middle button pans
+as it always did. Carson: "press the middle mouse button down to hide
+the specific object". The roadmap's "temporarily hide an object in a
+layer".
 
 ## The hover label
 
@@ -1813,6 +1838,18 @@ They act only in Build with something selected, so plain Z with nothing
 selected is nothing (Ctrl+Z is still undo, handled before). The buttons'
 tooltips name the keys through `bindLabel`. The roadmap's "transforms as
 keybinds".
+
+## Selection follows the shape
+
+The selection and hover outlines stroke the object's own regions
+(`objectPaths(o).regions[i].path` in the body's frame, `shapeOutline` in
+`drawSelectionOutline`), not the bounds rectangle — a diagonal plank's
+box is mostly air, and Carson wanted the box gone. The four corner
+knobs stay, as the resize handles. **The marquee picks by material**:
+an object is in the rubber band if any of its pieces intersects the
+band's rectangle (`pgIntersects`, after a cheap bounds test), so a band
+round two dots inside a diagonal plank's box picks the dots and not the
+plank. Carson: "only the specific material touching inside the box".
 
 ## Selection, and what Del means
 

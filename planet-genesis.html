@@ -2313,7 +2313,7 @@
     var pk = document.createElement("button");
     pk.textContent = "👁 Peek";
     pk.className = "peek" + (layerPeek ? " active" : "");
-    pk.title = "See through the layers in front of the one you are painting on — " + bindLabel("peek");
+    pk.title = "See through the layers in front of the one you are painting on — " + bindLabel("peek") + ". To hide one thing, hold the middle mouse button on it.";
     pk.addEventListener("click", function(){ togglePeek(); });
     layerHudEl.appendChild(pk);
   }
@@ -2828,6 +2828,7 @@
   function removeObject(obj){
     var idx = objects.indexOf(obj);
     if (idx < 0) return;
+    if (peekObj === obj) peekObj = null;
     dropBitmap(obj);
     bolts.slice().forEach(function(b){ if (b.objA===obj || b.objB===obj) removeBolt(b); });
     gadgets.slice().forEach(function(g){ if (g.obj === obj) removeGadget(g); });
@@ -3093,7 +3094,7 @@
   /* A camera is the one gadget that does not need a host: put it in empty
      air and it stays there, on the layer it was placed. Everything else
      sits on an object. */
-  function gadgetNeedsHost(kind){ return kind !== "camera" && kind !== "anim" && kind !== "creature" && kind !== "sticker"; }
+  function gadgetNeedsHost(kind){ return kind !== "camera" && kind !== "anim" && kind !== "creature"; }   // a sticker sticks to material
   function addGadget(kind, obj, pt, extra){
     if (GADGET_KINDS.indexOf(kind) < 0) return null;
     if (!obj || !obj.body){ if (gadgetNeedsHost(kind)) return null; obj = null; }
@@ -5152,7 +5153,7 @@
      low ceiling and the same drawing reads as ducking (a drawn Crouch
      pose goes in the shorter box). Standing back up needs the headroom;
      `setCrouch` checks with a probe body before swapping. */
-  var CROUCH_K = 0.6, crouchK = 1, crouching = false, sliding = false, slideUntil = 0, slideDir = 0, slideV = 0;
+  var CROUCH_K = 0.6, crouchK = 1, crouching = false, sliding = false, slideUntil = 0, slideDir = 0, slideV = 0, standTry = 0;
   var SLIDE_MS = 480, SLIDE_DECAY = 0.988;
   // the polygon a drawing makes, cached: a crouch rebuilds the body, and a
   // drawing of a hundred strokes is a hundred capsule unions
@@ -5671,6 +5672,7 @@
     if (isAction("recenter", e.code) && !e.repeat){ recenterCamera(); }
     if (isAction("grid", e.code) && !e.repeat && mode === "build"){ toggleGrid(); }
     if (isAction("peek", e.code) && !e.repeat && mode === "build"){ togglePeek(); }
+    if (e.code === "F3" && !e.repeat){ e.preventDefault(); showPerf = !showPerf; perfWorst = 0; showToast(showPerf ? "Frame times on (F3 again to hide)" : "Frame times off"); }
     // the transforms, as keys: the object box's Turn & flip and Layer buttons
     if (mode === "build" && selList().length && !e.repeat){
       if (isAction("rotLeft", e.code)){ e.preventDefault(); rotateSelected(-Math.PI/12); return; }
@@ -5769,7 +5771,7 @@
       if (runSpeed > walkSpeedNow() * 0.8){ sliding = true; slideUntil = performance.now() + SLIDE_MS; slideDir = player.velocity.x > 0 ? 1 : -1; slideV = runSpeed; sfx("land"); }
       setCrouch(true);
     } else if (crouching && (!input.down || flying || grabConstraint || frozen)){
-      setCrouch(false);   // refused while something is over your head; tried again next step
+      if ((standTry++ & 7) === 0) setCrouch(false);   // refused while something is over your head; tried again every few steps (the probe is a whole body build)
     }
     if (sliding && (performance.now() > slideUntil || !grounded || !crouching)) sliding = false;
     var speed = flying ? FLY_SPEED : walkSpeedNow() * (crouching ? 0.5 : 1);
@@ -6248,7 +6250,7 @@
      pan — and the moment you pan, the camera stops chasing you until
      you ask it to come back. Play always follows. ------------------- */
   var camZoom = parseFloat(localStorage.getItem("pg_zoom") || "1") || 1;
-  var CAM_ZOOM_MIN = 0.3, CAM_ZOOM_MAX = 3;
+  var CAM_ZOOM_MIN = 0.04, CAM_ZOOM_MAX = 3;   // the real floor is whatever keeps the view inside the map — the whole map on screen, if the screen allows
   var camFollow = true;
   var buildZoom = camZoom;   // the editor's zoom, kept while Play uses the level's own
 
@@ -6549,7 +6551,7 @@
      the one you are painting on goes faint, so you can see and work on
      what is behind it — LBP's peek. Only the alpha changes, and the
      alpha is applied at the blit, so the bitmap cache is untouched. */
-  var layerPeek = false;
+  var layerPeek = false, peekObj = null;   // peekObj: the one object hidden while the middle button is held on it
   function peekFade(layer){ return layerPeek && mode === "build" && layer > buildLayer ? 0.18 : 1; }
   function layerDepth(layer){
     var pk = peekFade(layer);
@@ -7118,6 +7120,16 @@
     var b = obj.body, g = objectPaths(obj), depth = layerDepth(obj.layer);
     if (obj.alpha != null && obj.alpha < 1) depth = { a: depth.a * obj.alpha, s: depth.s, off: depth.off, shade: depth.shade };   // its own opacity, on top of the layer's fade
     if (!g.regions.length) return;
+    if (obj === peekObj){
+      // hidden while the middle button is held on it: just its outline, faint, so it is not simply gone
+      ctx.save();
+      ctx.translate(b.position.x, b.position.y); ctx.rotate(b.angle);
+      ctx.globalAlpha = 0.35; ctx.strokeStyle = "#F6ECD9"; ctx.lineWidth = 1.5/camScale; ctx.setLineDash([5/camScale, 4/camScale]);
+      for (var pk = 0; pk < g.regions.length; pk++) ctx.stroke(g.regions[pk].path);
+      ctx.setLineDash([]);
+      ctx.restore();
+      return;
+    }
     var sg = objectSkinGadget(obj);
     if (sg && drawSkinOn(obj, sg, depth)) return;
     ctx.save();
@@ -7899,8 +7911,15 @@
       } else if (isMaterialTool() && paintMode === "fill"){
         // Fill mode: the enclosed space under the cursor, lit, so you can
         // see what a click would fill before you click
-        var nowF = performance.now();
-        if (nowF - fillHoverAt > 120){ fillHoverAt = nowF; fillHover = enclosedRegionAt(mouseWorld.x, mouseWorld.y, buildLayer); }
+        // recomputed only when the cursor has moved, no more than four times a
+        // second, and not at all once the union has shown itself slow (a click
+        // still fills; only the preview is given up)
+        var nowF = performance.now(), movedF = !fillHoverFrom || Math.abs(fillHoverFrom.x - mouseWorld.x) > 2 || Math.abs(fillHoverFrom.y - mouseWorld.y) > 2;
+        if (!fillHoverSlow && movedF && nowF - fillHoverAt > 250){
+          fillHoverAt = nowF; fillHoverFrom = { x: mouseWorld.x, y: mouseWorld.y };
+          fillHover = enclosedRegionAt(mouseWorld.x, mouseWorld.y, buildLayer);
+          if (fillCache.ms > 40){ fillHoverSlow = true; fillHover = null; }
+        }
         ctx.save();
         if (fillHover && fillHover.length){
           var fp = mpPath(fillHover), fm = matOf(currentTool);
@@ -8069,7 +8088,7 @@
        rectangle, which the GPU fills for almost nothing, where a round
        blob per cell was thousands of little arcs a frame once the cells
        went to 8px. Only the cells on the outside of the mass are blobs. */
-    var runStart = -1;
+    var runStart = -1, far = camScale < 0.45;   // zoomed right out, every wet cell is a run: no blobs, no surface curve, at a distance nothing shows
     var isWet = function(idx){ return waterLevels[idx] > W_MIN || waterSolid[idx]; };
     for (var row = visR0; row <= visR1; row++){
       runStart = -1;
@@ -8078,8 +8097,8 @@
         var lv = col <= visC1 ? waterLevels[i] : 0;
         var interior = false;
         if (lv > W_MIN && col <= visC1){
-          interior = row > 0 && row + 1 < WROWS && col > 0 && col + 1 < WCOLS &&
-                     isWet(i - WCOLS) && isWet(i + WCOLS) && isWet(i - 1) && isWet(i + 1) && waterLevels[i - WCOLS] > W_MIN;
+          interior = far || (row > 0 && row + 1 < WROWS && col > 0 && col + 1 < WCOLS &&
+                     isWet(i - WCOLS) && isWet(i + WCOLS) && isWet(i - 1) && isWet(i + 1) && waterLevels[i - WCOLS] > W_MIN);
         }
         if (interior){ if (runStart < 0) runStart = col; continue; }
         if (runStart >= 0){
@@ -8427,6 +8446,12 @@
   }
   function drawFrame(now){
     var frameK = Math.max(0.2, Math.min(3, (now - lastFrameT)/16.666));
+    if (showPerf){
+      var gap = now - lastFrameT;
+      if (gap > 0 && gap < 1000){ perfAvg += (gap - perfAvg) * 0.08; if (gap > perfWorst || now - perfWorstAt > 2000){ perfWorst = gap; perfWorstAt = now; } }
+      perfLastSteps = runner.steps - (runner.stepsSeen || 0); runner.stepsSeen = runner.steps;
+      perfDrawT0 = performance.now();
+    }
     lastFrameT = now;
     // Safety net: nothing should leave a rebuild batch open across a
     // frame, but if anything ever does, this flushes it rather than
@@ -8484,10 +8509,33 @@
     drawMarquee();
     drawCursorOverlay();
     ctx.restore();
+    if (showPerf){ perfDrawMs += (performance.now() - perfDrawT0 - perfDrawMs) * 0.1; drawPerfHud(now); }
     updatePersonalMenuPos();
     updateSelBarPos();
     pruneObjCtxMenu();
     updateHoverLayer();
+  }
+  /* F3: a frame-time readout in the corner, for when the game feels slow
+     on a machine that is not this one — what the frame costs, how many
+     physics steps it took, how much is on screen. Averaged so it can be
+     read; the worst recent frame beside it, since a stutter is a spike. */
+  var showPerf = false, perfAvg = 8, perfWorst = 0, perfWorstAt = 0, perfLastSteps = 0, perfDrawMs = 0, perfDrawT0 = 0;
+  function drawPerfHud(now){
+    var dt = now - lastFrameT + 0.0001;   // lastFrameT was set at the top of this frame to `now`; the frame's own length is the previous gap
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var lines = [
+      perfAvg.toFixed(1) + " ms a frame (" + Math.round(1000 / Math.max(1, perfAvg)) + " fps) · worst " + perfWorst.toFixed(0) + " ms",
+      "draw " + perfDrawMs.toFixed(1) + " ms · " + perfLastSteps + " physics steps · " + (runner.enabled ? "running" : "paused"),
+      objects.length + " objects · " + gadgets.length + " gadgets · water " + waterCount + " cells · zoom " + Math.round(camZoom * 100) + "%"
+    ];
+    ctx.font = "12px monospace"; ctx.textAlign = "right"; ctx.textBaseline = "top";
+    var w = 0; lines.forEach(function(l){ w = Math.max(w, ctx.measureText(l).width); });
+    var x = viewRectW - 12, y = 58;
+    ctx.fillStyle = "rgba(43,27,18,0.75)"; ctx.fillRect(x - w - 10, y - 6, w + 20, lines.length * 16 + 12);
+    ctx.fillStyle = "#F6ECD9";
+    lines.forEach(function(l, i){ ctx.fillText(l, x, y + i * 16); });
+    ctx.restore();
   }
   var hoverLayerEl = document.getElementById("hoverLayer"), hoverLayerShown = "";
   function updateHoverLayer(){
@@ -9243,7 +9291,7 @@
   function renderStickersTab(el){
     var h = document.createElement("h3"); h.textContent = "Stickers"; el.appendChild(h);
     var note = document.createElement("div"); note.className = "noteText";
-    note.textContent = "Draw a sticker, then click on anything in your level to stick it there — on any layer, or on the background. It rides with what it is stuck to. Right-click a placed one for its size, turn and flip.";
+    note.textContent = "Draw a sticker, then click on anything you have built to stick it there — any layer. It rides with the thing and is trimmed to its shape. Right-click a placed one for its size, turn and flip.";
     el.appendChild(note);
     var newBtn = document.createElement("button"); newBtn.className = "btn small"; newBtn.textContent = "✏️ Draw a new sticker";
     newBtn.addEventListener("click", function(){ openStickerDraft(); });
@@ -10903,7 +10951,9 @@
     }
     if (kind === "sticker"){
       if (!stickerPick){ showToast("Pick a sticker first — Build → Stickers."); sfx("deny"); return; }
-      var sHost = objectUnderOn(pt.x, pt.y, buildLayer, 6);   // on the thing under the cursor, or the background
+      var sHost = objectUnderOn(pt.x, pt.y, buildLayer, 6);   // on the thing under the cursor — stickers stick to material, as LBP's do
+      if (!sHost){ var anyHit = objectAt(pt.x, pt.y); sHost = anyHit ? anyHit.obj : null; }   // any layer's thing under the cursor
+      if (!sHost){ showToast("Stickers stick to material — click on something you have built."); sfx("deny"); return; }
       pushUndo("placing a sticker");
       var gS = addGadget("sticker", sHost, pt, { skin: stickerPick.data, size: stickerSize, rot: stickerRot });
       selectGadget(gS);
@@ -11336,13 +11386,21 @@
      redo it unless something moved; a level's worth of pieces unions in
      tens of milliseconds. Pieces sitting inside the hole are cut out of
      the fill, so filling round an island leaves the island. */
-  var fillCache = { key: null, union: [] }, fillHover = null, fillHoverAt = 0;
+  var fillCache = { key: null, union: [], ms: 0 }, fillHover = null, fillHoverAt = 0, fillHoverSlow = false, fillHoverFrom = null;
+  /* The key that says the union is stale. A moving object (a creature, a
+     falling crate) would change an exact key every frame and have the
+     union — tens of milliseconds on a big level — redone every hover
+     tick: that was Carson's "the game is very laggy now" after the fill
+     landed with Fill left picked. Free objects go in at 24px and a tenth
+     of a turn; still objects exactly. */
   function layerGeomKey(layer){
     var k = layer + ":" + objects.length;
     for (var i = 0; i < objects.length; i++){
       var o = objects[i];
       if (o.layer !== layer || !o.body) continue;
-      k += "," + o.id + ":" + (o.geomRev || 0) + ":" + Math.round(o.body.position.x) + ":" + Math.round(o.body.position.y) + ":" + o.body.angle.toFixed(2);
+      var st = o.body.isStatic;
+      k += "," + o.id + ":" + (o.geomRev || 0) + ":" + (st ? Math.round(o.body.position.x) + ":" + Math.round(o.body.position.y) + ":" + o.body.angle.toFixed(2)
+                                                        : Math.round(o.body.position.x / 24) + ":" + Math.round(o.body.position.y / 24) + ":" + o.body.angle.toFixed(1));
     }
     return k;
   }
@@ -11352,7 +11410,10 @@
       if (o.layer !== layer || !o.body) return;
       o.pieces.forEach(function(pc){ var m = matOf(pc.m); if (!m || m.isFluid || m.isMask) return; polys.push(objToWorld(o, pc.poly)); });
     });
-    return polys.length ? pgUnionMany(polys, GEOM_TOL) : [];
+    var t0 = performance.now();
+    var u = polys.length ? pgUnionMany(polys, GEOM_TOL) : [];
+    fillCache.ms = performance.now() - t0;
+    return u;
   }
   function enclosedRegionAt(x, y, layer){
     var key = layerGeomKey(layer);
@@ -11372,6 +11433,7 @@
     return null;
   }
   function fillAt(pt){
+    fillHoverSlow = false;
     var mat = matOf(currentTool);
     if (!mat || mat.isMask) return;
     if (mat.isFluid && buildLayer !== MID_LAYER){ showToast("Water only works on the Mid layer — switch to Mid to pour it."); sfx("deny"); return; }
@@ -11989,7 +12051,7 @@
         stickerPick = entry; stickerSize = g.size; stickerRot = g.rot || 0; pickTool("sticker", "Sticker"); showToast("Click to stick another one.");
       }, "wide");
       var sn = document.createElement("div"); sn.className = "noteText";
-      sn.textContent = g.obj ? "Stuck to " + (g.obj.pieces[0] && matOf(g.obj.pieces[0].m) ? matOf(g.obj.pieces[0].m).label.toLowerCase() : "an object") + " — drag it off onto something else, or onto nothing to stick it to the background." : "On the background — drag it onto something and it rides with it.";
+      sn.textContent = "Stuck to " + (g.obj && g.obj.pieces[0] && matOf(g.obj.pieces[0].m) ? matOf(g.obj.pieces[0].m).label.toLowerCase() : "an object") + " — drag it onto something else to move it there.";
       sn.style.flexBasis = "100%"; opSection(null).appendChild(sn);
     }
     if (g.kind === "fan"){
@@ -12381,31 +12443,24 @@
     var o = selected && objects.indexOf(selected) >= 0 ? selected : null;
     var h = (currentTool === "move" && hoverObj && hoverObj !== o &&
              objects.indexOf(hoverObj) >= 0) ? hoverObj : null;
-    if (h){
-      var hb = h.body.bounds;
+    // Outlines follow the shape itself, not the box round it — a diagonal
+    // plank's box is mostly air, and Carson wanted the box gone.
+    var shapeOutline = function(obj, colour, alpha, width, dash){
+      var paths = objectPaths(obj), bd = obj.body;
       ctx.save();
-      ctx.globalAlpha = 0.55;
-      ctx.strokeStyle = "#F6ECD9"; ctx.lineWidth = 2/camScale;
-      ctx.setLineDash([6/camScale, 5/camScale]);
-      ctx.strokeRect(hb.min.x-3, hb.min.y-3, (hb.max.x-hb.min.x)+6, (hb.max.y-hb.min.y)+6);
+      ctx.translate(bd.position.x, bd.position.y); ctx.rotate(bd.angle);
+      ctx.globalAlpha = alpha; ctx.strokeStyle = colour; ctx.lineWidth = width/camScale; ctx.lineJoin = "round";
+      if (dash){ ctx.setLineDash([dash[0]/camScale, dash[1]/camScale]); ctx.lineDashOffset = -performance.now()/70/camScale; }
+      for (var pi = 0; pi < paths.regions.length; pi++) ctx.stroke(paths.regions[pi].path);
       ctx.setLineDash([]);
       ctx.restore();
-    }
+    };
+    if (h) shapeOutline(h, "#F6ECD9", 0.6, 2.4, [6, 5]);
     if (!o) return;
     // every other object in the selection gets its own quiet ring
     var group = selList();
     if (group.length > 1){
-      ctx.save();
-      ctx.globalAlpha = 0.5;
-      ctx.strokeStyle = "#F2B705"; ctx.lineWidth = 2/camScale;
-      ctx.setLineDash([6/camScale, 5/camScale]);
-      group.forEach(function(g){
-        if (g === o) return;
-        var gb = g.body.bounds;
-        ctx.strokeRect(gb.min.x-4, gb.min.y-4, (gb.max.x-gb.min.x)+8, (gb.max.y-gb.min.y)+8);
-      });
-      ctx.setLineDash([]);
-      ctx.restore();
+      group.forEach(function(g){ if (g !== o) shapeOutline(g, "#F2B705", 0.55, 2.4, [6, 5]); });
     }
     // the piece under the cursor, drawn inside the object's own outline
     if (selectedRegion && selectedRegion.obj === o && regionValid(selectedRegion) && !regionIsWhole(selectedRegion)){
@@ -12426,25 +12481,11 @@
     }
     var sb = selectionBounds();
     var b = sb ? { min:{x:sb.minX,y:sb.minY}, max:{x:sb.maxX,y:sb.maxY} } : o.body.bounds;
-    var pulse = 0.55 + Math.sin(performance.now()/260)*0.2;
+    var pulse = 0.6 + Math.sin(performance.now()/260)*0.2;
+    // the selected shape itself, glowing; the box round it is gone — only
+    // its four corners remain, as the resize handles
+    shapeOutline(o, "#F2B705", pulse, 3.4, [9, 6]);
     ctx.save();
-    ctx.globalAlpha = pulse;
-    ctx.strokeStyle = "#F2B705"; ctx.lineWidth = 3.2/camScale;
-    ctx.setLineDash([9/camScale, 6/camScale]);
-    ctx.lineDashOffset = -performance.now()/70/camScale;
-    ctx.strokeRect(b.min.x-5, b.min.y-5, (b.max.x-b.min.x)+10, (b.max.y-b.min.y)+10);
-    ctx.setLineDash([]);
-    // corner ticks, so the selection reads as a handle rather than a box
-    ctx.globalAlpha = 0.95; ctx.lineWidth = 3.4/camScale;
-    var k = Math.min(16, (b.max.x-b.min.x)/3, (b.max.y-b.min.y)/3)/1;
-    [[b.min.x-5,b.min.y-5,1,1],[b.max.x+5,b.min.y-5,-1,1],
-     [b.min.x-5,b.max.y+5,1,-1],[b.max.x+5,b.max.y+5,-1,-1]].forEach(function(c){
-      ctx.beginPath();
-      ctx.moveTo(c[0] + c[2]*k, c[1]);
-      ctx.lineTo(c[0], c[1]);
-      ctx.lineTo(c[0], c[1] + c[3]*k);
-      ctx.stroke();
-    });
     /* Solid knobs on the corners, so it reads as something you can pull
        rather than a decoration. Sized in screen pixels, so they stay
        grabbable however far out you are zoomed. */
@@ -13141,9 +13182,17 @@
     var x0 = Math.min(m.a.x, m.b.x), x1 = Math.max(m.a.x, m.b.x);
     var y0 = Math.min(m.a.y, m.b.y), y1 = Math.max(m.a.y, m.b.y);
     if (x1 - x0 < 5 && y1 - y0 < 5) return;         // a click, not a drag
+    // what the box actually touches — the material, not the box round it: a
+    // diagonal plank's bounds are huge, and a marquee over the dots beside
+    // it kept catching the plank. Carson: "only the specific material
+    // touching inside the box"
+    var boxPoly = [[[[x0, y0], [x1, y0], [x1, y1], [x0, y1]]]];
     var hits = objects.filter(function(o){
       var b = o.body.bounds;
-      return b.max.x >= x0 && b.min.x <= x1 && b.max.y >= y0 && b.min.y <= y1;
+      if (b.max.x < x0 || b.min.x > x1 || b.max.y < y0 || b.min.y > y1) return false;   // bounds first, cheaply
+      var local = objToLocal(o, boxPoly);
+      for (var i = 0; i < o.pieces.length; i++) if (pgIntersects(o.pieces[i].poly, local)) return true;
+      return false;
     });
     if (!hits.length){
       if (!m.add) clearSelection();
@@ -13315,7 +13364,18 @@
   }, { passive:false });
 
   canvas.addEventListener("pointerdown", function(e){
-    if (e.button === 1){ e.preventDefault(); beginPan(e); canvas.setPointerCapture(e.pointerId); return; }
+    if (e.button === 1){
+      e.preventDefault();
+      // LBP's peek, Carson's way: hold the middle button on a thing and
+      // that thing — the whole object, whatever layer — is hidden while
+      // you hold, so you can see and reach what is behind it. On nothing,
+      // the button pans as it always did.
+      if (mode === "build"){
+        var pkPt = screenToWorld(e.clientX, e.clientY), pkHit = objectAt(pkPt.x, pkPt.y);
+        if (pkHit){ peekObj = pkHit.obj; canvas.setPointerCapture(e.pointerId); return; }
+      }
+      beginPan(e); canvas.setPointerCapture(e.pointerId); return;
+    }
     if (e.button === 2){
       var pt = screenToWorld(e.clientX, e.clientY);
       if (mode === "build"){
@@ -13449,6 +13509,7 @@
   });
   window.addEventListener("pointerup", function(e){
     endPan();
+    if (e.button === 1) peekObj = null;
     if (e.button === 2 && grabMouse){ grabMouse = false; setGrabHeld(false); }
   });
   window.addEventListener("blur", function(){ grabMouse = false; setGrabHeld(false); });

@@ -295,6 +295,25 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('undo glues it back', (await stats()).some(o => o.pieces.length === 2), (await stats()).map(o=>o.pieces));
 
   console.log('');
+  console.log('== the marquee picks by the material inside it, not the box round the object ==');
+  await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setStick(true); window.__pg.setPaintMode('brush'); window.__pg.deselect(); });
+  await p.waitForTimeout(150);
+  await tool('wood', 2);
+  await drag([[X, Y+300],[X+400, Y]]);                                  // a long diagonal plank: its box covers the whole area
+  await p.evaluate(() => { window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
+  await tool('sponge', 1);
+  await drag([[X+40, Y+40],[X+70, Y+70]]);                              // two small dots up in the plank's box, well clear of its material
+  await drag([[X+100, Y+40],[X+130, Y+70]]);
+  await p.evaluate(() => { window.__pg.setTool('move'); window.__pg.deselect(); });
+  await drag([[X+20, Y+20],[X+150, Y+90]]);                             // rubber-band round the two dots only
+  const picked = await p.evaluate(() => window.__pg.selected() ? window.__pg.selection().map(id => window.__pg.objects().find(o => o.id === id).pieces[0].m) : []);
+  ok('a rubber band round two dots inside the plank box picks the dots and not the plank', picked.length === 2 && picked.every(m => m.indexOf('sponge') === 0), picked);
+  await p.evaluate(() => window.__pg.deselect());
+  await drag([[X+180, Y+60],[X+260, Y+130]]);                           // a band across the plank's material itself
+  const picked2 = await p.evaluate(() => window.__pg.selected() ? window.__pg.selection().map(id => window.__pg.objects().find(o => o.id === id).pieces[0].m) : []);
+  ok('and a band across the plank own material picks the plank', picked2.length === 1 && picked2[0].indexOf('wood') === 0, picked2);
+
+  console.log('');
   console.log('== the transforms as keys: turn, flip, layer ==');
   await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setStick(true); window.__pg.setPaintMode('rect'); window.__pg.deselect(); });
   await p.waitForTimeout(150);

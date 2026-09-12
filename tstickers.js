@@ -62,12 +62,18 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.mouse.move(d0.x, d0.y); await p.mouse.down(); await p.mouse.move(d1.x, d1.y, { steps: 8 }); await p.mouse.up(); await p.waitForTimeout(200);
   sk = (await stickers())[0];
   ok('moving the plank moves the sticker with it', Math.abs(sk.x - (X + 200)) < 8, { sticker: sk.x, wanted: X + 200 });
-  // on the background
+  // on nothing: stickers stick to material only
   await p.evaluate(id => window.__pg.pickSticker(id), mine[0].id);
   const s2 = await w2p(X-300, Y-200);
   await p.mouse.click(s2.x, s2.y); await p.waitForTimeout(200);
-  const bg = (await stickers()).filter(g => !g.obj)[0];
-  ok('a click on nothing sticks one to the background', !!bg && Math.abs(bg.x - (X-300)) < 2, bg && bg.x);
+  ok('a click on nothing sticks nothing — stickers stick to material', (await stickers()).length === 1, (await stickers()).length);
+  // a second one on a Back-layer wall, a different layer
+  await rect('wood', 0, X-380, Y-300, X-200, Y-100);
+  await p.evaluate(() => window.__pg.setLayer(1));
+  await p.evaluate(id => window.__pg.pickSticker(id), mine[0].id);
+  await p.mouse.click(s2.x, s2.y); await p.waitForTimeout(200);
+  const bg = (await stickers()).filter(g => g.layer === 0)[0];
+  ok('a click on a Back-layer wall sticks one there, on the Back layer', !!bg && Math.abs(bg.x - (X-300)) < 2, bg && { x: bg.x, layer: bg.layer });
   ok('it is picked by its picture, not a marker', (await p.evaluate(([x,y]) => window.__pg.stickerHitAt(x,y), [X-300+40, Y-200-40])) === bg.id);
   ok('and not outside it', (await p.evaluate(([x,y]) => window.__pg.stickerHitAt(x,y), [X-300+90, Y-200])) === null);
 
@@ -77,10 +83,10 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('turned 45°, a point past its flat edge but inside its corner counts', (await p.evaluate(([x,y]) => window.__pg.stickerHitAt(x,y), [X-300+120, Y-200])) === bg.id);
   const sv = await p.evaluate(() => window.__pg.serialize('stickers'));
   const svS = sv.gadgets.filter(g => g.kind === 'sticker');
-  ok('the level file carries both stickers, their drawing, size, turn and flip', svS.length === 2 && svS.every(g => g.skin && g.skin.states.sticker[0].length === 2) && svS.some(g => g.size === 200 && Math.abs(g.rot - Math.PI/4) < 1e-6 && g.flipX === true && g.o == null), svS.map(g => ({ size: g.size, rot: g.rot, flipX: g.flipX, o: g.o })));
+  ok('the level file carries both stickers, their drawing, size, turn and flip', svS.length === 2 && svS.every(g => g.skin && g.skin.states.sticker[0].length === 2 && g.o != null) && svS.some(g => g.size === 200 && Math.abs(g.rot - Math.PI/4) < 1e-6 && g.flipX === true), svS.map(g => ({ size: g.size, rot: g.rot, flipX: g.flipX, o: g.o })));
   await p.evaluate(d => window.__pg.load(d), sv); await p.waitForTimeout(300);
   const back = await stickers();
-  ok('and they come back, one on its plank and one on the background', back.length === 2 && back.filter(g => g.obj).length === 1 && back.some(g => g.size === 200 && g.flipX === true), back.map(g => ({ obj: g.obj, size: g.size })));
+  ok('and they come back, each on its thing', back.length === 2 && back.every(g => g.obj) && back.some(g => g.size === 200 && g.flipX === true), back.map(g => ({ obj: g.obj, size: g.size })));
   ok('the sticker page lists what was drawn', (await p.evaluate(() => window.__pg.stickers())).length === 1);
 
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
