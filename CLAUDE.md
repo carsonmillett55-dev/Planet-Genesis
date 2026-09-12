@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 749 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 754 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 749 checks + checkgeom, in order
+npm test                   # all 754 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -51,7 +51,7 @@ Or one suite at a time:
 ```
 node regress.js            # 39 — geometry, save/load, play mode, loop and save safety, two tabs and the autosave, map edges
 node tsel.js               # 38 — selection, marquee, group transforms, resize, detach, the number row
-node tlayer.js             # 12 — layer accuracy, ranked picking, the hover label
+node tlayer.js             # 17 — layer accuracy, ranked picking, the hover label, peek
 node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
 node tctx.js               # 24 — the object box: opening, closing, moving, remembering
@@ -1557,6 +1557,18 @@ What is changed in Play is discarded with Play, like everything else.
 **Test note:** never start a drag off the screen in a suite. Playwright
 loses the button on a negative page coordinate and the *next* drag ends
 after its first step — an hour of "why is this rect 1/6 the size".
+
+## Layer peek
+
+`layerPeek` (the 👁 Peek button in the layer pill, or V — `peek` in the
+rebindable list): in Build, everything on a layer **in front of** the one
+you are painting on draws at 0.18 alpha (`peekFade` inside `layerDepth`),
+so you can see and work on what is behind it — LBP's peek. Building on
+Back fades Mid and Front; on Mid, Front; on Front, nothing. Only the
+alpha changes and the alpha is applied at the blit, so the bitmap cache
+is untouched. Off in Play, and not saved. From the roadmap's "temporarily
+hide an object in a layer" / "layer peek"; hiding a single object is not
+done.
 
 ## The hover label
 

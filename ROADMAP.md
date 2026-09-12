@@ -90,7 +90,7 @@ the whole object. Covered by `tsel.js`.
 Carried over from the earlier near-term list in `CLAUDE.md`, still wanted:
 
 - **Layer peek** — related to, but not the same as, temporarily hiding an
-  object in a layer.
+  object in a layer. DONE 2026-09-11 — 👁 Peek in the layer pill, or V: the layers in front of the one you are painting on go faint. Hiding one object is still to do.
 - **Sprint on shift.** DONE — a bit quicker, not a dash.
 
 ### The grab (supersedes the floppy rope) — DONE

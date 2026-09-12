@@ -1796,6 +1796,7 @@
     { id:"glue",      label:"Glue (hold)",      def:["Tab"] },
     { id:"recenter",  label:"Centre camera",    def:["KeyC"] },
     { id:"grid",      label:"Grid snap on/off", def:["KeyG"] },
+    { id:"peek",      label:"Peek behind the layers in front", def:["KeyV"] },
     { id:"brushDown", label:"Smaller brush",    def:["Comma"] },
     { id:"brushUp",   label:"Bigger brush",     def:["Period"] }
   ];
@@ -2205,6 +2206,17 @@
       b.addEventListener("click", function(){ setBuildLayer(i); });
       layerHudEl.appendChild(b);
     });
+    var pk = document.createElement("button");
+    pk.textContent = "👁 Peek";
+    pk.className = "peek" + (layerPeek ? " active" : "");
+    pk.title = "See through the layers in front of the one you are painting on — " + bindLabel("peek");
+    pk.addEventListener("click", function(){ togglePeek(); });
+    layerHudEl.appendChild(pk);
+  }
+  function togglePeek(){
+    layerPeek = !layerPeek;
+    updateLayerHud(); sfx("click");
+    showToast(layerPeek ? "Peeking — the layers in front of " + LAYER_NAMES[buildLayer] + " are faded" : "Peek off");
   }
 
   /* ============================================================
@@ -5394,6 +5406,7 @@
     if (isAction("reset", e.code) && !e.repeat){ resetCharacterPosition(); }
     if (isAction("recenter", e.code) && !e.repeat){ recenterCamera(); }
     if (isAction("grid", e.code) && !e.repeat && mode === "build"){ toggleGrid(); }
+    if (isAction("peek", e.code) && !e.repeat && mode === "build"){ togglePeek(); }
     if (isAction("brushDown", e.code)) nudgeBrush(-1);
     if (isAction("brushUp", e.code)) nudgeBrush(1);
     // The number row means two different things depending on what you're
@@ -6244,9 +6257,17 @@
      using the true size all along. Everything is 1:1 now — what you
      see is exactly where the shape is. `off` is how far the slab's
      shaded side face is thrown, which is what carries the depth. */
+  /* Layer peek: with it on, in Build, everything on a layer IN FRONT of
+     the one you are painting on goes faint, so you can see and work on
+     what is behind it — LBP's peek. Only the alpha changes, and the
+     alpha is applied at the blit, so the bitmap cache is untouched. */
+  var layerPeek = false;
+  function peekFade(layer){ return layerPeek && mode === "build" && layer > buildLayer ? 0.18 : 1; }
   function layerDepth(layer){
-    if (layer === 0) return { a: 0.72, s: 1, off: -1.8, shade: 0.20 };
-    if (layer === 2) return { a: 1,    s: 1, off:  3.4, shade: 0.32 };
+    var pk = peekFade(layer);
+    if (layer === 0) return { a: 0.72 * pk, s: 1, off: -1.8, shade: 0.20 };
+    if (layer === 2) return { a: 1 * pk,    s: 1, off:  3.4, shade: 0.32 };
+    if (pk < 1) return { a: pk, s: 1, off: 0, shade: 0 };
     // Mid is the plane you build on — the reference the other two read
     // as offset FROM — so it throws no side face at all. That also keeps
     // it at one drawing pass per region, which matters: a level's mid

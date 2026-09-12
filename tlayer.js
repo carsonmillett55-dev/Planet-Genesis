@@ -86,6 +86,21 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.mouse.move(nowhere.x, nowhere.y); await p.waitForTimeout(250);
   ok('and over nothing it goes away', (await label()) === null, await label());
 
+  console.log('');
+  console.log('== peek: the layers in front go faint ==');
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('move'); });
+  const a0 = await p.evaluate(() => [0,1,2].map(l => window.__pg.layerAlpha(l)));
+  ok('peek off: Front and Mid are solid, Back a little faded as always', a0[2] === 1 && a0[1] === 1 && a0[0] > 0.6, a0);
+  await p.keyboard.press('v'); await p.waitForTimeout(100);
+  const a1 = await p.evaluate(() => [0,1,2].map(l => window.__pg.layerAlpha(l)));
+  ok('V peeks: building on Mid, Front goes faint and Mid and Back do not', a1[2] < 0.3 && a1[1] === 1 && a1[0] === a0[0], a1);
+  await p.evaluate(() => window.__pg.setLayer(0));
+  const a2 = await p.evaluate(() => [0,1,2].map(l => window.__pg.layerAlpha(l)));
+  ok('building on Back, both layers in front go faint', a2[2] < 0.3 && a2[1] < 0.3 && a2[0] === a0[0], a2);
+  ok('the Peek button in the layer pill shows it on', await p.evaluate(() => !!document.querySelector('#layerHud button.peek.active, .peek.active')));
+  await p.keyboard.press('v'); await p.waitForTimeout(100);
+  ok('V again turns it off', (await p.evaluate(() => window.__pg.layerAlpha(2))) === 1);
+
   await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('move'); });
   await p.mouse.move(1180, 700);
   await p.waitForTimeout(400);
