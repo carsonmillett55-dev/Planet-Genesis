@@ -2837,7 +2837,7 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature"];
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan"];
 
   /* ---- Skins: drawn, animated looks on things -----------------------
      A creature, an animated object or a particle carries a SKIN: a set of
@@ -2979,8 +2979,8 @@
     if (matOf(currentTool) && matOf(currentTool).isMask){ currentTool = "move"; canvas.dataset.tool = "move"; }
     renderSelBar();
   }
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature" };
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   var gadgets = [], gadgetCounter = 1;
   var wires = [];                 // { from: gadget id, to: bolt or gadget id }
@@ -3066,6 +3066,18 @@
         g.homeAngle = null; g.face = 1; g.look = { x: 1, y: 0 };
         g.dying = false; g.dieT0 = 0; g.attackT0 = 0;
       }
+    }
+    if (kind === "fan"){
+      /* Carson's Fan: it blows a column of air straight up from itself
+         (up in its host's frame, so a fan on a wall blows sideways) that
+         lifts the player and anything loose. `width` of the column,
+         `reach` how far the air goes, `strength` how hard — 1 is about
+         gravity and a half. Wired, it blows while the signal is on;
+         unwired, always. */
+      g.width = extra.width != null ? Math.max(40, Math.min(1200, +extra.width)) : 120;
+      g.reach = extra.reach != null ? Math.max(60, Math.min(3000, +extra.reach)) : 420;
+      g.strength = extra.strength != null ? Math.max(0.1, Math.min(2, +extra.strength)) : 0.9;
+      g.blade = 0;
     }
     if (kind === "emitter"){
       /* Particles: little drawn pictures thrown out of this spot. Rate a
@@ -3200,7 +3212,7 @@
     });
   }
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature"); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan"); }
   function addWire(from, to){
     if (!from || !to || from === to) return false;
     if (!canReceive(to)) return false;
@@ -3333,6 +3345,10 @@
         if (on && !g.wasOn) g.actT0 = performance.now();
         g.wasOn = on;
       }
+      if (g.kind === "fan"){
+        g.out = fanOn(g) ? 1 : 0;
+        if (g.out) fanBlow(g);
+      }
       if (g.kind === "watersensor"){
         // on while water is actually touching it: a wet cell within its
         // reach, or the world's water above it. It used to ask the column's
@@ -3352,6 +3368,40 @@
     }
     updateWorldLive(stepSeconds());
   });
+  /* ---- The Fan ----------------------------------------------------
+     Air in a column above the fan, in the fan's own frame. Anything whose
+     centre is in the column — the player, a loose object — has its
+     velocity nudged up the column every step, hardest at the fan and
+     tailing off to half at the top, so a body floats up and hovers where
+     the push and gravity balance. Gravity is about 0.28px a step a step;
+     strength 1 pushes 0.45 at the fan. */
+  function fanOn(g){ return g.input == null ? true : g.input > 0; }
+  function fanFrame(g){
+    var a = g.obj && g.obj.body ? g.obj.body.angle : 0;
+    return { x: g.pos.x, y: g.pos.y, ux: Math.sin(a), uy: -Math.cos(a), rx: Math.cos(a), ry: Math.sin(a) };   // up the column, and across it
+  }
+  function fanHolds(g, f, x, y, slack){
+    var dx = x - f.x, dy = y - f.y;
+    var along = dx * f.ux + dy * f.uy, across = dx * f.rx + dy * f.ry;   // along: how far up the column
+    return along >= -slack && along <= g.reach && Math.abs(across) <= g.width / 2 + slack;
+  }
+  function fanBlow(g){
+    var f = fanFrame(g), a0 = g.strength * 0.45;
+    var push = function(b, x, y, slack){
+      if (!fanHolds(g, f, x, y, slack)) return;
+      var dx = x - f.x, dy = y - f.y, along = dx * f.ux + dy * f.uy;
+      var k = a0 * (1 - 0.5 * Math.max(0, along) / g.reach);
+      Body.setVelocity(b, { x: b.velocity.x + f.ux * k, y: b.velocity.y + f.uy * k });
+    };
+    if (player && !flying) push(player, player.position.x, player.position.y, PH / 2);
+    for (var i = 0; i < objects.length; i++){
+      var o = objects[i], b = o.body;
+      if (!b || b.isStatic || b.isSensor || o === g.obj || o.decorative) continue;
+      push(b, b.position.x, b.position.y, (b.bounds.max.y - b.bounds.min.y) / 2);
+    }
+    g.blade = (g.blade || 0) + 0.35;
+  }
+
   /* ---- Creatures --------------------------------------------------
      A creature is a normal physics object that walks: each step, with the
      player in range, its sideways velocity is set toward them (and its
@@ -5895,7 +5945,8 @@
                skin: g.skin ? packSkin(g.skin) : null, actionMode: g.actionMode, ghost: g.ghost,
                hitbox: g.hitbox && g.hitbox.length ? g.hitbox : null, weakD: g.weakD && g.weakD.length ? g.weakD : null, dangerD: g.dangerD && g.dangerD.length ? g.dangerD : null,
                art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h, a:g.art.a || 0 } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
-               rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin };
+               rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin,
+               width: g.width, reach: g.reach, strength: g.strength };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);
@@ -7038,6 +7089,15 @@
       ctx.fillStyle = "#F6ECD9";
       for (var fi = -8; fi <= 8; fi += 4){ ctx.fillRect(fi - 1, -7, 2, 2); ctx.fillRect(fi - 1, 5, 2, 2); }
       ctx.beginPath(); ctx.moveTo(-3, -3); ctx.lineTo(4, 0); ctx.lineTo(-3, 3); ctx.closePath(); ctx.fill();
+    } else if (g.kind === "fan"){
+      // a round housing with four blades, turning while it blows
+      ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI*2);
+      ctx.fillStyle = on ? "#BFE3F5" : "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2.2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.save(); ctx.rotate(g.blade || 0);
+      ctx.fillStyle = "#2B1B12";
+      for (var bl = 0; bl < 4; bl++){ ctx.beginPath(); ctx.ellipse(0, -6.5, 3, 6, 0, 0, Math.PI*2); ctx.fill(); ctx.rotate(Math.PI/2); }
+      ctx.restore();
+      ctx.beginPath(); ctx.arc(0, 0, 2.6, 0, Math.PI*2); ctx.fillStyle = "#F6ECD9"; ctx.fill();
     } else if (g.kind === "emitter"){
       // a spout with sparks
       ctx.beginPath(); ctx.moveTo(-8, 8); ctx.lineTo(8, 8); ctx.lineTo(4, -2); ctx.lineTo(-4, -2); ctx.closePath();
@@ -7154,6 +7214,30 @@
           ctx.beginPath(); ctx.arc(ex0, ey0, 3/camScale, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
         }
         ctx.restore();
+      }
+      if (g.kind === "fan"){
+        // the air: wisps drifting up the column while it blows, in every
+        // mode; the whole column outlined in Build while it is selected or
+        // the tool is in hand
+        var fw = g.width, fr = g.reach, sel2 = g === selectedGadget || (mode === "build" && currentTool === "fan");
+        if (g.out){
+          ctx.save();
+          ctx.strokeStyle = "rgba(90,170,215,0.9)"; ctx.lineWidth = 3/camScale; ctx.lineCap = "round";
+          var tAir = performance.now() / 1000, nW = Math.max(3, Math.round(fw / 40));
+          for (var wi = 0; wi < nW; wi++){
+            var wx = -fw/2 + (wi + 0.5) * fw / nW, ph = (tAir * 1.3 + wi * 0.37) % 1, wy = -ph * fr;
+            ctx.globalAlpha = 0.65 * (1 - ph) * (ph < 0.08 ? ph / 0.08 : 1);
+            ctx.beginPath(); ctx.moveTo(wx - 4, wy); ctx.quadraticCurveTo(wx, wy - 10, wx + 4, wy - 20); ctx.stroke();
+          }
+          ctx.restore();
+        }
+        if (sel2 && mode === "build"){
+          ctx.save();
+          ctx.beginPath(); ctx.rect(-fw/2, -fr, fw, fr);
+          ctx.fillStyle = "rgba(191,227,245,0.14)"; ctx.fill();
+          ctx.lineWidth = 1.5/camScale; ctx.strokeStyle = "#7FB9CE"; ctx.setLineDash([6/camScale, 4/camScale]); ctx.stroke(); ctx.setLineDash([]);
+          ctx.restore();
+        }
       }
       if (mode === "build" && g.kind === "emitter" && (g === selectedGadget || currentTool === "emitter")){
         // so it is not guesswork: the direction and spread as a wedge, the
@@ -8836,7 +8920,7 @@
                   note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
     logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["changer","🌗","World changer"]],
                   note:"Put them on something. Right-click one and Connect it to a motor, a piston, a camera, a mover or a world changer — it drives that while it is on." },
-    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
+    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["fan","🌀","Fan"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
                   note:"A camera shows its shot while the player is in its zone. A mover carries an object along a line. A creature eye makes an object chase the player." }
   };
   function renderToolsTab(el, pageId){
@@ -11448,6 +11532,15 @@
         (g.danger ? "The danger hurts the player" + (g.skin && skinStateHasArt(g.skin, "attack") ? " and its Attack plays" : "") + "." : "No danger drawn: it is harmless.");
       cn.style.flexBasis = "100%"; opSection(null).appendChild(cn);
     }
+    if (g.kind === "fan"){
+      var fb = opSection("The air");
+      slider(fb, "Width", g.width, 40, 1200, 10, function(v){ g.width = v; }, function(v){ return Math.round(v) + "px"; }, "changing a fan");
+      slider(fb, "Reach", g.reach, 60, 3000, 10, function(v){ g.reach = v; }, function(v){ return Math.round(v) + "px up"; }, "changing a fan");
+      slider(fb, "Strength", g.strength, 0.1, 2, 0.05, function(v){ g.strength = v; }, function(v){ return v < 0.5 ? "a breeze" : (v < 0.9 ? "gentle" : (v < 1.3 ? "lifts you" : "a gale")); }, "changing a fan");
+      var fn = document.createElement("div"); fn.className = "noteText";
+      fn.textContent = g.input != null ? "Wired: it blows while its signal is on." : "It blows all the time. Wire a switch or sensor to it and it blows only while the signal is on. It blows straight up from whatever it sits on — put it on a wall and it blows sideways.";
+      fn.style.flexBasis = "100%"; opSection(null).appendChild(fn);
+    }
     if (g.kind === "emitter"){
       var pd = opSection("The particle");
       opBtn(pd, skinStateHasArt(g.skin, "particle") ? "🎨 Edit the particle" : "🎨 Draw the particle", "Draw what each particle looks like; several frames play over its life", function(){ openSkinStudio(g); }, "wide" + (skinStateHasArt(g.skin, "particle") ? " on" : ""));
@@ -13248,7 +13341,8 @@
                skin: g.skin ? packSkin(g.skin) : null, actionMode: g.actionMode, ghost: g.ghost,
                hitbox: g.hitbox && g.hitbox.length ? g.hitbox : null, weakD: g.weakD && g.weakD.length ? g.weakD : null, dangerD: g.dangerD && g.dangerD.length ? g.dangerD : null,
                art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h, a:g.art.a || 0 } : null, drawnFacing: g.drawnFacing, alpha: g.alpha,
-               rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin };
+               rate: g.rate, pspeed: g.pspeed, angle: g.angle, spread: g.spread, grav: g.grav, life: g.life, psize: g.psize, spin: g.spin,
+               width: g.width, reach: g.reach, strength: g.strength };
     });
     var linkSnaps = links.map(function(l){
       var e = linkEnds(l);

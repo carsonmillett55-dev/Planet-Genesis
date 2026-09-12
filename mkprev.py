@@ -80,6 +80,7 @@ HOOK = """
       line:g.line ? { dx:g.line.dx, dy:g.line.dy } : null, bounce:g.bounce, u:g.u, home:g.home,
       setLight:g.setLight, light:g.light, setWater:g.setWater, water:g.water, secs:g.secs, latch:g.latch, latched:g.latched,
       range:g.range, fly:g.fly, deadly:g.deadly, weakMode:g.weakMode, color:g.color, look:g.look, weakArea: g.weak ? +Math.abs(pgArea(g.weak)).toFixed(1) : 0, dangerArea: g.danger ? +Math.abs(pgArea(g.danger)).toFixed(1) : 0,
+      width: g.width, reach: g.reach, strength: g.strength,
       hasSkin: !!(g.skin && skinHasArt(g.skin)), actionMode: g.actionMode, ghost: g.ghost, face: g.face, rate: g.rate, pspeed: g.pspeed, life: g.life, psize: g.psize,
       alpha: g.alpha, drawnFacing: g.drawnFacing, dying: g.dying, art: g.art ? { x:g.art.x, y:g.art.y, w:g.art.w, h:g.art.h } : null, hitStrokes: g.hitbox ? g.hitbox.length : 0 }; }); },
     skinStudioAt: function(id, step){ var g = gadgetById(id); if (!g) return false; openSkinStudio(g, step); return !charEditorOverlay.hidden; },

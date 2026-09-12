@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 793 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` | Playwright suites, 802 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 793 checks + checkgeom, in order
+npm test                   # all 802 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -67,6 +67,7 @@ node tcreature.js          # 32 — the Creature eye: chasing, stopping short, s
 node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
 node tstudio.js            # 61 — the studio: strokes, undo/redo, the tools, frames, playback, no rig; the brush ring, filled shapes, nudge and flip, the Settings card's keys; the character's size and drawn hitbox
 node tfill.js              # 14 — the fill: a closed outline fills with material or water; open space, material, a gap and an island
+node tfan.js               # 9 — the Fan: lifts the player and a loose crate, hovers in reach, wired on/off, saved
 node tskins.js             # 69 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
@@ -440,6 +441,7 @@ Each gadget has an **output**, 0 or 1:
 | **anim** | a Custom object: its own drawn body (the hitbox step) and look; Idle loops, a wire plays Action — see Drawn things | skin, hitbox, art, actionMode, ghost |
 | **creature** | a Custom creature: drawn look, hitbox, weak spot and danger; chases, faces, bites, dies — see Drawn things | skin, hitbox, weakD, dangerD, art, range, speed, fly, ghost, drawnFacing, actionMode |
 | **emitter** | throws out drawn particles while on (unwired: always) — see Skins | skin, rate, pspeed, angle, spread, grav, life, psize, spin |
+| **fan** | blows a column of air up from itself — up in its host's frame — that lifts the player and anything loose; wired, while the signal is on, else always | width, reach, strength |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
 
@@ -1289,6 +1291,24 @@ frames play over its life (frame = progress × count), and it fades over
 the last 40%. Nothing comes out until a particle is drawn; wired, it
 emits only while the signal is on; paused Build emits nothing. A
 particle whose emitter is gone is dropped.
+
+## The Fan
+
+Carson's Fan: "it just blows a bit of air up that pushes the player
+upwards, adjustable in size, on and off with sensors and wires".
+`kind:"fan"` on the Gameplay page, host required; `width` of the column
+(40–1200), `reach` (60–3000) and `strength` (0.1–2). `fanBlow` each
+gadget step while `fanOn` (unwired: always; wired: the signal): the
+column is `reach` long by `width` wide **up in the host's frame**
+(`fanFrame` — a fan on a wall blows sideways, a fan on a turning wheel
+turns with it); anything whose centre is in it — the player unless
+flying, any loose Mid body but the host — has `strength × 0.45` px/step²
+added to its velocity up the column, tailing off to half at the top, so
+a body floats up and hovers where the push and gravity (≈0.28) balance
+rather than being flung out of the level. The glyph is a housing with
+blades that turn while it blows (`blade`); the air is drawn as wisps
+drifting up the column in every mode, and the whole column is outlined
+in Build while the fan is selected or the tool is in hand. `tfan.js`.
 
 ## The live world
 
