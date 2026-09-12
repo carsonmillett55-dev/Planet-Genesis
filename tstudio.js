@@ -32,6 +32,8 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('two kinds of character: Simple and Animated', chips.length === 2 && chips.includes('Simple') && chips.includes('Animated') && !chips.some(c => /Simple Animated/.test(c)), chips);
   await st('click', 'Animated');
   ok('Animated is picked', (await where()).mode === 'animated');
+  ok('a fresh character opens on the Size step', (await where()).state === 'size', (await where()).state);
+  await st('go', 'idle', 0);
   ok('and a fresh frame is empty', (await drawing()).length === 0);
 
   console.log('');
@@ -123,6 +125,88 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('the frame count is saved', saved && saved.run === 48, saved);
   const fps = await p.evaluate(() => JSON.parse(localStorage.getItem('pg_char_fps')));
   ok('with a speed per state', fps && fps.run === 8 && fps.idle === 2, fps);
+
+  console.log('');
+  console.log('== the brush shows itself, filled shapes, nudge, flip, the keys ==');
+  await st('open'); await p.waitForTimeout(150);
+  await st('go', 'idle', 0); await st('click', 'Clear');
+  const r2 = await st('canvasRect');
+  await p.mouse.move(r2.x + r2.w * 0.5, r2.y + r2.h * 0.5); await p.waitForTimeout(80);
+  ok('the pointer over the stage has a brush ring under it', (await st('cursor')) !== null, await st('cursor'));
+  // a filled box
+  await p.keyboard.press('r');
+  ok('R picks the filled box', (await where()).tool === 'rect', (await where()).tool);
+  await stroke(0.2, 0.2, 0.6, 0.5);
+  let d = await drawing();
+  ok('dragging one out makes a filled shape with four corners', d.length === 1 && d[0].f === true && d[0].p.length === 8, d[0] && { f: d[0].f, n: d[0].p.length });
+  await p.keyboard.press('c');
+  await stroke(0.3, 0.6, 0.7, 0.9);
+  d = await drawing();
+  ok('C is the filled oval', d.length === 2 && d[1].f === true && d[1].p.length >= 40, d[1] && { f: d[1].f, n: d[1].p.length });
+  await p.keyboard.press('k');
+  const lr = await st('canvasRect');
+  await p.mouse.move(lr.x + lr.w*0.7, lr.y + lr.h*0.2); await p.mouse.down();
+  for (const q of [[0.9,0.2],[0.9,0.5],[0.7,0.5]]) await p.mouse.move(lr.x + lr.w*q[0], lr.y + lr.h*q[1], { steps: 4 });
+  await p.mouse.up(); await p.waitForTimeout(80);
+  d = await drawing();
+  ok('K is the lasso: draw round an area and it fills', d.length === 3 && d[2].f === true && d[2].p.length >= 8, d[2] && { f: d[2].f, n: d[2].p.length });
+  await p.keyboard.press('b');
+  // nudge and flip
+  const beforeN = await drawing();
+  await p.keyboard.press('Shift+ArrowRight'); await p.waitForTimeout(60);
+  d = await drawing();
+  ok('Shift+right nudges the whole frame a touch right', Math.abs(d[0].p[0] - (beforeN[0].p[0] + 0.01)) < 1e-6, { before: beforeN[0].p[0], after: d[0].p[0] });
+  await p.keyboard.press('v'); await p.waitForTimeout(60);
+  d = await drawing();
+  ok('V flips it upside down', Math.abs(d[0].p[1] - (1 - beforeN[0].p[1])) < 1e-6, { before: beforeN[0].p[1], after: d[0].p[1] });
+  const beforeScale = await drawing();
+  await st('click', '◐ Smaller'); await p.waitForTimeout(60);
+  d = await drawing();
+  ok('Smaller shrinks the frame about its centre', Math.abs(d[0].p[0] - 0.5) < Math.abs(beforeScale[0].p[0] - 0.5), { before: beforeScale[0].p[0], after: d[0].p[0] });
+  await p.keyboard.press('Control+z'); await p.keyboard.press('Control+z'); await p.keyboard.press('Control+z'); await p.waitForTimeout(80);
+  ok('and every one of those is undone like a stroke', JSON.stringify(await drawing()) === JSON.stringify(beforeN));
+  // the keys can be changed
+  await st('click', '⚙ Settings'); await p.waitForTimeout(80);
+  ok('the Settings card off the header lists the brush on B', await p.evaluate(() => Array.from(document.querySelectorAll('.ceKeyRow')).some(r => /Brush/.test(r.textContent) && /^B$/i.test(r.querySelector('button').textContent.trim()))));
+  await p.evaluate(() => { const row = Array.from(document.querySelectorAll('.ceKeyRow')).find(r => /^Line/.test(r.textContent.trim())); row.querySelector('button').click(); });
+  await p.waitForTimeout(60);
+  await p.keyboard.press('q'); await p.waitForTimeout(80);
+  await p.keyboard.press('q'); await p.waitForTimeout(60);
+  ok('the line tool can be put on Q, and Q then picks it', (await where()).tool === 'line', (await where()).tool);
+  ok('and the change is remembered', (await p.evaluate(() => JSON.parse(localStorage.getItem('pg_ce_keys')).line)) === 'q');
+  await st('click', 'Back to the usual keys'); await p.waitForTimeout(60);
+  ok('back to the usual keys puts it on L', (await p.evaluate(() => (JSON.parse(localStorage.getItem('pg_ce_keys') || '{}').line || 'l'))) === 'l');
+  ok('the colour wheel is a labelled control', await p.evaluate(() => /Colour wheel/.test(document.querySelector('.cePickWrap').textContent)));
+  await st('close');
+
+  console.log('');
+  console.log('== the size: twice the old by default, any size, and a drawn hitbox ==');
+  await p.evaluate(() => { localStorage.clear(); localStorage.setItem('pg_test_real_size', '1'); }); await p.reload(); await p.waitForTimeout(1100);   // the suites pin the old size; this one wants the real default
+  const sz = await p.evaluate(() => window.__pg.playerSize());
+  ok('a fresh character is twice the old size: 80 by 112', sz.w === 80 && sz.h === 112 && sz.scale === 2, sz);
+  await st('open'); await p.waitForTimeout(150);
+  ok('the studio opens on the Size step first', (await where()).state === 'size', (await where()).state);
+  const chipsS = await p.evaluate(() => Array.from(document.querySelectorAll('#ceLeft .ceChips button')).map(b => b.textContent));
+  const headsS = await p.evaluate(() => Array.from(document.querySelectorAll('#ceLeft h4')).map(b => b.textContent));
+  ok('in order: 1. your size, 2. draw your look, then the hitbox', /^1\./.test(headsS[0]) && /^2\./.test(headsS[1]) && /Size/.test(chipsS[0]) && chipsS.some(c => /3\..*Hitbox/.test(c)), { heads: headsS, chips: chipsS });
+  await p.evaluate(() => window.__pg.setCharScale(1.5)); await p.waitForTimeout(100);
+  ok('any size: 1.5 makes 60 by 84', (await p.evaluate(() => window.__pg.playerSize())).h === 84, await p.evaluate(() => window.__pg.playerSize()));
+  const nx = await p.evaluate(() => Array.from(document.querySelectorAll('#ceLeft button')).map(b => b.textContent).find(t => /^Next:/.test(t)));
+  ok('Next goes on to the look', /Idle/.test(nx || ''), nx);
+  await st('click', nx);
+  await st('setColor', '#E8567A'); await stroke(0.2, 0.2, 0.8, 0.8);
+  const nx2 = await p.evaluate(() => Array.from(document.querySelectorAll('#ceLeft button')).map(b => b.textContent).find(t => /^Next:/.test(t)));
+  ok('and then to the hitbox', /Hitbox/.test(nx2 || ''), nx2);
+  await st('click', nx2);
+  await stroke(0.5, 0.3, 0.5, 0.7);                                  // a thin bar down the middle: a much smaller body than the box
+  await st('close'); await p.waitForTimeout(200);
+  const sz2 = await p.evaluate(() => window.__pg.playerSize());
+  ok('closing rebuilds the body from the drawn hitbox: narrower than the box, in parts', sz2.w < 30 && sz2.h < 84 && sz2.parts >= 2, sz2);
+  ok('while the picture keeps its full size around it', sz2.art && sz2.art.w === 60 && sz2.art.h === 84, sz2.art);
+  ok('the hitbox is remembered', (await p.evaluate(() => JSON.parse(localStorage.getItem('pg_char_hit')).length)) === 1);
+  await p.evaluate(() => window.__pg.setCharHit([])); await p.waitForTimeout(100);
+  const sz3 = await p.evaluate(() => window.__pg.playerSize());
+  ok('with no hitbox drawn it is the rounded box again', sz3.w === 60 && sz3.h === 84 && sz3.parts === 1, sz3);
 
   console.log('');
   console.log(fail ? `FAILED ${fail} of ${pass+fail} checks` : `ALL ${pass} checks`);

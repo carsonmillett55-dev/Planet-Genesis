@@ -83,10 +83,11 @@ HOOK = """
       if (cmd === 'close'){ closeCharEditor(); return charEditorOverlay.hidden; }
       if (cmd === 'drawing'){ return JSON.parse(JSON.stringify(ceTargetDrawing())); }
       if (cmd === 'where'){ return { state: pmEditState, frame: pmEditFrame, frames: ceFramesOf(pmEditState).length, mode: charMode, tool: ceTool, color: pmPaintColor, symmetry: ceSymmetry, zoom: +ceZoom.toFixed(3), playing: cePlaying, fps: charFps[pmEditState] }; }
-      if (cmd === 'go'){ pmEditState = a; pmEditFrame = b || 0; renderCharEditorPanels(); ceRedraw(); return true; }
+      if (cmd === 'go'){ pmEditState = a; pmEditFrame = b || 0; renderCharEditorPanels(); ceLayout(); return true; }
       if (cmd === 'canvasRect'){ var r = ceCanvas.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }
       if (cmd === 'chips'){ return Array.from(ceModeRowEl.querySelectorAll('button')).map(function(b){ return b.textContent; }); }
       if (cmd === 'click'){ var btn = Array.from(charEditorOverlay.querySelectorAll('button')).find(function(x){ return x.textContent.trim() === a; }); if (btn){ btn.click(); return true; } return false; }
+      if (cmd === 'cursor'){ return ceCursor ? { x: +ceCursor.x.toFixed(3), y: +ceCursor.y.toFixed(3) } : null; }
       if (cmd === 'history'){ return { undo: ceHistory.undo.length, redo: ceHistory.redo.length }; }
       if (cmd === 'setColor'){ pmPaintColor = a; return pmPaintColor; }
       if (cmd === 'set'){ if (a === 'tool') ceTool = b; if (a === 'symmetry') ceSymmetry = !!b; if (a === 'opacity') ceOpacity = b; if (a === 'smooth') ceSmooth = !!b; renderCharEditorPanels(); return true; }
@@ -173,7 +174,9 @@ HOOK = """
       for (var i=0;i<d.length;i+=4){ var L=d[i]+d[i+1]+d[i+2]; if (L>best){best=L; var px=(i/4)|0; bx=px%canvas.width; by=(px/canvas.width)|0;} }
       return { x:+(bx/dpr).toFixed(1), y:+(by/dpr).toFixed(1), lum:best }; },
     playerPos: function(){ return player ? { x:player.position.x, y:player.position.y } : null; },
-    playerSize: function(){ return { w: PW, h: PH }; },
+    playerSize: function(){ return { w: PW, h: PH, scale: charScale, art: charArt, parts: player ? player.parts.length : 0 }; },
+    setCharScale: function(v){ setCharScale(v); return charScale; },
+    setCharHit: function(strokes){ setCharHit(strokes); return { w: PW, h: PH, parts: player ? player.parts.length : 0 }; },
     objMass: function(id){ var o = objects.filter(function(q){ return q.id===id; })[0]; if (!o || !o.body) return null; var b = o.body; return b.isStatic ? (b._original ? b._original.mass : Infinity) : b.mass; },
     objWeight: function(id){ var o = objects.filter(function(q){ return q.id===id; })[0]; return o ? (o.weight == null ? 1 : o.weight) : null; },
     playerMass: function(){ return player ? player.mass : null; },

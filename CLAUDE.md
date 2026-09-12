@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` | Playwright suites, 682 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` | Playwright suites, 707 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 682 checks + checkgeom, in order
+npm test                   # all 707 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -65,7 +65,7 @@ node tmover.js             # 22 — the Mover: two-click placing, once and bounc
 node tworld.js             # 22 — the Water sensor (touching, not a pool above; on Front), and the World changer's light and water, wired, latched, saved
 node tcreature.js          # 32 — the Creature eye: chasing, stopping short, sight, locked, flying, the stomp, painted weak spot and danger, colour, a Back-layer creature, save/load
 node twater.js             # 15 — the eraser by layer, the vacuum, water drying up and a pool staying
-node tstudio.js            # 34 — the studio: strokes, undo/redo, the tools, frames, playback, no rig
+node tstudio.js            # 59 — the studio: strokes, undo/redo, the tools, frames, playback, no rig; the brush ring, filled shapes, nudge and flip, the Settings card's keys; the character's size and drawn hitbox
 node tskins.js             # 50 — the Custom creature and Custom object wizards (look, hitbox, weak spot, danger), death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node checkgeom.js          # geom.js vs the inlined copy
@@ -896,10 +896,85 @@ cycles at the state's speed — `charFps` per state for the character
 Onion skin: the frame before at 0.22 and, if wanted, the one after at
 0.12. Keys while open: B E L I X O G [ ] 0 P, the arrows, Space to pan.
 
+**The brush shows itself** (`ceCursor`, set on every pointermove over the
+stage, cleared on leave): a ring at the pointer exactly the size the next
+dab covers — `ceBrushW * v.h / 2`, in the view's own pixels, so it is
+right at any zoom — white with a dark dashed ring inside, red for the
+eraser. Not drawn for the eyedropper. Carson: "show a visual
+representation of what is about to be drawn".
+
+**Filled shapes**: Box (R), Oval (C) and Lasso (K). A shape is a stroke
+with `f: true` and no width: its `p` is the outline (four corners; forty
+points round an ellipse; whatever the hand drew), which `paintDrawing`
+fills and `drawingToPoly` takes as an exact polygon, so a boxed hitbox is
+a box. Shift while dragging makes a box square or an oval round. The
+outline shows while dragging (`ceShape`); symmetry mirrors it. Also
+**Mirror** (M) and **Flip upside down** (V) for the whole frame,
+**Shift+arrows** nudge it by 1% (`ceNudge`), and **◐ Smaller / ◑ Bigger**
+scale it about its centre (`ceScaleFrame`) — all through
+`ceBeginChange`/`ceEndChange`, so each is one undo.
+
+**The colour wheel is a labelled button**, not a bare swatch: `.cePickWrap`
+wraps the native colour input in "🎨 Colour wheel — any colour" with a
+conic-gradient ring, so it reads as the place to get any colour.
+
+**The Settings card** (⚙ Settings in the header, `#ceKeysPanel`,
+`renderCeKeysPanel`): every key the studio uses, each rebindable —
+`CE_KEY_DEFAULTS` is the list (brush, eraser, line, pick, rect, ellipse,
+lasso, symmetry, onion, guides, smaller, bigger, play, resetView, flipH,
+flipV), `ceKeys` the live map, saved in `pg_ce_keys`. Click a key,
+press the new one (`ceKeyWaiting`; Escape keeps the old); "Back to the
+usual keys" resets. The keydown handler resolves keys through `ceKeys`
+and `ceDoAction(act)`, so the chips' key tags (`ceKeyTag`) and the card
+always agree. It floats over the stage from the header rather than
+sitting at the bottom of the right column, where it scrolled out of
+sight. Opening the studio closes it.
+
 **The rig ("Simple Animated") mode is gone**, at Carson's ask — the
 four-part procedurally posed character, its editor, `rigSprites`,
 `rigAnchors`, `RIG_*`. A saved character with `mode: "rig"` loads as
 `animated`. `charMode` is `preset`, `simple` or `animated`.
+
+## The character's size and hitbox
+
+**Twice the size it was, by default.** `charScale` (0.5–3.5, `CHAR_BASE_W/H`
+40×56 at 1) replaces the three fixed sizes: the default is 2, so a fresh
+character is 80×112. Carson: "the character is naturally REALLY small".
+Saved in `pg_char_scale`; an older `pg_char_size` (small/medium/large)
+is read once and turned into a scale; the character file carries `scale`
+and `hit`. `setCharScale` rebuilds the body in place
+(`respawnSameSpot`: same spot, same velocity), so the Character tab's
+Size slider and the studio both resize you live.
+
+**The studio's wizard is Size → look → Hitbox** (`ceCharacterSubject`
+states `[CHAR_STEP_SIZE] + looks + [CHAR_STEP_HIT]`; `isSize`, `isMask`,
+`next`). A character with nothing drawn yet opens on the Size step
+(`openCharEditor`); one with art opens where it was. **The Size step's
+stage is a scene, to scale** (`subject.stage`, drawn by `ceRedraw` in
+place of the drawing box, the stage the full width): a floor, a 100px
+crate, you beside it at one pixel to one (a placeholder with a face
+until something is drawn), a measuring line, and the old 40×56 size as a
+dashed outline for comparison. Carson: "a visual representation shown in
+your real world". The Height slider and Old size / Twice / Giant presets
+sit on the left. The wheel does nothing there.
+
+**The hitbox is drawn** (`charHit`, one drawing, `pg_char_hit`) and
+`buildPlayerBody` makes the body from it on every spawn: `drawingToPoly`
+over the art box (`CHAR_BASE × charScale`), the biggest island only (a
+body is one piece), `pgConvexParts` → a compound `Body.create({parts})`
+with `PW/PH` the polygon's bounds and `charArt` the art box offset by
+the shape's centroid, so the picture stays where it was drawn around the
+new body. Nothing drawn (or a sliver under 8px) is the rounded box it
+always was, its chamfer scaled with the size. `Body.setInertia(Infinity)`
+as before, so a drawn shape never tumbles.
+
+**The suites are pinned to the old size.** Every suite's geometry —
+where the feet land, what fits under a ledge, how far a sponge is stood
+beside — was built for 40×56, so `tenv.js`'s `launch()` sets
+`pg_char_scale = '1'` on every page before the game boots unless
+`pg_test_real_size` is set; `tstudio.js` sets that after clearing
+storage and checks the real default. A new suite that wants the real
+size does the same.
 
 ## Drawn things: the Custom creature and the Custom object
 

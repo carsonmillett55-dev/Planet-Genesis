@@ -1054,10 +1054,20 @@
 
   /* ---------- full-screen character editor ---------- */
   #charEditor{
+    position:relative;
     background:var(--paper); border:5px solid var(--stitch); border-radius:16px;
     width:100%; height:100%; display:flex; flex-direction:column; overflow:hidden;
     box-shadow:0 10px 30px rgba(0,0,0,.5);
   }
+  /* the studio's settings: a card that drops down from the header's ⚙ */
+  #ceKeysPanel{
+    position:absolute; right:.7rem; top:3.4rem; z-index:5; width:17rem; max-height:calc(100% - 4.5rem); overflow-y:auto;
+    background:var(--paper); border:3px solid var(--ink); border-radius:12px; padding:.6rem .7rem;
+    display:flex; flex-direction:column; gap:.35rem; box-shadow:0 8px 22px rgba(0,0,0,.35);
+  }
+  #ceKeysPanel[hidden]{ display:none; }
+  #ceKeysPanel h4{ font-family:'Patrick Hand',cursive; margin:0; font-size:1rem; color:var(--ink); }
+  #ceKeysPanel .btn.ghost{ color:var(--ink); border-color:var(--ink); }
   #ceHeader{
     display:flex; align-items:center; gap:.6rem; flex-wrap:wrap;
     padding:.5rem .7rem; background:var(--desk-dark); border-bottom:3px dashed var(--stitch);
@@ -1088,6 +1098,11 @@
   }
   .ceChips button.active{ background:var(--yellow); border-color:var(--yellow-dark); }
   .cePicker{ width:1.9rem; height:1.9rem; padding:0; border:2px solid var(--ink); border-radius:50%; background:none; cursor:pointer; }
+  .cePickWrap{ display:flex; align-items:center; gap:.4rem; cursor:pointer; padding:.25rem .45rem; border-radius:10px;
+    border:2px solid var(--pick, #E8567A); background:var(--paper); font-family:'Patrick Hand',cursive; font-size:.82rem; color:var(--ink); }
+  .cePickWrap .cePicker{ border:3px solid transparent; background:conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00) border-box; }
+  .cePickWrap:hover{ background:var(--stitch); }
+  .ceKeyRow{ display:flex; align-items:center; justify-content:space-between; gap:.3rem; font-size:.74rem; }
   .cePicker::-webkit-color-swatch-wrapper{ padding:0; }
   .cePicker::-webkit-color-swatch{ border:none; border-radius:50%; }
   .ceFrameStrip{ display:flex; flex-wrap:wrap; gap:.3rem; max-height:11rem; overflow-y:auto; }
@@ -1366,8 +1381,10 @@
       <div id="ceHeader">
         <h2>✏️ Character Creator</h2>
         <div class="ceChips" id="ceModeRow"></div>
+        <button class="btn small ghost" id="ceKeysBtn" title="Keys and shortcuts">⚙ Settings</button>
         <button class="btn small" id="ceDone">Done</button>
       </div>
+      <div id="ceKeysPanel" hidden></div>
       <div id="ceMain">
         <div id="ceLeft"></div>
         <div id="ceStage"><canvas id="ceCanvas"></canvas><div class="noteText" id="ceHint"></div></div>
@@ -1612,6 +1629,17 @@
       if (!pts || pts.length < 2) continue;
       c2d.globalCompositeOperation = s.c ? "source-over" : "destination-out";
       c2d.globalAlpha = s.a != null ? s.a : 1;
+      if (s.f){
+        // a filled shape: the points are its outline
+        if (pts.length < 6) continue;
+        c2d.fillStyle = s.c || "#000";
+        c2d.beginPath();
+        c2d.moveTo(pts[0]*w, pts[1]*h);
+        for (var q = 2; q < pts.length; q += 2) c2d.lineTo(pts[q]*w, pts[q+1]*h);
+        c2d.closePath();
+        c2d.fill();
+        continue;
+      }
       c2d.strokeStyle = s.c || "#000";
       c2d.lineWidth = Math.max(0.6, (s.w || 0.1) * h);
       c2d.beginPath();
@@ -2810,6 +2838,16 @@
     for (i = 0; i < strokes.length; i++){
       var st = strokes[i], pts = st.p;
       if (!pts || pts.length < 2) continue;
+      if (st.f){
+        // a filled shape is its own polygon, exactly
+        if (pts.length < 6) continue;
+        var ring = [];
+        for (var fq = 0; fq < pts.length; fq += 2) ring.push([(pts[fq] - 0.5) * w, (pts[fq+1] - 0.5) * h]);
+        var fshape = pgClean([[ring]], tol);
+        if (!fshape.length) continue;
+        acc = st.c ? (acc.length ? pgUnion(acc, fshape, tol) : fshape) : (acc.length ? pgDiff(acc, fshape, tol) : acc);
+        continue;
+      }
       var r = Math.max(1.5, (st.w || 0.1) * h / 2), rings = [];
       var x0 = (pts[0] - 0.5) * w, y0 = (pts[1] - 0.5) * h;
       if (pts.length === 2) rings.push([circleRing(x0, y0, r, 0.6)]);
@@ -4602,11 +4640,30 @@
   /* ============================================================
      3. Player character
      ============================================================ */
-  var charSize = localStorage.getItem("pg_char_size") || "medium"; // "small" | "medium" | "large"
-  var PW, PH;
+  /* The character's size is a scale on the 40×56 box everything was
+     authored in. **Twice that by default** — Carson found it "REALLY
+     small" — and anything from half to three and a half times. The old
+     Small/Medium/Large are 0.75, 1, 1.3. `charHit` is a drawn hitbox:
+     strokes in the character's box, turned into the body's polygon at
+     spawn (`buildPlayerBody`); with none drawn the body is the rounded
+     box it always was. `charArt` is where the picture is drawn relative
+     to the body's centre — with a drawn hitbox the body's centre is that
+     shape's, not the box's. */
+  var CHAR_BASE_W = 40, CHAR_BASE_H = 56, CHAR_SCALE_MIN = 0.5, CHAR_SCALE_MAX = 3.5;
+  var charScale = parseFloat(localStorage.getItem("pg_char_scale") || "0") || 0;
+  if (!charScale){
+    var oldSz = localStorage.getItem("pg_char_size");
+    charScale = oldSz && CHAR_SIZES[oldSz] ? CHAR_SIZES[oldSz].h / CHAR_BASE_H : 2;   // an old choice is kept; a fresh start is twice the old default
+  }
+  var charSize = "medium";   // kept for older readers of the character data
+  var charHit = null;
+  try { charHit = normalizeDrawing(JSON.parse(localStorage.getItem("pg_char_hit") || "null"), 10, 14); } catch(e){ charHit = blankDrawing(); }
+  if (!charHit) charHit = blankDrawing();
+  function persistCharHit(){ try { localStorage.setItem("pg_char_hit", JSON.stringify(charHit)); } catch(e){} }
+  var PW, PH, charArt = null;
   function applyCharSize(){
-    var sz = CHAR_SIZES[charSize] || CHAR_SIZES.medium;
-    PW = sz.w; PH = sz.h;
+    PW = Math.round(CHAR_BASE_W * charScale); PH = Math.round(CHAR_BASE_H * charScale);
+    charArt = { x: -PW/2, y: -PH/2, w: PW, h: PH };
   }
   applyCharSize();
   var player = null;
@@ -4792,10 +4849,11 @@
   // smooth brush stroke stays smooth at any character size without
   // re-stroking every path each frame.
   function drawSpriteFrame(frame, mirror){
-    var cv = drawingCanvas(frame, PW*2, PH*2);
+    var a = charArt || { x: -PW/2, y: -PH/2, w: PW, h: PH };
+    var cv = drawingCanvas(frame, Math.min(2048, a.w*2), Math.min(2048, a.h*2));
     ctx.save();
     if (mirror) ctx.scale(-1, 1);
-    ctx.drawImage(cv, -PW/2, -PH/2, PW, PH);
+    ctx.drawImage(cv, a.x, a.y, a.w, a.h);
     ctx.restore();
   }
 
@@ -4828,31 +4886,66 @@
     if (flying) return { category: CAT_LAYER[MID_LAYER], mask: CAT_WALL, group: CARRY_GROUP }; // fly straight through objects, still bounded by the sealed world
     var f = layerFilter(MID_LAYER); f.group = CARRY_GROUP; return f;   // see CARRY_GROUP: the only other member is what is being carried
   }
+  /* The body: the rounded box, or the drawn hitbox as convex parts. A
+     drawn hitbox makes the body's centre its own centroid; PW/PH become
+     its bounds (the feet, the head, the grab probe and the carry ring are
+     all worked out from them) and charArt holds the picture where it was
+     drawn, so a hitbox drawn small in the middle of a big picture still
+     puts the picture around it. */
+  function buildPlayerBody(sp){
+    var opts = { friction:0.02, frictionAir:0.01, restitution:0, density:0.006, label:"player", collisionFilter: playerFilter() };
+    var artW = Math.round(CHAR_BASE_W * charScale), artH = Math.round(CHAR_BASE_H * charScale);
+    var poly = drawingHasArt(charHit) ? drawingToPoly(charHit, artW, artH, 1.0) : [];
+    if (poly.length){
+      // the biggest island only — a body has to be one piece
+      var best = 0, bestA = 0;
+      for (var i = 0; i < poly.length; i++){ var a = Math.abs(pgArea([poly[i]])); if (a > bestA){ bestA = a; best = i; } }
+      var one = [poly[best]], bb = pgBounds(one);
+      if (bb && bb.x2 - bb.x >= 8 && bb.y2 - bb.y >= 8){
+        var cps = pgConvexParts(pgClean(one, 1.4)), parts = [];
+        for (var k = 0; k < cps.length && parts.length < 60; k++){
+          var ring = cps[k], verts = ring.map(function(q){ return { x: q[0], y: q[1] }; }), c = ringCentroid(ring);
+          parts.push(Body.create({ position: { x: c.x, y: c.y }, vertices: verts, friction: 0.02, frictionAir: 0.01, restitution: 0, density: 0.006 }));
+        }
+        if (parts.length){
+          var body = Body.create({ parts: parts, friction:0.02, frictionAir:0.01, restitution:0, label:"player", collisionFilter: playerFilter() });
+          var c0 = { x: body.position.x, y: body.position.y };   // the shape's centroid, in the art box's frame
+          PW = Math.round(bb.x2 - bb.x); PH = Math.round(bb.y2 - bb.y);
+          charArt = { x: -artW/2 - c0.x, y: -artH/2 - c0.y, w: artW, h: artH };
+          Body.setPosition(body, { x: sp.x, y: sp.y });
+          return body;
+        }
+      }
+    }
+    PW = artW; PH = artH; charArt = { x: -PW/2, y: -PH/2, w: PW, h: PH };
+    opts.chamfer = { radius: Math.min(16 * Math.max(0.6, charScale), PW * 0.4) };
+    return Bodies.rectangle(sp.x, sp.y, PW, PH, opts);
+  }
   function spawnPlayer(atPos){
     if (player) World.remove(world, player);
     var sp = atPos || getSpawnPos();
-    player = Bodies.rectangle(sp.x, sp.y, PW, PH, {
-      chamfer:{radius:16}, friction:0.02, frictionAir:0.01, restitution:0,
-      density:0.006, label:"player", collisionFilter: playerFilter()
-    });
+    player = buildPlayerBody(sp);
     Body.setInertia(player, Infinity);
     World.add(world, player);
     grounded = false;
     releaseRope();
   }
   spawnPlayer();
-  function setCharSize(sz){
-    if (!CHAR_SIZES[sz] || sz === charSize) return;
-    charSize = sz;
-    localStorage.setItem("pg_char_size", sz);
+  function respawnSameSpot(){
     var pos = player ? { x: player.position.x, y: player.position.y } : null;
     var vel = player ? { x: player.velocity.x, y: player.velocity.y } : null;
     applyCharSize();
-    if (player){
-      spawnPlayer(pos);
-      Body.setVelocity(player, vel);
-    }
+    if (player){ spawnPlayer(pos); Body.setVelocity(player, vel); }
   }
+  function setCharScale(v){
+    v = Math.max(CHAR_SCALE_MIN, Math.min(CHAR_SCALE_MAX, +v || 1));
+    if (Math.abs(v - charScale) < 1e-6) return;
+    charScale = v;
+    localStorage.setItem("pg_char_scale", String(v));
+    respawnSameSpot();
+  }
+  function setCharSize(sz){ if (CHAR_SIZES[sz]) setCharScale(CHAR_SIZES[sz].h / CHAR_BASE_H); }
+  function setCharHit(strokes){ charHit = normalizeDrawing(strokes, 10, 14); persistCharHit(); respawnSameSpot(); }
 
   function releaseRope(){
     if (grabConstraint){ World.remove(world, grabConstraint); grabConstraint = null; sfx("unrope"); }
@@ -8655,7 +8748,7 @@
   // stroke array, which is exactly what we want in a saved character.
   function currentCharacterData(){
     return JSON.parse(JSON.stringify({
-      mode: charMode, color: charColor, size: charSize,
+      mode: charMode, color: charColor, size: charSize, scale: charScale, hit: charHit,
       frameCounts: charFrameCounts, sprites: charSprites, fps: charFps
     }));
   }
@@ -8664,7 +8757,8 @@
     charMode = d.mode === "rig" ? "animated" : (d.mode || "preset");   // the rig mode is gone; its saves become animated
     if (d.color) charColor = d.color;
     if (d.fps) ANIM_STATES.forEach(function(s){ if (typeof d.fps[s.id] === "number") charFps[s.id] = Math.max(1, Math.min(30, d.fps[s.id])); });
-    if (d.size && CHAR_SIZES[d.size]) setCharSize(d.size);
+    if (typeof d.scale === "number") setCharScale(d.scale); else if (d.size && CHAR_SIZES[d.size]) setCharSize(d.size);
+    if (d.hit !== undefined) setCharHit(d.hit || []);
     ANIM_STATES.forEach(function(s){
       var n = (d.frameCounts && d.frameCounts[s.id]) || s.frames;
       charFrameCounts[s.id] = Math.max(1, Math.min(CHAR_MAX_FRAMES, n));
@@ -8704,7 +8798,18 @@
   var ceHintEl = document.getElementById("ceHint");
   var ceTitleEl = charEditorOverlay.querySelector("h2");
   var ceOnion = true, ceOnionNext = true, ceGuides = true, ceSymmetry = false, ceSmooth = true;
-  var ceTool = "brush";            // brush | line | pick
+  var ceTool = "brush";            // brush | line | pick | rect | ellipse | lasso
+  var ceCursor = null;             // where the pointer is over the stage, in drawing fractions, for the brush ring
+  /* The studio's keys, rebindable from its own Keys panel. Undo/redo and
+     copy/paste stay on Ctrl as every program has them. */
+  var CE_KEY_DEFAULTS = { brush:"b", eraser:"e", line:"l", pick:"i", rect:"r", ellipse:"c", lasso:"k", symmetry:"x", onion:"o", guides:"g", smaller:"[", bigger:"]", play:"p", resetView:"0", flipH:"m", flipV:"v" };
+  var CE_KEY_LABELS = { brush:"Brush", eraser:"Eraser", line:"Line", pick:"Eyedropper", rect:"Filled box", ellipse:"Filled oval", lasso:"Lasso fill", symmetry:"Symmetry", onion:"Onion skin", guides:"Guides", smaller:"Smaller brush", bigger:"Bigger brush", play:"Play / pause", resetView:"Zoom to 1:1", flipH:"Mirror", flipV:"Flip upside down" };
+  var ceKeys = {};
+  try { ceKeys = JSON.parse(localStorage.getItem("pg_ce_keys") || "{}"); } catch(e){ ceKeys = {}; }
+  Object.keys(CE_KEY_DEFAULTS).forEach(function(k){ if (typeof ceKeys[k] !== "string") ceKeys[k] = CE_KEY_DEFAULTS[k]; });
+  function persistCeKeys(){ try { localStorage.setItem("pg_ce_keys", JSON.stringify(ceKeys)); } catch(e){} }
+  var ceKeyWaiting = null;         // the action whose key is being chosen
+  var ceShowKeys = false;
   var ceOpacity = 1;
   var ceZoom = 1, ceCX = 0.5, ceCY = 0.5;   // the stage's view: zoom about a point of the drawing
   var cePlaying = false, cePlayLast = 0, cePlayAcc = 0;
@@ -8716,23 +8821,132 @@
 
   // -- the subject --
   var ceSubject = null;
+  var CHAR_STEP_SIZE = { id:"size", label:"Size", emoji:"📏", size:true }, CHAR_STEP_HIT = { id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" };
   function ceCharacterSubject(){
-    return {
+    var sub = {
       kind: "character", title: "✏️ Character Creator",
-      states: function(){ return charMode === "animated" ? ANIM_STATES : [ANIM_STATES[0]]; },
-      frames: function(st){ return charSprites[st]; },
-      count: function(st){ return charFrameCounts[st]; },
-      setCount: function(st, n){ setStateFrameCount(st, n); },
+      // first the size, then the look, then the hitbox — Carson's order
+      states: function(){ return [CHAR_STEP_SIZE].concat(charMode === "animated" ? ANIM_STATES : [ANIM_STATES[0]]).concat([CHAR_STEP_HIT]); },
+      isSize: function(st){ return st === "size"; },
+      isMask: function(st){ return st === "hitbox"; },
+      maskColor: function(st){ return st === "hitbox" ? CHAR_STEP_HIT.color : null; },
+      frames: function(st){
+        if (st === "size") return [blankDrawing()];
+        if (st === "hitbox") return [charHit];
+        return charSprites[st];
+      },
+      setFrame: function(st, d){ if (st === "hitbox") charHit = d; else if (st !== "size") charSprites[st][pmEditFrame] = d; },
+      count: function(st){ return sub.frames(st).length; },
+      setCount: function(st, n){ if (st !== "size" && st !== "hitbox") setStateFrameCount(st, n); },
       fps: function(st){ return charFps[st]; },
       setFps: function(st, v){ charFps[st] = v; persistCharFps(); },
       aspect: function(){ return CHAR_ASPECT; },
-      persist: function(){ persistCharSprites(); persistCharFrameCounts(); persistCharFps(); },
-      hint: function(){ return charMode === "simple" ? "One look for your character." : "A pose per state, as many frames as you like. Ctrl+Z undoes, Ctrl+Y redoes."; },
+      persist: function(){ persistCharSprites(); persistCharFrameCounts(); persistCharFps(); persistCharHit(); },
+      hint: function(){
+        if (pmEditState === "size") return "How big you are on the level, shown to scale. Slide the height and watch; the level shows the change when you close.";
+        if (pmEditState === "hitbox") return "Draw your hitbox — the part of you that touches things. Leave it empty for the rounded box.";
+        return charMode === "simple" ? "One look for your character." : "A pose per state, as many frames as you like. Ctrl+Z undoes, Ctrl+Y redoes.";
+      },
       modes: function(){ return [["simple","Simple"],["animated","Animated"]]; },
       mode: function(){ return charMode; },
       setMode: function(m){ charMode = m; persistCharMode(); },
-      extraRight: function(el){ ceCharacterExtras(el); }
+      next: function(){
+        var ids = sub.states().map(function(st){ return st.id; }), i = ids.indexOf(pmEditState);
+        if (pmEditState === "size") return ids[1];
+        if (pmEditState === "hitbox") return null;
+        return "hitbox";
+      },
+      backdrop: function(c2, w, h){
+        if (pmEditState !== "hitbox") return;
+        var idle = pickCharFrame("idle", 0);
+        if (idle){ c2.save(); c2.globalAlpha = 0.45; c2.drawImage(drawingCanvas(idle, w, h), 0, 0); c2.restore(); }
+      },
+      leftPanel: function(el){
+        if (pmEditState !== "size") return false;
+        ceH4("Your size", el);
+        el.appendChild(sliderRow("Height", charScale, CHAR_SCALE_MIN, CHAR_SCALE_MAX, 0.05, function(v){ setCharScale(v); ceRedraw(); },
+          function(v){ return Math.round(CHAR_BASE_H * v) + "px tall"; }));
+        var pr = document.createElement("div"); pr.className = "ceChips";
+        [[1, "Old size"], [2, "Twice (usual)"], [3, "Giant"]].forEach(function(o){
+          pr.appendChild(ceChip(o[1], Math.abs(charScale - o[0]) < 0.01, function(){ setCharScale(o[0]); renderCharEditorPanels(); ceRedraw(); }));
+        });
+        el.appendChild(pr);
+        var n = document.createElement("div"); n.className = "noteText";
+        n.textContent = "The stage shows you to scale on a bit of level, next to a 100px crate. Everything about you — jumps, reach, what you can carry — is worked out from your size.";
+        el.appendChild(n);
+        return true;
+      },
+      previewLabel: "To scale, with a 100px crate",
+      // the size step's stage: a bit of level at one pixel to one — a floor, a 100px crate, you beside it, and the old size for comparison
+      stage: function(c2, w, h){
+        var artW = Math.round(CHAR_BASE_W * charScale), artH = Math.round(CHAR_BASE_H * charScale);
+        var floorH = 46, top = 34;
+        var fit = Math.min(1, (h - floorH - top) / Math.max(artH, 100));
+        var floorY = h - floorH;
+        // sky and floor, in the level's own colours
+        var sky = c2.createLinearGradient(0, 0, 0, floorY);
+        sky.addColorStop(0, "#BFE3F5"); sky.addColorStop(1, "#EAF6FB");
+        c2.fillStyle = sky; c2.fillRect(0, 0, w, floorY);
+        c2.fillStyle = "#7DBB5E"; c2.fillRect(0, floorY, w, 8);
+        c2.fillStyle = "#8B5E3C"; c2.fillRect(0, floorY + 8, w, floorH - 8);
+        c2.fillStyle = "rgba(0,0,0,0.12)"; c2.fillRect(0, floorY + 8, w, 3);
+        var scaleNote = fit < 1 ? " (shown at " + Math.round(fit * 100) + "%)" : "";
+        // the crate
+        var cs = 100 * fit, cx = Math.max(16, w * 0.5 - cs - 30 - artW * fit / 2), cy = floorY - cs;
+        c2.fillStyle = "#D2A86A"; c2.fillRect(cx, cy, cs, cs);
+        c2.strokeStyle = "#8B5E3C"; c2.lineWidth = 3; c2.strokeRect(cx + 1.5, cy + 1.5, cs - 3, cs - 3);
+        c2.lineWidth = 1.5; c2.beginPath(); c2.moveTo(cx, cy); c2.lineTo(cx + cs, cy + cs); c2.moveTo(cx + cs, cy); c2.lineTo(cx, cy + cs); c2.stroke();
+        c2.fillStyle = "rgba(43,27,18,0.7)"; c2.font = "bold 12px sans-serif"; c2.textAlign = "center";
+        c2.fillText("a 100px crate", cx + cs / 2, cy - 8);
+        // you
+        var pw = artW * fit, ph = artH * fit, px = cx + cs + 30, py = floorY - ph;
+        var f = pickCharFrame("idle", 0);
+        if (f) c2.drawImage(drawingCanvas(f, Math.max(1, Math.round(pw * 2)), Math.max(1, Math.round(ph * 2))), px, py, pw, ph);
+        else {
+          c2.fillStyle = charColor; c2.beginPath();
+          if (c2.roundRect) c2.roundRect(px, py, pw, ph, Math.min(12, pw * 0.3)); else c2.rect(px, py, pw, ph);
+          c2.fill();
+          // a face, so the placeholder reads as a person
+          c2.fillStyle = "#fff"; c2.beginPath(); c2.arc(px + pw * 0.35, py + ph * 0.28, Math.max(2, pw * 0.09), 0, Math.PI * 2); c2.arc(px + pw * 0.65, py + ph * 0.28, Math.max(2, pw * 0.09), 0, Math.PI * 2); c2.fill();
+          c2.fillStyle = "#2B1B12"; c2.beginPath(); c2.arc(px + pw * 0.37, py + ph * 0.29, Math.max(1, pw * 0.045), 0, Math.PI * 2); c2.arc(px + pw * 0.67, py + ph * 0.29, Math.max(1, pw * 0.045), 0, Math.PI * 2); c2.fill();
+          c2.strokeStyle = "#2B1B12"; c2.lineWidth = Math.max(1, pw * 0.03); c2.beginPath(); c2.arc(px + pw * 0.5, py + ph * 0.4, pw * 0.16, 0.15 * Math.PI, 0.85 * Math.PI); c2.stroke();
+        }
+        c2.fillStyle = "rgba(43,27,18,0.8)"; c2.font = "bold 12px sans-serif"; c2.textAlign = "center";
+        c2.fillText("you — " + artH + "px tall" + scaleNote, px + pw / 2, py - 8);
+        // a measuring line beside you
+        var mx = px + pw + 14;
+        c2.strokeStyle = "rgba(43,27,18,0.55)"; c2.lineWidth = 1; c2.setLineDash([]);
+        c2.beginPath(); c2.moveTo(mx, py); c2.lineTo(mx, floorY); c2.moveTo(mx - 5, py); c2.lineTo(mx + 5, py); c2.moveTo(mx - 5, floorY); c2.lineTo(mx + 5, floorY); c2.stroke();
+        // the old size, for comparison
+        var ow = CHAR_BASE_W * fit, oh = CHAR_BASE_H * fit, ox = mx + 40, oy = floorY - oh;
+        if (ox + ow + 10 < w && Math.abs(charScale - 1) > 0.01){
+          c2.setLineDash([4, 3]); c2.strokeStyle = "rgba(43,27,18,0.5)"; c2.lineWidth = 1.5;
+          c2.strokeRect(ox, oy, ow, oh); c2.setLineDash([]);
+          c2.fillStyle = "rgba(43,27,18,0.6)"; c2.font = "11px sans-serif"; c2.textAlign = "center";
+          c2.fillText("the old size", ox + ow / 2, oy - 6);
+        }
+        c2.textAlign = "left";
+      },
+      preview: function(pctx, w, h){
+        // the character at its real size beside a 100px crate, both scaled to fit
+        var artW = Math.round(CHAR_BASE_W * charScale), artH = Math.round(CHAR_BASE_H * charScale);
+        var fit = Math.min((h - 12) / Math.max(artH, 100), (w - 12) / (artW + 100 + 10));
+        var cw = 100 * fit, ch = 100 * fit, pw = artW * fit, ph = artH * fit;
+        var baseY = h - 6;
+        pctx.save();
+        pctx.strokeStyle = "rgba(43,27,18,0.5)"; pctx.lineWidth = 1.5; pctx.setLineDash([3, 3]);
+        pctx.strokeRect(6, baseY - ch, cw, ch);
+        pctx.setLineDash([]); pctx.fillStyle = "rgba(43,27,18,0.5)"; pctx.font = "9px sans-serif"; pctx.fillText("100px", 8, baseY - ch - 2);
+        var f = pickCharFrame("idle", 0), x0 = 6 + cw + 10, y0 = baseY - ph;
+        if (f) pctx.drawImage(drawingCanvas(f, pw*2, ph*2), x0, y0, pw, ph);
+        else { pctx.fillStyle = charColor; pctx.beginPath(); if (pctx.roundRect) pctx.roundRect(x0, y0, pw, ph, 6 * fit); else pctx.rect(x0, y0, pw, ph); pctx.fill(); }
+        if (drawingHasArt(charHit) && pmEditState !== "size"){ pctx.save(); pctx.globalAlpha = 0.5; pctx.drawImage(drawingCanvas(charHit, pw*2, ph*2), x0, y0, pw, ph); pctx.restore(); }
+        pctx.restore();
+      },
+      extraRight: function(el){ ceCharacterExtras(el); },
+      onClose: function(){ persistCharHit(); respawnSameSpot(); }
     };
+    return sub;
   }
   /* A gadget's skin in the studio. The drawing box is the host's own
      bounding box, so what is drawn lands exactly on the object, and the
@@ -8966,7 +9180,8 @@
     if (charEditorOverlay.hidden) return;
     var availW = Math.max(80, ceStageEl.clientWidth - 8);
     var availH = Math.max(80, ceStageEl.clientHeight - 30);
-    var a = ceAspect();
+    var sizeStage = ceSubject && ceSubject.isSize && ceSubject.isSize(pmEditState) && ceSubject.stage;
+    var a = sizeStage ? availW / availH : ceAspect();
     var h = availH, w = h * a;
     if (w > availW){ w = availW; h = w / a; }
     var d2 = window.devicePixelRatio || 1;
@@ -8980,6 +9195,13 @@
     var w = ceCanvas.width, h = ceCanvas.height;
     ceCtx.setTransform(1,0,0,1,0,0);
     ceCtx.clearRect(0, 0, w, h);
+    if (ceSubject.isSize && ceSubject.isSize(pmEditState) && ceSubject.stage){
+      // the size step: not a drawing box but a scene, to scale
+      var d2s = window.devicePixelRatio || 1;
+      ceCtx.save(); ceCtx.scale(d2s, d2s); ceSubject.stage(ceCtx, w / d2s, h / d2s); ceCtx.restore();
+      ceRefreshPreview(); ceRefreshFrameStrip();
+      return;
+    }
     var v = ceViewRect();
     // the drawing box itself, so a zoomed view still shows its edge
     ceCtx.save();
@@ -8994,7 +9216,8 @@
     // only this drawing and leave the onion skins alone
     var isMaskStep = ceSubject.isMask && ceSubject.isMask(pmEditState);
     if (isMaskStep) ceCtx.globalAlpha = 0.6;
-    ceCtx.drawImage(drawingCanvas(ceTargetDrawing(), rw, rh), v.x, v.y, v.w, v.h);
+    var stageDrawing = ceSubject.isSize && ceSubject.isSize(pmEditState) ? (pickCharFrame("idle", 0) || blankDrawing()) : ceTargetDrawing();
+    ceCtx.drawImage(drawingCanvas(stageDrawing, rw, rh), v.x, v.y, v.w, v.h);
     ceCtx.globalAlpha = 1;
     if (ceGuides){
       ceCtx.save();
@@ -9007,11 +9230,40 @@
       ceCtx.strokeRect(v.x + 0.5, v.y + 0.5, v.w - 1, v.h - 1);
       ceCtx.restore();
     }
+    // the brush, where the pointer is: exactly what a dab would cover
+    if (ceCursor && ceTool !== "pick"){
+      var cx = v.x + ceCursor.x * v.w, cy = v.y + ceCursor.y * v.h;
+      var r = Math.max(1.5, ceBrushW * v.h / 2);
+      ceCtx.save();
+      ceCtx.beginPath(); ceCtx.arc(cx, cy, r, 0, Math.PI*2);
+      ceCtx.lineWidth = 1.5; ceCtx.strokeStyle = "rgba(255,255,255,0.9)"; ceCtx.stroke();
+      ceCtx.lineWidth = 1; ceCtx.strokeStyle = pmPaintColor === null ? "rgba(214,69,69,0.9)" : "rgba(43,27,18,0.9)"; ceCtx.setLineDash([3, 3]); ceCtx.stroke();
+      ceCtx.restore();
+    }
+    // a shape being dragged out: its outline
+    if (ceShape){
+      ceCtx.save();
+      ceCtx.beginPath();
+      var sp = ceShape.pts;
+      ceCtx.moveTo(v.x + sp[0]*v.w, v.y + sp[1]*v.h);
+      for (var si = 2; si < sp.length; si += 2) ceCtx.lineTo(v.x + sp[si]*v.w, v.y + sp[si+1]*v.h);
+      ceCtx.closePath();
+      ceCtx.fillStyle = pmPaintColor || "#000"; ceCtx.globalAlpha = 0.5; ceCtx.fill();
+      ceCtx.globalAlpha = 1; ceCtx.lineWidth = 1.5; ceCtx.strokeStyle = "#2B1B12"; ceCtx.setLineDash([4, 3]); ceCtx.stroke();
+      ceCtx.restore();
+    }
     ceRefreshPreview();
     ceRefreshFrameStrip();
   }
 
   // -- painting --
+  var ceShape = null;              // a filled shape being dragged out: { kind, x0, y0, pts }
+  function ceShapePoints(kind, x0, y0, x1, y1){
+    if (kind === "rect") return [x0, y0, x1, y0, x1, y1, x0, y1];
+    var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rx = Math.abs(x1 - x0) / 2, ry = Math.abs(y1 - y0) / 2, out = [];
+    for (var i = 0; i < 40; i++){ var a = i / 40 * Math.PI * 2; out.push(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry); }
+    return out;
+  }
   var ceStroke = null, ceStroke2 = null, cePan = null, ceSpaceHeld = false;
   function ceRecordColour(c){
     if (!c) return;
@@ -9037,6 +9289,15 @@
       ceCanvas.setPointerCapture(e.pointerId); return;
     }
     if (e.button !== 0) return;
+    if (ceSubject.isSize && ceSubject.isSize(pmEditState)) return;   // the size step: nothing to paint
+    if (ceTool === "rect" || ceTool === "ellipse" || ceTool === "lasso"){
+      // filled shapes: dragged out, or drawn round by hand
+      ceCanvas.setPointerCapture(e.pointerId);
+      var n0 = ceNorm(e);
+      ceShape = { kind: ceTool, x0: n0.x, y0: n0.y, pts: ceTool === "lasso" ? [n0.x, n0.y] : ceShapePoints(ceTool, n0.x, n0.y, n0.x, n0.y) };
+      ceRedraw();
+      return;
+    }
     if (ceTool === "pick"){
       var c = cePickAt(e);
       if (c){ pmPaintColor = c; ceRecordColour(c); ceTool = "brush"; renderCharEditorPanels(); showToast("Picked " + c); }
@@ -9064,13 +9325,24 @@
     ceRedraw();
   });
   ceCanvas.addEventListener("pointermove", function(e){
+    ceCursor = ceNorm(e);
+    if (ceShape){
+      var ns = ceNorm(e);
+      if (ceShape.kind === "lasso"){ var lp = ceShape.pts; if (Math.hypot(ns.x - lp[lp.length-2], ns.y - lp[lp.length-1]) > 0.006) lp.push(ns.x, ns.y); }
+      else {
+        var x1 = ns.x, y1 = ns.y;
+        if (e.shiftKey){ var d = Math.max(Math.abs(x1 - ceShape.x0), Math.abs(y1 - ceShape.y0) * ceAspect()); x1 = ceShape.x0 + Math.sign(x1 - ceShape.x0 || 1) * d; y1 = ceShape.y0 + Math.sign(y1 - ceShape.y0 || 1) * d / ceAspect(); }
+        ceShape.pts = ceShapePoints(ceShape.kind, ceShape.x0, ceShape.y0, x1, y1);
+      }
+      ceRedraw(); return;
+    }
     if (cePan){
       var r = ceCanvas.getBoundingClientRect();
       ceCX = cePan.cx - (e.clientX - cePan.x) / Math.max(1, r.width) / ceZoom;
       ceCY = cePan.cy - (e.clientY - cePan.y) / Math.max(1, r.height) / ceZoom;
       ceClampView(); ceRedraw(); return;
     }
-    if (!ceStroke) return;
+    if (!ceStroke){ ceRedraw(); return; }   // just the brush ring following the pointer
     var n = ceNorm(e);
     var p = ceStroke.p;
     if (ceStroke.line){
@@ -9088,9 +9360,24 @@
     touchDrawing(ceTargetDrawing());
     ceRedraw();
   });
+  ceCanvas.addEventListener("pointerleave", function(){ ceCursor = null; ceRedraw(); });
   ["pointerup","pointercancel"].forEach(function(ev){
     ceCanvas.addEventListener(ev, function(){
       if (cePan){ cePan = null; return; }
+      if (ceShape){
+        var sh = ceShape; ceShape = null;
+        if (sh.pts.length >= 6){
+          ceBeginChange();
+          var mc2 = ceSubject.isMask && ceSubject.isMask(pmEditState) ? ceSubject.maskColor(pmEditState) : null;
+          var fill = { c: mc2 && pmPaintColor !== null ? mc2 : pmPaintColor, w: 0, f: true, p: sh.pts.slice() };
+          if (ceOpacity < 0.999) fill.a = ceOpacity;
+          var dd = ceTargetDrawing(); dd.push(fill);
+          if (ceSymmetry){ var mp = []; for (var mi = 0; mi < sh.pts.length; mi += 2) mp.push(1 - sh.pts[mi], sh.pts[mi+1]); var fill2 = { c: fill.c, w: 0, f: true, p: mp }; if (fill.a != null) fill2.a = fill.a; dd.push(fill2); }
+          touchDrawing(dd);
+          ceEndChange();
+        }
+        ceRedraw(); return;
+      }
       if (!ceStroke) return;
       delete ceStroke.line;
       ceStroke = null; ceStroke2 = null;
@@ -9100,12 +9387,17 @@
   });
   ceCanvas.addEventListener("wheel", function(e){
     e.preventDefault();
+    if (ceSubject && ceSubject.isSize && ceSubject.isSize(pmEditState)) return;   // nothing to zoom on the size step
     var r = ceCanvas.getBoundingClientRect();
     ceZoomAt((e.clientX - r.left) / Math.max(1, r.width), (e.clientY - r.top) / Math.max(1, r.height), e.deltaY < 0 ? 1.15 : 1/1.15);
   }, { passive: false });
 
   function ceClear(){ ceEdit(function(){ ceTargetDrawing().length = 0; }); }
   function ceMirror(){ ceEdit(function(){ ceTargetDrawing().forEach(function(st){ for (var i = 0; i < st.p.length; i += 2) st.p[i] = 1 - st.p[i]; }); }); }
+  function ceFlipV(){ ceEdit(function(){ ceTargetDrawing().forEach(function(st){ for (var i = 1; i < st.p.length; i += 2) st.p[i] = 1 - st.p[i]; }); }); }
+  // nudge the whole frame by a little, for lining frames up; scale it about the centre
+  function ceNudge(dx, dy){ ceEdit(function(){ ceTargetDrawing().forEach(function(st){ for (var i = 0; i < st.p.length; i += 2){ st.p[i] += dx; st.p[i+1] += dy; } }); }); }
+  function ceScaleFrame(k){ ceEdit(function(){ ceTargetDrawing().forEach(function(st){ for (var i = 0; i < st.p.length; i += 2){ st.p[i] = 0.5 + (st.p[i] - 0.5) * k; st.p[i+1] = 0.5 + (st.p[i+1] - 0.5) * k; } if (!st.f) st.w = (st.w || 0.1) * k; }); }); }
   function ceCopyFrom(srcDrawing){
     if (!drawingHasArt(srcDrawing)){ showToast("That frame is empty."); return; }
     ceEdit(function(){ ceSetTarget(JSON.parse(JSON.stringify(srcDrawing))); });
@@ -9160,10 +9452,36 @@
     requestAnimationFrame(ceTick);
   }
 
+  // the studio's settings card: every key, rebindable, off the header's ⚙
+  var ceKeysPanelEl = document.getElementById("ceKeysPanel"), ceKeysBtnEl = document.getElementById("ceKeysBtn");
+  function renderCeKeysPanel(){
+    ceKeysPanelEl.hidden = !ceShowKeys;
+    ceKeysBtnEl.classList.toggle("ghost", !ceShowKeys);
+    if (!ceShowKeys){ ceKeyWaiting = null; return; }
+    ceKeysPanelEl.innerHTML = "";
+    var h = document.createElement("h4"); h.textContent = "⚙ Keys and shortcuts"; ceKeysPanelEl.appendChild(h);
+    var kn = document.createElement("div"); kn.className = "noteText";
+    kn.textContent = "Click a key to change it, then press the new one. Ctrl+Z / Ctrl+Y undo and redo, Ctrl+C / Ctrl+V copy and paste a frame, the arrows step frames, Shift+arrows nudge, Space pans, the wheel zooms.";
+    ceKeysPanelEl.appendChild(kn);
+    Object.keys(CE_KEY_DEFAULTS).forEach(function(act){
+      var row = document.createElement("div"); row.className = "ceKeyRow";
+      var lab = document.createElement("span"); lab.textContent = CE_KEY_LABELS[act];
+      var kb = document.createElement("button"); kb.className = "btn tiny " + (ceKeyWaiting === act ? "" : "ghost");
+      kb.textContent = ceKeyWaiting === act ? "press a key…" : (ceKeys[act] || "").toUpperCase();
+      kb.addEventListener("click", function(){ ceKeyWaiting = ceKeyWaiting === act ? null : act; renderCeKeysPanel(); });
+      row.appendChild(lab); row.appendChild(kb);
+      ceKeysPanelEl.appendChild(row);
+    });
+    var foot = document.createElement("div"); foot.className = "ceChips";
+    foot.appendChild(ceBtn("Back to the usual keys", "ghost", function(){ ceKeys = JSON.parse(JSON.stringify(CE_KEY_DEFAULTS)); persistCeKeys(); renderCharEditorPanels(); }));
+    foot.appendChild(ceBtn("Close", "ghost", function(){ ceShowKeys = false; renderCeKeysPanel(); }));
+    ceKeysPanelEl.appendChild(foot);
+  }
+  ceKeysBtnEl.addEventListener("click", function(){ ceShowKeys = !ceShowKeys; renderCeKeysPanel(); });
   function ceOpenWith(subject){
     ceSubject = subject;
     ceHistory.undo.length = 0; ceHistory.redo.length = 0; cePending = null; ceStroke = null;
-    cePlaying = false; ceZoom = 1; ceCX = 0.5; ceCY = 0.5; ceTool = "brush";
+    cePlaying = false; ceZoom = 1; ceCX = 0.5; ceCY = 0.5; ceTool = "brush"; ceShowKeys = false; ceKeyWaiting = null;
     if (pmPaintColor === null) pmPaintColor = ceRecent[0] || CHAR_PALETTE[0];   // never open on the eraser
     ceEnsureState();
     closePersonalMenu();
@@ -9177,6 +9495,9 @@
   }
   function openCharEditor(){
     if (charMode === "preset"){ charMode = "simple"; persistCharMode(); }
+    // a character with nothing drawn yet starts at the first step, the size; otherwise the studio opens where it was
+    var fresh = !Object.keys(charSprites).some(function(st){ return (charSprites[st] || []).some(drawingHasArt); });
+    if (fresh || pmEditState === "hitbox"){ pmEditState = "size"; pmEditFrame = 0; }
     ceOpenWith(ceCharacterSubject());
   }
   function closeCharEditor(){
@@ -9197,21 +9518,43 @@
     if ((e.ctrlKey || e.metaKey) && k === "c"){ e.preventDefault(); ceCopyFrame(); return; }
     if ((e.ctrlKey || e.metaKey) && k === "v"){ e.preventDefault(); cePasteFrame(); return; }
     if (e.ctrlKey || e.metaKey) return;
+    if (ceKeyWaiting){
+      // choosing a key for an action
+      e.preventDefault();
+      if (e.key !== "Escape"){ ceKeys[ceKeyWaiting] = k.length === 1 ? k : e.key; persistCeKeys(); }
+      ceKeyWaiting = null; renderCharEditorPanels(); return;
+    }
     if (e.code === "Space"){ e.preventDefault(); if (!e.repeat) ceSpaceHeld = true; return; }
-    if (k === "b"){ ceTool = "brush"; if (pmPaintColor === null) pmPaintColor = ceRecent[0] || CHAR_PALETTE[0]; renderCharEditorPanels(); }
-    else if (k === "e"){ ceTool = "brush"; pmPaintColor = null; renderCharEditorPanels(); }
-    else if (k === "l"){ ceTool = ceTool === "line" ? "brush" : "line"; renderCharEditorPanels(); }
-    else if (k === "i"){ ceTool = ceTool === "pick" ? "brush" : "pick"; renderCharEditorPanels(); }
-    else if (k === "x"){ ceSymmetry = !ceSymmetry; renderCharEditorPanels(); }
-    else if (k === "o"){ ceOnion = !ceOnion; renderCharEditorPanels(); ceRedraw(); }
-    else if (k === "g"){ ceGuides = !ceGuides; renderCharEditorPanels(); ceRedraw(); }
-    else if (k === "[" ){ ceBrushW = Math.max(CE_BRUSH_MIN, ceBrushW * 0.85); persistCharBrush(); renderCharEditorPanels(); }
-    else if (k === "]" ){ ceBrushW = Math.min(CE_BRUSH_MAX, ceBrushW / 0.85); persistCharBrush(); renderCharEditorPanels(); }
-    else if (e.code === "ArrowLeft"){ e.preventDefault(); ceGoFrame(pmEditFrame - 1); }
-    else if (e.code === "ArrowRight"){ e.preventDefault(); ceGoFrame(pmEditFrame + 1); }
-    else if (k === "p"){ cePlaying = !cePlaying; cePlayAcc = 0; renderCharEditorPanels(); }
-    else if (k === "0"){ ceResetView(); }
+    if (e.shiftKey && (e.code === "ArrowLeft" || e.code === "ArrowRight" || e.code === "ArrowUp" || e.code === "ArrowDown")){
+      // nudge the frame a touch
+      e.preventDefault();
+      ceNudge(e.code === "ArrowLeft" ? -0.01 : (e.code === "ArrowRight" ? 0.01 : 0), e.code === "ArrowUp" ? -0.01 : (e.code === "ArrowDown" ? 0.01 : 0));
+      return;
+    }
+    if (e.code === "ArrowLeft"){ e.preventDefault(); ceGoFrame(pmEditFrame - 1); return; }
+    if (e.code === "ArrowRight"){ e.preventDefault(); ceGoFrame(pmEditFrame + 1); return; }
+    var act = null;
+    for (var a in ceKeys) if (ceKeys[a] === k || ceKeys[a] === e.key){ act = a; break; }
+    if (!act) return;
+    ceDoAction(act);
   }, true);
+  function ceDoAction(act){
+    var wantColour = function(){ if (pmPaintColor === null) pmPaintColor = ceRecent[0] || CHAR_PALETTE[0]; };
+    if (act === "brush"){ ceTool = "brush"; wantColour(); }
+    else if (act === "eraser"){ ceTool = "brush"; pmPaintColor = null; }
+    else if (act === "line" || act === "pick" || act === "rect" || act === "ellipse" || act === "lasso"){ ceTool = ceTool === act ? "brush" : act; if (act !== "pick") wantColour(); }
+    else if (act === "symmetry") ceSymmetry = !ceSymmetry;
+    else if (act === "onion") ceOnion = !ceOnion;
+    else if (act === "guides") ceGuides = !ceGuides;
+    else if (act === "smaller"){ ceBrushW = Math.max(CE_BRUSH_MIN, ceBrushW * 0.85); persistCharBrush(); }
+    else if (act === "bigger"){ ceBrushW = Math.min(CE_BRUSH_MAX, ceBrushW / 0.85); persistCharBrush(); }
+    else if (act === "play"){ cePlaying = !cePlaying; cePlayAcc = 0; }
+    else if (act === "resetView"){ ceResetView(); return; }
+    else if (act === "flipH"){ ceMirror(); return; }
+    else if (act === "flipV"){ ceFlipV(); return; }
+    renderCharEditorPanels(); ceRedraw();
+  }
+  function ceKeyTag(act){ var k = ceKeys[act]; return k ? " (" + k.toUpperCase() + ")" : ""; }
   window.addEventListener("keyup", function(e){ if (e.code === "Space") ceSpaceHeld = false; }, true);
 
   function ceChip(label, active, fn, title){
@@ -9227,6 +9570,7 @@
     var pctx = cePrevCanvas.getContext("2d");
     var w = cePrevCanvas.width, h = cePrevCanvas.height;
     pctx.clearRect(0, 0, w, h);
+    if (ceSubject.preview){ ceSubject.preview(pctx, w, h); return; }
     var f = ceTargetDrawing();
     if (!drawingHasArt(f)) return;
     var a = ceAspect(), ph = h * 0.86, pw = ph * a;
@@ -9265,10 +9609,22 @@
     ceLeftEl.innerHTML = "";
     ceFrameStripEl = null;
     var sts = ceStates();
+    var sizeStep = ceSubject.isSize && ceSubject.isSize(pmEditState);
     if (sts.length > 1){
-      ceH4("State", ceLeftEl);
+      ceH4(sts.some(function(st){ return st.size; }) ? "1. Your size" : "State", ceLeftEl);
       var stateRow = document.createElement("div"); stateRow.className = "ceChips";
-      var looks = sts.filter(function(st){ return !st.mask; }), drawnSteps = sts.filter(function(st){ return st.mask; });
+      var looks = sts.filter(function(st){ return !st.mask && !st.size; }), drawnSteps = sts.filter(function(st){ return st.mask; }), sizeSteps = sts.filter(function(st){ return st.size; });
+      sizeSteps.forEach(function(st){
+        stateRow.appendChild(ceChip(st.emoji + " " + st.label, pmEditState === st.id, function(){
+          pmEditState = st.id; pmEditFrame = 0; cePlaying = false; renderCharEditorPanels(); ceLayout();
+        }));
+      });
+      if (sizeSteps.length){
+        // the size first, on its own row; the looks are step two
+        ceLeftEl.appendChild(stateRow);
+        ceH4("2. Draw your look", ceLeftEl);
+        stateRow = document.createElement("div"); stateRow.className = "ceChips";
+      }
       looks.forEach(function(st){
         stateRow.appendChild(ceChip((st.emoji ? st.emoji + " " : "") + st.label, pmEditState === st.id, function(){
           pmEditState = st.id; pmEditFrame = 0; cePlaying = false; renderCharEditorPanels(); ceLayout();
@@ -9280,7 +9636,7 @@
         var stepRow = document.createElement("div"); stepRow.className = "ceChips";
         drawnSteps.forEach(function(st, i){
           var has = drawingHasArt(ceSubject.frames(st.id)[0]);
-          stepRow.appendChild(ceChip((i + 2) + ". " + st.emoji + " " + st.label + (has ? " ✓" : ""), pmEditState === st.id, function(){
+          stepRow.appendChild(ceChip((i + 2 + sizeSteps.length) + ". " + st.emoji + " " + st.label + (has ? " ✓" : ""), pmEditState === st.id, function(){
             pmEditState = st.id; pmEditFrame = 0; cePlaying = false; renderCharEditorPanels(); ceLayout();
           }));
         });
@@ -9289,13 +9645,14 @@
     }
     var arr = ceFramesOf(pmEditState);
     var maskStep = ceSubject.isMask && ceSubject.isMask(pmEditState);
+    if (sizeStep && ceSubject.leftPanel) ceSubject.leftPanel(ceLeftEl);
     if (maskStep){
       // one drawing, no frames: just the way on
       var mn = document.createElement("div"); mn.className = "noteText";
       mn.textContent = "One drawing. Paint the area; the eraser takes it back off.";
       ceLeftEl.appendChild(mn);
     }
-    if (!maskStep){
+    if (!maskStep && !sizeStep){
     ceH4("Frames — " + arr.length, ceLeftEl);
     var strip = document.createElement("div"); strip.className = "ceFrameStrip";
     ceFrameStripEl = strip;
@@ -9333,7 +9690,7 @@
       ceLeftEl.appendChild(sliderRow("Speed", ceSubject.fps(pmEditState) || 2, 1, 30, 1, function(v){ ceSubject.setFps(pmEditState, v); }, function(v){ return Math.round(v) + " frames/s"; }));
     }
     }   // (not a mask step)
-    if (!maskStep){
+    if (!maskStep && !sizeStep){
     ceH4("Onion skin", ceLeftEl);
     var on = document.createElement("div"); on.className = "ceChips";
     on.appendChild(ceChip("Previous", ceOnion, function(){ ceOnion = !ceOnion; renderCharEditorPanels(); ceRedraw(); }, "The frame before, faint (O)"));
@@ -9363,28 +9720,36 @@
     ceRightEl.innerHTML = "";
     ceH4("Tool", ceRightEl);
     var tl = document.createElement("div"); tl.className = "ceChips";
-    tl.appendChild(ceChip("✎ Brush", ceTool === "brush" && pmPaintColor !== null, function(){ ceTool = "brush"; if (pmPaintColor === null) pmPaintColor = ceRecent[0] || CHAR_PALETTE[0]; renderCharEditorPanels(); }, "Freehand (B)"));
-    tl.appendChild(ceChip("╱ Line", ceTool === "line", function(){ ceTool = "line"; if (pmPaintColor === null) pmPaintColor = ceRecent[0] || CHAR_PALETTE[0]; renderCharEditorPanels(); }, "Straight lines (L) — or hold Shift while brushing"));
-    tl.appendChild(ceChip("◌ Eraser", pmPaintColor === null, function(){ ceTool = "brush"; pmPaintColor = null; renderCharEditorPanels(); }, "Rub out (E)"));
-    tl.appendChild(ceChip("✦ Pick", ceTool === "pick", function(){ ceTool = "pick"; renderCharEditorPanels(); }, "Pick a colour off the drawing (I)"));
+    tl.appendChild(ceChip("✎ Brush", ceTool === "brush" && pmPaintColor !== null, function(){ ceDoAction("brush"); }, "Freehand" + ceKeyTag("brush")));
+    tl.appendChild(ceChip("╱ Line", ceTool === "line", function(){ ceTool = "brush"; ceDoAction("line"); }, "Straight lines" + ceKeyTag("line") + " — or hold Shift while brushing"));
+    tl.appendChild(ceChip("◌ Eraser", pmPaintColor === null && ceTool === "brush", function(){ ceDoAction("eraser"); }, "Rub out" + ceKeyTag("eraser")));
+    tl.appendChild(ceChip("✦ Pick", ceTool === "pick", function(){ ceTool = "brush"; ceDoAction("pick"); }, "Pick a colour off the drawing" + ceKeyTag("pick")));
+    tl.appendChild(ceChip("▰ Box", ceTool === "rect", function(){ ceTool = "brush"; ceDoAction("rect"); }, "Drag out a filled box" + ceKeyTag("rect") + " — Shift for a square"));
+    tl.appendChild(ceChip("⬬ Oval", ceTool === "ellipse", function(){ ceTool = "brush"; ceDoAction("ellipse"); }, "Drag out a filled oval" + ceKeyTag("ellipse") + " — Shift for a circle"));
+    tl.appendChild(ceChip("ᘒ Lasso", ceTool === "lasso", function(){ ceTool = "brush"; ceDoAction("lasso"); }, "Draw round an area and it fills" + ceKeyTag("lasso")));
     ceRightEl.appendChild(tl);
     var tg = document.createElement("div"); tg.className = "ceChips";
-    tg.appendChild(ceChip("⇔ Symmetry", ceSymmetry, function(){ ceSymmetry = !ceSymmetry; renderCharEditorPanels(); }, "Every stroke is mirrored left-right (X)"));
+    tg.appendChild(ceChip("⇔ Symmetry", ceSymmetry, function(){ ceDoAction("symmetry"); }, "Every stroke is mirrored left-right" + ceKeyTag("symmetry")));
     tg.appendChild(ceChip("〰 Steady", ceSmooth, function(){ ceSmooth = !ceSmooth; renderCharEditorPanels(); }, "Smooths a shaky hand"));
-    tg.appendChild(ceChip("⊞ Guides", ceGuides, function(){ ceGuides = !ceGuides; renderCharEditorPanels(); ceRedraw(); }, "Centre lines (G)"));
+    tg.appendChild(ceChip("⊞ Guides", ceGuides, function(){ ceDoAction("guides"); }, "Centre lines" + ceKeyTag("guides")));
     ceRightEl.appendChild(tg);
     ceRightEl.appendChild(sliderRow("Size", ceBrushW, CE_BRUSH_MIN, CE_BRUSH_MAX, 0.002,
       function(v){ ceBrushW = v; persistCharBrush(); }, function(v){ return (v*100).toFixed(1) + "%"; }));
     ceRightEl.appendChild(sliderRow("Opacity", ceOpacity, 0.05, 1, 0.05, function(v){ ceOpacity = v; }, function(v){ return Math.round(v*100) + "%"; }));
 
     ceH4("Colour", ceRightEl);
-    var pal = document.createElement("div"); pal.className = "charPalette";
+    // any colour at all: the colour wheel, made plain as a button
+    var pickWrap = document.createElement("label"); pickWrap.className = "cePickWrap";
     var picker = document.createElement("input"); picker.type = "color"; picker.className = "cePicker";
     picker.value = /^#[0-9a-f]{6}$/i.test(pmPaintColor || "") ? pmPaintColor : (ceRecent[0] || CHAR_PALETTE[0]);
     picker.title = "Any colour";
-    picker.addEventListener("input", function(){ pmPaintColor = picker.value; ceTool = ceTool === "pick" ? "brush" : ceTool; ceRecordColour(picker.value); });
+    picker.addEventListener("input", function(){ pmPaintColor = picker.value; ceTool = ceTool === "pick" ? "brush" : ceTool; ceRecordColour(picker.value); pickWrap.style.setProperty("--pick", picker.value); });
     picker.addEventListener("change", function(){ renderCharEditorPanels(); });
-    pal.appendChild(picker);
+    var pickText = document.createElement("span"); pickText.textContent = "🎨 Colour wheel — any colour";
+    pickWrap.appendChild(picker); pickWrap.appendChild(pickText);
+    pickWrap.style.setProperty("--pick", picker.value);
+    ceRightEl.appendChild(pickWrap);
+    var pal = document.createElement("div"); pal.className = "charPalette";
     CHAR_PALETTE.forEach(function(c){
       var sw = document.createElement("div");
       sw.className = "cswatch" + (pmPaintColor === c ? " sel" : "");
@@ -9411,10 +9776,17 @@
     toolRow.appendChild(ceBtn("↪ Redo", "ghost", ceRedo, "Ctrl+Y"));
     ceRightEl.appendChild(toolRow);
     var toolRow2 = ceRow();
-    toolRow2.appendChild(ceBtn("⇄ Mirror", "ghost", ceMirror, "Flip this frame left-right"));
-    toolRow2.appendChild(ceBtn("1:1", "ghost", ceResetView, "Zoom back out (0) — scroll to zoom, hold Space or the middle button to pan"));
+    toolRow2.appendChild(ceBtn("⇄ Mirror", "ghost", ceMirror, "Flip this frame left-right" + ceKeyTag("flipH")));
+    toolRow2.appendChild(ceBtn("⇅ Flip", "ghost", ceFlipV, "Flip this frame upside down" + ceKeyTag("flipV")));
+    toolRow2.appendChild(ceBtn("1:1", "ghost", ceResetView, "Zoom back out" + ceKeyTag("resetView") + " — scroll to zoom, hold Space or the middle button to pan"));
     toolRow2.appendChild(ceBtn("Clear", "red", ceClear, "Empty this frame"));
     ceRightEl.appendChild(toolRow2);
+    var toolRow3 = ceRow();
+    toolRow3.appendChild(ceBtn("◐ Smaller", "ghost", function(){ ceScaleFrame(0.9); }, "Shrink the whole frame a little about its centre"));
+    toolRow3.appendChild(ceBtn("◑ Bigger", "ghost", function(){ ceScaleFrame(1 / 0.9); }, "Grow the whole frame a little about its centre"));
+    var nudgeNote = document.createElement("span"); nudgeNote.className = "noteText"; nudgeNote.textContent = "Shift+arrows nudge the frame";
+    toolRow3.appendChild(nudgeNote);
+    ceRightEl.appendChild(toolRow3);
 
     ceH4(ceSubject.previewLabel || "In-game size", ceRightEl);
     cePrevCanvas = document.createElement("canvas");
@@ -9425,17 +9797,12 @@
 
     if (ceSubject.extraRight) ceSubject.extraRight(ceRightEl);
 
+    renderCeKeysPanel();
     ceRefreshPreview();
     ceRefreshFrameStrip();
   }
   // the character's own controls on the right: its size, and My Characters
   function ceCharacterExtras(el){
-    ceH4("Character size", el);
-    var szRow = document.createElement("div"); szRow.className = "ceChips";
-    [["small","Small"],["medium","Medium"],["large","Large"]].forEach(function(sz){
-      szRow.appendChild(ceChip(sz[1], charSize === sz[0], function(){ setCharSize(sz[0]); renderCharEditorPanels(); }));
-    });
-    el.appendChild(szRow);
     ceH4("My Characters", el);
     el.appendChild(ceBtn("💾 Save this character", "", saveCurrentCharacter));
     if (!myCharacters.length){
@@ -9458,17 +9825,11 @@
   function renderCharacterTab(el){
     var h = document.createElement("h3"); h.textContent = "Character"; el.appendChild(h);
 
-    var sizeLabel = document.createElement("div"); sizeLabel.className = "noteText"; sizeLabel.textContent = "Character size (resizes the hitbox too)";
-    el.appendChild(sizeLabel);
-    var sizeRow = document.createElement("div"); sizeRow.className = "infoSubTabs";
-    [["small","Small"],["medium","Medium"],["large","Large"]].forEach(function(s){
-      var b = document.createElement("button");
-      b.textContent = s[1];
-      b.className = charSize === s[0] ? "active" : "";
-      b.addEventListener("click", function(){ setCharSize(s[0]); renderPersonalMenu(); });
-      sizeRow.appendChild(b);
-    });
-    el.appendChild(sizeRow);
+    el.appendChild(sliderRow("Size", charScale, CHAR_SCALE_MIN, CHAR_SCALE_MAX, 0.05, function(v){ setCharScale(v); },
+      function(v){ return Math.round(CHAR_BASE_H * v) + "px tall"; }));
+    var sizeNote = document.createElement("div"); sizeNote.className = "noteText";
+    sizeNote.textContent = "You change size on the level as you slide — look beside the menu. Twice the old size is the usual now.";
+    el.appendChild(sizeNote);
 
     var modeLabel = document.createElement("div"); modeLabel.className = "noteText"; modeLabel.textContent = "Character type";
     el.appendChild(modeLabel);

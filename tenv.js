@@ -36,9 +36,22 @@ function chromePath(){
   );
 }
 
-/* --no-sandbox is needed for root/CI Linux and is harmless elsewhere. */
+/* --no-sandbox is needed for root/CI Linux and is harmless elsewhere.
+
+   Every page the suites open starts with the character at the OLD size
+   (scale 1, the 40x56 box): the suites' geometry — floors, walls, where a
+   sponge is stood beside — was all built for it. The game's own default
+   is twice that. tstudio.js clears storage, sets pg_test_real_size, and checks the
+   real default itself. */
 async function launch(){
-  return chromium.launch({ executablePath: chromePath(), args: ['--no-sandbox'] });
+  const b = await chromium.launch({ executablePath: chromePath(), args: ['--no-sandbox'] });
+  const newPage = b.newPage.bind(b);
+  b.newPage = async function(opts){
+    const p = await newPage(opts);
+    await p.addInitScript(() => { try { if (!localStorage.getItem('pg_char_scale') && !localStorage.getItem('pg_test_real_size')) localStorage.setItem('pg_char_scale', '1'); } catch(e){} });
+    return p;
+  };
+  return b;
 }
 
 /* pathToFileURL, not 'file://' + __dirname: on Windows __dirname is

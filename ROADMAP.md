@@ -336,7 +336,11 @@ it emits while the signal is on.
 - **Crouch**, animatable for custom characters.
 - **Slide** — crouch while running to slide a little. Animatable.
 - **Custom hand-drawn hitboxes** for characters, potentially **size-changing**
-  so a crouch can have a shorter box.
+  so a crouch can have a shorter box. DONE 2026-09-11 for the standing
+  character: the studio goes Size → look → Hitbox, the size is any height
+  from half the old to three and a half times (twice by default, shown to
+  scale on a bit of level next to a 100px crate), and the hitbox is drawn.
+  A crouch's shorter box waits on the crouch.
 
 ### 2.5D create mode
 
