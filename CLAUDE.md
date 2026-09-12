@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 782 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` | Playwright suites, 788 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 782 checks + checkgeom, in order
+npm test                   # all 788 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -50,7 +50,7 @@ Or one suite at a time:
 
 ```
 node regress.js            # 45 — geometry, save/load, play mode, loop and save safety, two tabs and the autosave, map edges, the big map and an old level's move to its bottom
-node tsel.js               # 46 — selection, marquee, group transforms, resize, detach, the number row, the transforms as keys
+node tsel.js               # 52 — selection, marquee, group transforms, resize, detach, the number row, the transforms as keys, dragging with physics on
 node tlayer.js             # 17 — layer accuracy, ranked picking, the hover label, peek
 node tmat.js               # 17 — materials, colours, glass, light
 node tlight.js             # 20 — lighting, shadows, glow
@@ -552,6 +552,26 @@ it back with no undo step left behind.
 - A **link end** — the knobs on a selected piston or rope — goes to any
   object that is not the other end's (`moveLinkEndTo`). A piston widens its
   reach to fit the new span and re-takes its design pose; a rope re-hangs.
+
+## Dragging with physics on
+
+An object with its physics on — free, solid, Mid (`dragHasPhysics`) — is
+not teleported under the cursor but **driven** there: it stays dynamic
+and a `beforeUpdate` step gives it a velocity toward its target (the
+spot the cursor has dragged it to, `dragging.targets[i]`) every step,
+angle held, so the engine resolves what it meets — a wall stops it, a
+loose crate is shoved along in front of it. It used to be translated
+straight through everything and left overlapping whatever it was
+dropped in: Carson's "objects just merge into each other when moving
+them". The drive is 0.3 of the gap a step, capped at 9px, and **when the
+object is blocked it leans rather than shoves**: if it moved much less
+than it was told to last step, the cap drops toward 1px, so a crate
+pinned against a wall is not driven into it (a 22px/step drive left 30px
+of overlap; this leaves none). Paused, there is no engine to resolve
+anything, so `tryMoveObject` moves it by hand and backs out of a solid,
+axis by axis, as the paused walk does. A locked, decorative or
+walk-through object — physics off — is frozen and translated as before,
+through anything. `endDrag` restores static only for those.
 
 ## Screen and world
 

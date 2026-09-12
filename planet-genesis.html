@@ -12401,10 +12401,11 @@
         // will just be a square in my level"
         selectGadget(gh); renderSelBar();
         var dh = gh.obj;
-        dragging = { type:"object", objs:[dh], last:pt, start:{x:pt.x,y:pt.y} };
+        dragging = { type:"object", objs:[dh], last:pt, start:{x:pt.x,y:pt.y}, held: [dragHasPhysics(dh)],
+                     targets: [{ x: dh.body.position.x, y: dh.body.position.y }], angles: [dh.body.angle], lastPos: [null], lastCmd: [0] };
         dragMoved = false;
         dragOrigStatic = [dh.body.isStatic];
-        setBodyStatic(dh.body, true);
+        if (!dragging.held[0]) setBodyStatic(dh.body, true);
         return;
       }
       if (gh){ dragging = null; selectGadget(gh); renderSelBar(); beginAttachDrag("gadget", gh, pt); return; }
@@ -12445,10 +12446,42 @@
       selectedRegion = regionAt(pt.x, pt.y);
     }
     renderSelBar();
-    dragging = { type:"object", objs:group, last:pt, start:{x:pt.x,y:pt.y} };
+    dragging = { type:"object", objs:group, last:pt, start:{x:pt.x,y:pt.y},
+                 held: group.map(dragHasPhysics),
+                 targets: group.map(function(o){ return { x: o.body.position.x, y: o.body.position.y }; }),
+                 angles: group.map(function(o){ return o.body.angle; }), lastPos: group.map(function(){ return null; }), lastCmd: group.map(function(){ return 0; }) };
     dragMoved = false;
     dragOrigStatic = group.map(function(o){ return o.body.isStatic; });
-    group.forEach(function(o){ setBodyStatic(o.body, true); });
+    group.forEach(function(o, i){ if (!dragging.held[i]) setBodyStatic(o.body, true); });
+  }
+  /* Dragging with physics on. An object with its physics on — free, solid,
+     on the Mid layer — is not teleported under the cursor but DRIVEN there:
+     kept dynamic and given a velocity toward its target every step, so the
+     engine resolves what it meets on the way — a wall stops it, a loose
+     crate is shoved along. It used to be translated straight through
+     everything and left overlapping whatever it was dropped in ("objects
+     just merge into each other"). While the world is paused there is no
+     engine to resolve anything, so the move is tried by hand and backed
+     out of a solid, the way the paused walk is. A locked, decorative or
+     walk-through object — physics off — still goes straight where the
+     cursor says, through anything. */
+  function dragHasPhysics(o){
+    return !!o.body && !o.decorative && !o.forcedStatic && !o.holdsStill && !o.body.isSensor && !o.body.isStatic;
+  }
+  function dragObstaclesFor(o){
+    var group = dragging ? dragging.objs : [];
+    var list = objects.filter(function(q){ return q !== o && group.indexOf(q) < 0 && q.body && !q.body.isSensor; }).map(function(q){ return q.body; }).concat(walls);
+    if (player) list.push(player);
+    return Query.region(list, o.body.bounds);
+  }
+  function tryMoveObject(o, dx, dy){
+    Body.translate(o.body, { x: dx, y: dy });
+    var near = dragObstaclesFor(o);
+    if (near.length && Query.collides(o.body, near).length){
+      Body.translate(o.body, { x: -dx, y: -dy });
+      return false;
+    }
+    return true;
   }
   function moveDrag(rawPt){
     if (!dragging) return;
@@ -12459,18 +12492,52 @@
     if (dragging.type === "object"){
       var dx = pt.x - dragging.last.x, dy = pt.y - dragging.last.y;
       if (!dx && !dy) return;
-      dragging.objs.forEach(function(o){
-        if (objects.indexOf(o) >= 0) Body.translate(o.body, { x: dx, y: dy });
+      dragging.objs.forEach(function(o, i){
+        if (objects.indexOf(o) < 0) return;
+        var tg = dragging.targets && dragging.targets[i];
+        if (tg){ tg.x += dx; tg.y += dy; }
+        if (dragging.held && dragging.held[i]){
+          if (!runner.enabled){
+            // paused: by hand, straight to the target if it fits, else as far as it goes on each axis
+            var gx = tg.x - o.body.position.x, gy = tg.y - o.body.position.y;
+            if (!tryMoveObject(o, gx, gy)){ tryMoveObject(o, gx, 0); tryMoveObject(o, 0, gy); }
+          }
+          return;   // running: the step drives it
+        }
+        Body.translate(o.body, { x: dx, y: dy });
       });
       dragging.last = pt;
       dragMoved = true;
     }
   }
+  // the drive: every step, each held object is pushed toward where the cursor put its target
+  onStep("beforeUpdate", function(){
+    if (!dragging || dragging.type !== "object" || !dragging.held) return;
+    dragging.objs.forEach(function(o, i){
+      if (!dragging.held[i] || objects.indexOf(o) < 0 || o.body.isStatic) return;
+      var tg = dragging.targets[i], b = o.body;
+      // brisk but under what the solver separates cleanly in a step — and
+      // when it is blocked (it moved much less than it was told to last
+      // step), it leans rather than shoves, so a crate pinned against a
+      // wall is not driven into it
+      var vx = (tg.x - b.position.x) * 0.3, vy = (tg.y - b.position.y) * 0.3, vm = Math.hypot(vx, vy), vmax = 9;
+      var lp = dragging.lastPos[i], lc = dragging.lastCmd[i];
+      if (lp && lc > 0.5){
+        var got = Math.hypot(b.position.x - lp.x, b.position.y - lp.y);
+        if (got < lc * 0.5) vmax = Math.min(vmax, Math.max(1, got * 1.5 + 0.5));
+      }
+      if (vm > vmax){ vx *= vmax / vm; vy *= vmax / vm; vm = vmax; }
+      dragging.lastPos[i] = { x: b.position.x, y: b.position.y }; dragging.lastCmd[i] = vm;
+      Body.setVelocity(b, { x: vx, y: vy });
+      if (Math.abs(b.angle - dragging.angles[i]) > 1e-6) Body.setAngle(b, dragging.angles[i]);
+      Body.setAngularVelocity(b, 0);
+    });
+  });
   function endDrag(){
     if (dragging && dragging.type === "object"){
       dragging.objs.forEach(function(o, i){
         if (objects.indexOf(o) < 0) return;
-        setBodyStatic(o.body, dragOrigStatic[i]);
+        if (!(dragging.held && dragging.held[i])) setBodyStatic(o.body, dragOrigStatic[i]);
         Body.setVelocity(o.body, {x:0,y:0});
         Body.setAngularVelocity(o.body, 0);
       });

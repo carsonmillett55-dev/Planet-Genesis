@@ -26,12 +26,12 @@ the polygon winding convention, the CSG material rule, the Matter.js
 behaviours that are easy to get wrong, and the list of known hazards. Several
 of them look arbitrary until you break one.
 
-Tests are Playwright suites, 782 checks across twenty files:
+Tests are Playwright suites, 788 checks across twenty files:
 
 ```
 npm install           # once — playwright-core, no browser download
 python mkprev.py      # regenerate the test build after editing the HTML
-npm test              # all 782 checks
+npm test              # all 788 checks
 npm run perf          # migration + frame time on a real level
 ```
 

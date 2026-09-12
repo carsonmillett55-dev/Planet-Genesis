@@ -329,6 +329,54 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('with nothing selected the keys do nothing', Math.abs((await plank()).angle - ang1) < 0.001);
 
   console.log('');
+  console.log('== a dragged object with its physics on still collides ==');
+  await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); window.__pg.setStick(false); window.__pg.setPaintMode('rect'); window.__pg.deselect(); window.__pg.paused(true); });
+  await p.waitForTimeout(150);
+  await tool('wood', 1);
+  await drag([[X, Y+100],[X+900, Y+140]]);                       // a floor (its start on-screen: a drag begun off-screen loses the button)
+  await p.evaluate(() => { const o = window.__pg.objects().slice(-1)[0]; window.__pg.select(o); window.__pg.anchor(); window.__pg.deselect(); });
+  await drag([[X+500, Y-60],[X+540, Y+100]]);                        // a wall, locked
+  await p.evaluate(() => { const o = window.__pg.objects().slice(-1)[0]; window.__pg.select(o); window.__pg.anchor(); window.__pg.deselect(); });
+  await tool('sponge', 1);
+  await drag([[X+200, Y+40],[X+260, Y+100]]);                             // a loose crate A
+  await tool('rubber', 1);
+  await drag([[X+340, Y+40],[X+400, Y+100]]);                        // a loose crate B, to its right
+  await p.evaluate(() => { window.__pg.deselect(); window.__pg.setTool('move'); window.__pg.paused(false); });
+  await p.waitForTimeout(400);
+  const crate = (m) => stats().then(st => st.filter(o => o.pieces[0].indexOf(m) === 0)[0]);
+  const wallB = (await stats()).filter(o => o.pieces[0].indexOf('wood') === 0 && o.bounds.y2 - o.bounds.y > 100)[0].bounds;
+  const cA0 = await crate('sponge'), cB0 = await crate('rubber');
+  // drag A rightward, into B and on toward the wall
+  const q0 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [cA0.pos.x, cA0.pos.y]);
+  const q1 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+530, cA0.pos.y]);
+  await p.mouse.move(q0.x, q0.y); await p.mouse.down();
+  for (let i = 1; i <= 12; i++){ await p.mouse.move(q0.x + (q1.x - q0.x) * i / 12, q0.y, { steps: 2 }); await p.waitForTimeout(60); }
+  await p.waitForTimeout(500);
+  const cA1 = await crate('sponge'), cB1 = await crate('rubber');
+  await p.mouse.up(); await p.waitForTimeout(200);
+  ok('the loose crate it met was shoved along in front of it', cB1.pos.x > cB0.pos.x + 40, { from: cB0.pos.x, to: cB1.pos.x });
+  ok('the two never overlap', cA1.bounds.x2 <= cB1.bounds.x + 3, { a: cA1.bounds, b: cB1.bounds });
+  ok('and the locked wall stopped them short of the cursor', cB1.bounds.x2 <= wallB.x + 3 && cA1.pos.x < X + 500, { b: cB1.bounds, wall: wallB });
+  // a locked crate goes straight through
+  await p.evaluate(() => { window.__pg.paused(true); });
+  const cA2 = await crate('sponge');
+  await p.evaluate(id => { const o = window.__pg.objects().find(o => o.id === id); window.__pg.select(o); window.__pg.anchor(); window.__pg.deselect(); }, cA2.id);
+  const r0 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [cA2.pos.x, cA2.pos.y]);
+  const r1 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+600, cA2.pos.y]);
+  await p.mouse.move(r0.x, r0.y); await p.mouse.down(); await p.mouse.move(r1.x, r1.y, { steps: 10 }); await p.mouse.up(); await p.waitForTimeout(200);
+  const cA3 = await crate('sponge');
+  ok('a locked crate (physics off) goes wherever the cursor says, straight through the wall to the far side', Math.abs(cA3.pos.x - (X+600)) < 6, { x: cA3.pos.x, wanted: X+600 });
+  // paused, a free crate is still stopped by hand
+  await p.evaluate(id => { const o = window.__pg.objects().find(o => o.id === id); window.__pg.select(o); window.__pg.anchor(); window.__pg.deselect(); }, cA3.id);   // free again
+  const cA4 = await crate('sponge');
+  ok('(the crate is free again)', cA4.static === false);
+  const v0 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [cA4.pos.x, cA4.pos.y]);
+  const v1 = await p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [X+300, cA4.pos.y]);
+  await p.mouse.move(v0.x, v0.y); await p.mouse.down(); await p.mouse.move(v1.x, v1.y, { steps: 10 }); await p.mouse.up(); await p.waitForTimeout(200);
+  const cA5 = await crate('sponge');
+  ok('paused, dragging a free crate back through the wall stops it at the wall', cA5.bounds.x >= wallB.x2 - 3 && cA5.pos.x > X + 500, { crate: cA5.bounds, wall: wallB });
+
+  console.log('');
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();
