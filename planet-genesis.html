@@ -1694,6 +1694,7 @@
     box:       ["The object box", "Everything about what you picked, in one place: lock it in place or let it fall, its layer, its weight, whether it can be grabbed, its opacity. It follows whatever you select until you close it."],
     studio:    ["The studio", "B is the brush, E erases, L draws a straight line, I picks a colour from the drawing, the bucket fills a closed shape. Ctrl+Z takes a stroke back. The frames down the left make an animation — P plays it."],
     "tool:move":       ["Move & Select", "Click anything to select it and drag to move it. Drag across empty space to select everything the band touches; Shift-click adds one more. Middle-drag looks around, and the wheel zooms on the cursor."],
+    "tool:glue":       ["Glue", "Click one thing, then another. On the same layer they become one object. On different layers they stay in their own layers and move, turn, copy and delete as one — and a Mid thing glued to the scenery behind it stays put. Unglue from its box."],
     "tool:erase":      ["Erase", "Takes material off the layer you are on, in exactly the shape you sweep. Cut something clean in half and it becomes two things. Water goes too, on the Mid layer."],
     "tool:vacuum":     ["Vacuum", "Sucks up water and nothing else — nothing you built is touched, on any layer."],
     "tool:bolt":       ["Bolt", "A pin through two things on different layers — a wheel on a wall, a door on a frame. Point at something with something behind or in front of it and click. Right-click the bolt for its tightness and limits."],
@@ -2726,7 +2727,7 @@
     // creating it is still in progress — nothing you are mid-way through
     // painting should sag, roll away or explode out from under the brush.
     // It goes live the moment the mouse button comes up.
-    setBodyStatic(obj.body, (decorative || obj.drawing || objectHeldStill(obj)) ? true : !!obj.holdsStill);
+    setBodyStatic(obj.body, (decorative || obj.drawing || objectHeldStill(obj) || gluedToScenery(obj)) ? true : !!obj.holdsStill);
     var ghost = decorative || (allGlow && !obj.lightSolid) || objectWalkThrough(obj);
     obj.body.isSensor = ghost;
     // a drawn creature stands as it was drawn: it never tumbles, like the player
@@ -3010,6 +3011,7 @@
     return hits;
   }
   function removeObject(obj){
+    if (obj && obj.glue) unglue(obj);
     var idx = objects.indexOf(obj);
     if (idx < 0) return;
     if (peekObj === obj) peekObj = null;
@@ -3070,8 +3072,46 @@
     if (hit) return { obj: hit, materialId: hitMat };
     return near ? { obj: near, materialId: nearMat } : null;
   }
+  /* ---- Glue, LBP's way. Two things on the SAME layer glued become one
+     object (`mergeObjects`, the CSG weld). Two things on DIFFERENT layers
+     cannot be one body — only Mid has physics — so they become a glue
+     GROUP: each keeps its own layer and shape, they are selected, moved,
+     turned, flipped, copied and deleted as one, and a Mid thing glued to
+     Back or Front scenery is held still by it (glued to the world), as
+     LBP holds a thing glued to something static. `o.glue` is the group's
+     id, saved with the object. Carson: "it pulled the thing from the back
+     into the front layer instead of making them two glued objects in
+     separate layers". ---- */
+  var glueCounter = 1;
+  function glueMates(o){ if (!o || !o.glue) return [o]; return objects.filter(function(q){ return q.glue === o.glue; }); }
+  function glueExpand(list){
+    var out = [];
+    list.forEach(function(o){ glueMates(o).forEach(function(m){ if (out.indexOf(m) < 0) out.push(m); }); });
+    return out;
+  }
+  function glueTogether(a, b){
+    var id = a.glue || b.glue || ("gl" + (glueCounter++));
+    var members = glueMates(a).concat(glueMates(b));
+    members.forEach(function(m){ m.glue = id; });
+    if (a.glue !== id) a.glue = id; if (b.glue !== id) b.glue = id;
+    members.forEach(function(m){ if (m.body) refreshObjectPhysics(m); });
+  }
+  function unglue(o){
+    if (!o.glue) return;
+    var mates = glueMates(o);
+    o.glue = undefined;
+    if (mates.length <= 2) mates.forEach(function(m){ m.glue = undefined; });   // a group of one is no group
+    mates.forEach(function(m){ if (m.body && objects.indexOf(m) >= 0) refreshObjectPhysics(m); });
+  }
+  // a Mid thing glued to scenery cannot move: the scenery has no physics to carry it
+  function gluedToScenery(o){
+    if (!o.glue || o.layer !== MID_LAYER) return false;
+    for (var i = 0; i < objects.length; i++){ var q = objects[i]; if (q !== o && q.glue === o.glue && q.layer !== MID_LAYER) return true; }
+    return false;
+  }
   function mergeObjects(a, b){
     if (a === b) return a;
+    if (b.glue && !a.glue) a.glue = b.glue;   // the weld keeps whatever group either was in
     // b's regions come across in a's frame, joining their own material
     // and cutting the rest — the same rule painting follows
     var wp = b.pieces.map(function(pc){ return { m: pc.m, world: objToWorld(b, pc.poly) }; });
@@ -6723,7 +6763,8 @@
     if (mode !== "build") return;
     if (maskPaint) endMaskPaint();
     if (placePreset && placePreset.kind !== id) placePreset = null;
-    currentTool = id; canvas.dataset.tool = id === "vacuum" ? "erase" : id;
+    currentTool = id; canvas.dataset.tool = id === "vacuum" ? "erase" : (id === "glue" ? "move" : id);
+    if (id === "glue"){ glueFirst = null; canvas.classList.add("glueMode"); } else canvas.classList.remove("glueMode");
     shapeDrag = null; marquee = null;
     if (id !== "move") clearSelection();
     if (pmOpen) renderPersonalMenu();
@@ -6762,10 +6803,10 @@
   function enterGlueMode(){
     glueMode = true; glueFirst = null;
     canvas.classList.add("glueMode");
-    showToast("Glue: click one object, then another to weld them. Release Tab to stop.");
+    showToast("Glue: click one thing, then another. Release Tab to stop.");
   }
   function exitGlueMode(){
-    if (!glueMode) return;
+    if (!glueMode && currentTool !== "glue") return;
     glueMode = false; glueFirst = null;
     canvas.classList.remove("glueMode");
   }
@@ -6999,6 +7040,7 @@
     if (o.grabbable === true) d.grab = 1; else if (o.grabbable === false) d.grab = 0;
     if (o.weight != null && o.weight !== 1) d.weight = o.weight;
     if (o.alpha != null && o.alpha !== 1) d.alpha = o.alpha;
+    if (o.glue) d.glue = o.glue;
     return d;
   }
   /* Corners left in this load's budget. A level file is untrusted input
@@ -7032,6 +7074,7 @@
     if (made){
       made.lightSolid = !!os.lightSolid;
       made.lightFalls = !!os.lightFalls;
+      if (typeof os.glue === "string" && os.glue) made.glue = os.glue.slice(0, 24);
     }
     return made;
   }
@@ -10714,8 +10757,8 @@
      bubbles, the goal). Carson wanted the editing tools in a different
      spot from the bolts and pistons and all. */
   var TOOL_PAGES = {
-    editing:    { title:"Editing", defs:[["move","🕹","Move & Select"],["erase","🧹","Erase"],["vacuum","🌀","Vacuum"]],
-                  note:"Move & Select drags, resizes and picks things to set up. Erase takes material off the layer you are on. Vacuum takes water and nothing else. Hold Tab anywhere to glue two objects into one." },
+    editing:    { title:"Editing", defs:[["move","🕹","Move & Select"],["erase","🧹","Erase"],["vacuum","🌀","Vacuum"],["glue","🧷","Glue"]],
+                  note:"Move & Select drags, resizes and picks things to set up. Erase takes material off the layer you are on. Vacuum takes water and nothing else. Glue: click one thing, then another — on the same layer they become one; on different layers they keep their layers and move as one. Tab does the same anywhere." },
     connectors: { title:"Connectors", defs:[["bolt","🔩","Bolt"],["sprungbolt","🌀","Sprung bolt"],["motorbolt","⚙","Motor bolt"],["wobblebolt","↔","Wobble bolt"],["piston","🔩","Piston"],["rope","➰","Rope"]],
                   note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
     logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["impact","💥","Impact sensor"],["projsensor","🎯","Projectile sensor"],["tag","🏷","Tag"],["tagsensor","📡","Tag sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["timer","⏱","Timer"],["counter","🔢","Counter"],["gate","🔀","Gate"],["changer","🌗","World changer"]],
@@ -10732,7 +10775,7 @@
       var key = quickKeyFor(d[0]);
       chip.innerHTML = '<div class="swatch tool">'+d[1]+'</div><label>'+d[2]+'</label>' + (key ? '<span class="keyTag">' + key + '</span>' : '');
       if (key) chip.title = "Press " + key;
-      chip.addEventListener("click", function(){ currentTool = d[0]; canvas.dataset.tool = d[0] === "vacuum" ? "erase" : d[0]; if (d[0] !== "move") clearSelection(); renderPersonalMenu(); if (pageId !== "editing" || d[0] === "move") closePersonalMenu(); });
+      chip.addEventListener("click", function(){ currentTool = d[0]; canvas.dataset.tool = d[0] === "vacuum" ? "erase" : (d[0] === "glue" ? "move" : d[0]); if (d[0] !== "move") clearSelection(); if (d[0] === "glue"){ glueFirst = null; canvas.classList.add("glueMode"); showToast("Glue: click one thing, then another. Esc or another tool to stop."); } else canvas.classList.remove("glueMode"); renderPersonalMenu(); if (pageId !== "editing" || d[0] === "move" || d[0] === "glue") closePersonalMenu(); });
       grid.appendChild(chip);
     });
     el.appendChild(grid);
@@ -13752,7 +13795,7 @@
   }
   function selectMany(list, additive){
     var out = additive ? selList() : [];
-    list.forEach(function(o){ if (objects.indexOf(o) >= 0 && out.indexOf(o) < 0) out.push(o); });
+    glueExpand(list).forEach(function(o){ if (objects.indexOf(o) >= 0 && out.indexOf(o) < 0) out.push(o); });
     selection = out;
     selected = out[out.length - 1] || null;
     selectedRegion = null;
@@ -13760,8 +13803,8 @@
     renderSelBar();
   }
   function toggleInSelection(o){
-    var list = selList(), i = list.indexOf(o);
-    if (i >= 0) list.splice(i, 1); else list.push(o);
+    var list = selList(), i = list.indexOf(o), mates = glueMates(o);
+    if (i >= 0) list = list.filter(function(q){ return mates.indexOf(q) < 0; }); else mates.forEach(function(m){ if (list.indexOf(m) < 0) list.push(m); });
     selection = list;
     selected = list[list.length - 1] || null;
     selectedRegion = null;
@@ -13795,9 +13838,10 @@
     selectedBolt = null;
     selectedGadget = null;
     selectedLink = null;
-    if (selected === o && selection.length <= 1){ selection = [o]; renderSelBar(); return; }
+    var mates = glueMates(o);   // glued things are one thing to the cursor
+    if (selected === o && selection.length <= mates.length){ selection = mates; renderSelBar(); return; }
     selected = o;
-    selection = [o];
+    selection = mates;
     renderSelBar();
     sfx("tick");
   }
@@ -14582,10 +14626,19 @@
       opBtn(ps, "⇱ Detach", "Make the " + pm + " its own object", function(){ detachSelectedRegion(); });
     }
 
+    if (o.glue && glueMates(o).length > 1){
+      var gsec = opSection("Glued");
+      var mates = glueMates(o).filter(function(m){ return m !== o; });
+      var gn = document.createElement("div"); gn.className = "noteText";
+      gn.textContent = "Glued to " + mates.length + " other thing" + (mates.length === 1 ? "" : "s") + " (" + mates.map(function(m){ return LAYER_NAMES[m.layer]; }).join(", ") + "): they move as one." + (gluedToScenery(o) ? " Held still by the scenery it is glued to." : "");
+      gn.style.flexBasis = "100%"; gsec.appendChild(gn);
+      opBtn(gsec, "🧷 Unglue this", "Let this one go its own way; the rest stay glued", function(){ pushUndo("ungluing"); unglue(o); selectObject(o); renderSelBar(); sfx("unrope"); }, "wide");
+    }
     // Actions.
     var ac = opSection("Actions");
     opBtn(ac, "⧉ Duplicate", "Duplicate (Ctrl+D)", function(){ duplicateSelected(); });
-    opBtn(ac, o.forcedStatic ? "🔒 Locked" : "🔓 Unlocked",
+    if (gluedToScenery(o)) opBtn(ac, "🔒 Held by the glue", "Glued to scenery, so it stays put — unglue it to let it move", function(){ showToast("Glued to the scenery: unglue it to let it move."); sfx("deny"); }, "on");
+    else opBtn(ac, o.forcedStatic ? "🔒 Locked" : "🔓 Unlocked",
       o.forcedStatic ? "Locked in place — click to let it move" : "Free to move — click to lock it in place",
       function(){ anchorSelected(); }, o.forcedStatic ? "on" : "");
     if (many === 1){
@@ -15064,6 +15117,10 @@
       }
     });
     if (!copies.length) return;
+    // glued things copied together are glued together, in a group of their own
+    var newIds = {};
+    list.forEach(function(src, i){ if (src.glue && copies[i]){ if (!newIds[src.glue]) newIds[src.glue] = "gl" + (glueCounter++); copies[i].glue = newIds[src.glue]; } });
+    copies.forEach(function(c){ if (c.glue && objects.indexOf(c) >= 0) refreshObjectPhysics(c); });
     selectMany(copies, false);
     sfx("place");
     showToast(copies.length > 1 ? ("Copied " + copies.length + " — drag them where you want them.")
@@ -15240,7 +15297,7 @@
     if (group.indexOf(hit.obj) < 0){
       selectedRegion = regionAt(pt.x, pt.y);
       selectObject(hit.obj);
-      group = [hit.obj];
+      group = selList();   // its glue mates come along
     } else if (group.length === 1){
       selectedRegion = regionAt(pt.x, pt.y);
     }
@@ -15398,11 +15455,25 @@
 
   function handleGlueClick(pt){
     var hit = objectAt(pt.x, pt.y);
-    if (!hit) return;
-    if (!glueFirst){ glueFirst = hit.obj; showToast("Now click a second object to glue to it."); }
-    else if (glueFirst === hit.obj){ showToast("Pick a different object to glue to."); }
-    else { pushUndo("gluing"); mergeObjects(glueFirst, hit.obj); showToast("Glued together!"); sfx("glue");
-           puff(pt.x, pt.y, 10, { color:"#F6ECD9", speed:1.8, g:0.05 }); glueFirst = null; }
+    if (!hit){ if (glueFirst) showToast("Click on the second thing — that was empty space."); return; }
+    if (!glueFirst){ glueFirst = hit.obj; selectObject(hit.obj); showToast("Now click the second thing. Same layer: they become one. Different layers: they stay where they are and move as one."); return; }
+    if (glueFirst === hit.obj){ showToast("Pick a different thing to glue to."); return; }
+    if (glueFirst.glue && glueFirst.glue === hit.obj.glue){ showToast("Those two are already glued."); glueFirst = null; return; }
+    pushUndo("gluing");
+    var a = glueFirst, b = hit.obj;
+    if (a.layer === b.layer){
+      mergeObjects(a, b);
+      selectObject(a);
+      showToast("Glued into one thing.");
+    } else {
+      glueTogether(a, b);
+      selectObject(a);
+      showToast("Glued — " + LAYER_NAMES[a.layer] + " and " + LAYER_NAMES[b.layer] + ", each on its own layer, moving as one." + (gluedToScenery(a) || gluedToScenery(b) ? " The Mid one is held still by the scenery it is glued to." : ""));
+    }
+    sfx("glue");
+    puff(pt.x, pt.y, 10, { color:"#F6ECD9", speed:1.8, g:0.05 });
+    glueFirst = null;
+    if (currentTool !== "glue") exitGlueMode();
   }
 
   // ---- The object box (Build) / grab (Play) ----
@@ -15603,7 +15674,7 @@
     if (mode !== "build") return;
     var pt2 = screenToWorld(e.clientX, e.clientY);
     if (e.altKey){ eyedrop(pt2); return; }
-    if (glueMode){ handleGlueClick(pt2); return; }
+    if (glueMode || currentTool === "glue"){ handleGlueClick(pt2); return; }
     if (moverDraft){ moverSetLine(snapPt(pt2)); return; }   // a mover waiting to be told where it goes takes the click, whatever the tool
     canvas.setPointerCapture(e.pointerId);
     if (currentTool === "move"){
@@ -15731,6 +15802,7 @@
   var pauseView = "main";
   function onEscape(){
     if (maskPaint){ endMaskPaint(); showToast("Done painting the creature."); return; }
+    if (currentTool === "glue"){ glueFirst = null; canvas.classList.remove("glueMode"); currentTool = "move"; canvas.dataset.tool = "move"; showToast("Glue put down."); if (pmOpen) renderPersonalMenu(); return; }
     if (!nameOverlay.hidden){ closeName(false); return; }
     if (!charEditorOverlay.hidden){ closeCharEditor(); return; }
     if (!loadOverlay.hidden){ loadOverlay.hidden = true; return; }

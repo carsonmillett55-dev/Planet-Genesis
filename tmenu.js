@@ -55,7 +55,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('Tools holds Editing, Connectors, Logic and Gameplay',
      JSON.stringify(await pageNames()) === JSON.stringify(['Editing','Connectors','Logic','Gameplay']), await pageNames());
   const chipsOn = () => p.evaluate(() => Array.from(document.querySelectorAll('#pmBody .chip label')).map(l => l.textContent));
-  ok('Editing holds Move & Select, Erase and Vacuum, and nothing else', JSON.stringify(await chipsOn()) === JSON.stringify(['Move & Select','Erase','Vacuum']), await chipsOn());
+  ok('Editing holds Move & Select, Erase, Vacuum and Glue, and nothing else', JSON.stringify(await chipsOn()) === JSON.stringify(['Move & Select','Erase','Vacuum','Glue']), await chipsOn());
   ok('and shows their number keys', JSON.stringify(await p.evaluate(() => Array.from(document.querySelectorAll('#pmBody .chip .keyTag')).map(k => k.textContent))) === JSON.stringify(['1','2','3']));
   await clickPage('Connectors'); await p.waitForTimeout(250);
   ok('Connectors holds the bolts, the piston and the rope', (await chipsOn()).includes('Bolt') && (await chipsOn()).includes('Piston') && (await chipsOn()).includes('Rope') && !(await chipsOn()).includes('Erase'), await chipsOn());

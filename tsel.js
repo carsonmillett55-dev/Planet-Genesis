@@ -396,6 +396,67 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('paused, dragging a free crate back through the wall stops it at the wall', cA5.bounds.x >= wallB.x2 - 3 && cA5.pos.x > X + 500, { crate: cA5.bounds, wall: wallB });
 
   console.log('');
+  console.log('\n== glue: same layer welds into one; different layers stay put and move as one ==');
+  await p.mouse.move(640, 400); await p.waitForTimeout(150);
+  await p.evaluate(() => { window.__pg.setMode('build'); window.__pg.paused(true); window.__pg.clear(); window.__pg.starter(); window.__pg.setLayer(1); window.__pg.deselect(); window.__pg.setStick(true); window.__pg.setPaintMode('rect'); window.__pg.setTool('move'); });
+  await p.waitForTimeout(400);
+  const GX = X + 160;   // the scene sits to the right, on screen: a drag must never start off it
+  const w2p = (x,y) => p.evaluate(([x,y]) => window.__pg.w2sPage(x,y), [x,y]);
+  const gRect = async (mat, layer, x0, y0, x1, y1) => {
+    await p.evaluate(([m,l]) => { window.__pg.setLayer(l); window.__pg.setTool(m); window.__pg.deselect(); window.__pg.setPaintMode('rect'); }, [mat, layer]);
+    const a = await w2p(x0,y0), c = await w2p(x1,y1);
+    await p.mouse.move(a.x,a.y); await p.mouse.down(); await p.mouse.move(c.x,c.y,{steps:6}); await p.mouse.up(); await p.waitForTimeout(150);
+    await p.evaluate(() => window.__pg.deselect());
+  };
+  const gNs = await p.evaluate(() => window.__pg.objects().length);
+  await gRect('wood', 0, GX-200, Y-100, GX+200, Y-40);     // a Back beam
+  await gRect('metal', 1, GX-40, Y-30, GX+40, Y+50);      // a Mid gCrate, in front of it
+  await gRect('sponge', 1, GX+260, Y-30, GX+340, Y+50);   // another Mid thing, well apart from the gCrate
+  const gIds = await p.evaluate(n => window.__pg.objects().slice(n).map(o => ({ id: o.id, m: o.pieces[0].m, layer: o.layer })), gNs);
+  const gBack = gIds.filter(o => o.m === 'wood')[0], gCrate = gIds.filter(o => o.m === 'metal')[0], gSpg = gIds.filter(o => o.m === 'sponge')[0];
+  ok('three things: a Back beam and two Mid things', gBack && gBack.layer === 0 && gCrate && gCrate.layer === 1 && gSpg && gSpg.layer === 1, gIds);
+  // unlock the gCrate so it could move, then glue it to the beam behind
+  await p.evaluate(id => { const o = window.__pg.objects().filter(o => o.id === id)[0]; window.__pg.select(o); window.__pg.anchor(); window.__pg.deselect(); }, gCrate.id);
+  ok('the gCrate is free gBefore the glue', !(await p.evaluate(id => window.__pg.glueOf(id), gCrate.id)).isStatic);
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('glue'); });
+  ok('the first glue click picks the gCrate up', (await p.evaluate(([x,y]) => window.__pg.glueAt(x,y), [GX, Y+10])) === gCrate.id);
+  await p.evaluate(() => window.__pg.setLayer(0));
+  await p.evaluate(([x,y]) => window.__pg.glueAt(x,y), [GX-150, Y-70]);   // on the beam, where the gCrate does not cover it
+  const gb = await p.evaluate(id => window.__pg.glueOf(id), gBack.id), gc = await p.evaluate(id => window.__pg.glueOf(id), gCrate.id);
+  ok('glued across layers: both keep their layers', gb.layer === 0 && gc.layer === 1 && (await p.evaluate(() => window.__pg.objects().length)) === 4, { gb, gc });
+  ok('and share a glue group', gb.glue && gb.glue === gc.glue && gb.mates.length === 2, { gb, gc });
+  ok('the Mid gCrate is held still by the scenery it is glued to', gc.held === true && gc.isStatic === true, gc);
+  ok('selecting one selects both', await p.evaluate(id => { const o = window.__pg.objects().filter(o => o.id === id)[0]; window.__pg.select(o); return window.__pg.selIds().length === 2; }, gCrate.id));
+  // drag the gCrate: the beam comes along
+  await p.evaluate(() => { window.__pg.setTool('move'); window.__pg.deselect(); });
+  const gBefore = await p.evaluate(gIds => gIds.map(id => { const o = window.__pg.objects().filter(o => o.id === id)[0]; return [o.body.position.x, o.body.position.y]; }), [gBack.id, gCrate.id]);
+  const d0 = await w2p(GX, Y+10), d1 = await w2p(GX+120, Y+10);
+  await p.mouse.move(d0.x, d0.y); await p.mouse.down(); await p.mouse.move(d1.x, d1.y, { steps: 10 }); await p.mouse.up(); await p.waitForTimeout(200);
+  const gAfter = await p.evaluate(gIds => gIds.map(id => { const o = window.__pg.objects().filter(o => o.id === id)[0]; return [o.body.position.x, o.body.position.y]; }), [gBack.id, gCrate.id]);
+  ok('dragging the gCrate moves the beam behind it too, by the same amount', gAfter[1][0] - gBefore[1][0] > 90 && Math.abs((gAfter[0][0] - gBefore[0][0]) - (gAfter[1][0] - gBefore[1][0])) < 3, { gBefore, gAfter });
+  // the sponge, not glued, stayed
+  ok('the other Mid thing was not part of it', Math.abs((await p.evaluate(id => window.__pg.objects().filter(o => o.id === id)[0].body.position.x, gSpg.id)) - (GX+300)) < 8);
+  // save and load keep the group
+  const gData = await p.evaluate(() => window.__pg.serialize('glue'));
+  ok('the level file carries the glue', gData.objects.filter(o => o.glue).length === 2 && gData.objects.filter(o => o.glue)[0].glue === gData.objects.filter(o => o.glue)[1].glue);
+  await p.evaluate(d => window.__pg.load(d), gData); await p.waitForTimeout(200);
+  const gLoaded = await p.evaluate(() => window.__pg.objects().filter(o => o.glue).map(o => ({ layer: o.layer, held: window.__pg.glueOf(o.id).held })));
+  ok('gLoaded, they are still glued, the Mid one still held', gLoaded.length === 2 && gLoaded.some(o => o.layer === 1 && o.held), gLoaded);
+  // unglue frees the gCrate
+  const crate2 = await p.evaluate(() => window.__pg.objects().filter(o => o.glue && o.layer === 1)[0].id);
+  await p.evaluate(id => window.__pg.unglue(id), crate2);
+  const gc2 = await p.evaluate(id => window.__pg.glueOf(id), crate2);
+  ok('unglued, the gCrate is free again and alone', gc2.glue === null && gc2.held === false && gc2.isStatic === false && (await p.evaluate(() => window.__pg.objects().filter(o => o.glue).length)) === 0, gc2);
+  // same layer: welded into one, as gBefore
+  const gN0w = await p.evaluate(() => window.__pg.objects().length);
+  await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('glue'); });
+  const cr2 = await p.evaluate(id => { const o = window.__pg.objects().filter(o => o.id === id)[0]; return { x: o.body.position.x, y: o.body.position.y }; }, crate2);
+  await p.evaluate(([x,y]) => window.__pg.glueAt(x,y), [cr2.x, cr2.y]);                 // the crate first
+  await p.evaluate(([x,y]) => window.__pg.glueAt(x,y), [GX+300, Y+10]);                // then the sponge
+  ok('two Mid things glued become one object', (await p.evaluate(() => window.__pg.objects().length)) === gN0w - 1 && (await p.evaluate(() => window.__pg.objects().some(o => o.pieces.length === 2))), { n: await p.evaluate(() => window.__pg.objects().length), gN0w, objs: await p.evaluate(() => window.__pg.objects().map(o => [o.id, o.pieces.map(pc => pc.m), o.layer, Math.round(o.body.position.x), Math.round(o.body.position.y)])), toast: await p.evaluate(() => document.getElementById('toast').textContent), cr2, GX, Y });
+  await p.keyboard.press('Escape');
+  ok('Esc puts the glue down', (await p.evaluate(() => window.__pg.tool ? window.__pg.tool() : null)) !== 'glue' && !(await p.evaluate(() => document.getElementById('game').classList.contains('glueMode'))));
+
   console.log((fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   console.log('errors:', errs.length ? errs.slice(0,6).join(String.fromCharCode(10)) : 'none');
   await b.close();
