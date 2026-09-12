@@ -10,6 +10,7 @@ s = re.sub(r'<link[^>]*fonts\.(googleapis|gstatic)\.com[^>]*>', '', s)
 # shipping file has no such switch: it is rewritten into the preview only.
 WORLD_LINE = 'var WORLD_W = 19200, WORLD_H = 9600;'
 assert WORLD_LINE in s, 'the world size line moved'
+s = s.replace('var pads = navigator.getGamepads ? navigator.getGamepads() : null;', 'var pads = window.__pgFakePad !== undefined ? [window.__pgFakePad] : (navigator.getGamepads ? navigator.getGamepads() : null);')   # the suites plant a pad
 s = s.replace(WORLD_LINE, "var WORLD_W = +localStorage.getItem('pg_test_world_w') || 19200, WORLD_H = +localStorage.getItem('pg_test_world_h') || 9600;")
 HOOK = """
   window.__pg = {
@@ -39,6 +40,8 @@ HOOK = """
     saveThing: function(id, name){ var g = gadgetById(id); if (!g) return false; if (!mySkins[g.kind]) mySkins[g.kind] = []; mySkins[g.kind].push({ id: "s" + Date.now(), name: name, data: packDrawnThing(g) }); persistMySkins(); return true; },
     placeSaved: function(kind, entryId){ var e = (mySkins[kind] || []).find(function(x){ return x.id === entryId; }); if (!e) return false; placePreset = { kind: kind, entry: e }; currentTool = kind; canvas.dataset.tool = kind; return true; },
     playHere: function(){ playFromHere(); return mode; },
+    padState: function(){ return { held: padHeld, seen: padSeen, aim: gunAim, lastShot: gunLastShot, now: performance.now(), mode: mode, armed: !!playerGun, input: { left: input.left, right: input.right, up: input.up, down: input.down, sprint: input.sprint } }; },
+    fakePad: function(gp){ window.__pgFakePad = gp; },
     levelType: function(v){ if (v) worldSettings.levelType = v; return worldSettings.levelType; },
     rules: function(o){ if (o) for (var k in o) worldSettings[k] = o[k]; return { lives: worldSettings.lives, timeLimit: worldSettings.timeLimit, fallLine: worldSettings.fallLine, knockouts: worldSettings.knockouts }; },
     run: function(){ return { lives: playRun.lives, deaths: playRun.deaths, left: runTimeLeft(), over: playRun.over, livesHud: document.getElementById("livesHud").hidden ? null : document.getElementById("livesHud").textContent, timeHud: document.getElementById("timeHud").hidden ? null : document.getElementById("timeHud").textContent }; },

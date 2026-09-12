@@ -542,6 +542,54 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('a new level asks what kind it is', await p.evaluate(() => window.__pg.askType()));
   ok('and picking one closes the chooser', await p.evaluate(() => window.__pg.pickType('Hub')) && (await p.evaluate(() => document.getElementById('typeOverlay').hidden)));
 
+  console.log('== a controller: the stick walks, A jumps, X grabs, the right stick aims a launcher ==');
+  await fresh();
+  await p.evaluate(() => window.__pg.setStick(true));
+  await rect('wood', 1, X-400, Y+100, X+400, Y+140);
+  await rect('sponge', 1, X+150, Y+40, X+210, Y+100);
+  await p.evaluate(() => window.__pg.setStick(false));
+  const pad = (over) => { const b = []; for (let i = 0; i < 17; i++) b.push({ pressed: false, value: 0 }); const g = { connected: true, axes: [0, 0, 0, 0], buttons: b }; if (over){ if (over.axes) g.axes = over.axes; (over.press || []).forEach(i => { b[i].pressed = true; b[i].value = 1; }); } return g; };
+  await p.evaluate(g => window.__pg.fakePad(g), pad()); await p.waitForTimeout(100);
+  ok('a pad is seen, and says so', (await p.evaluate(() => window.__pg.padState())).seen && /Controller connected/.test(await p.evaluate(() => document.getElementById('toast').textContent)));
+  await play(); await standAt(X-300, Y+60);
+  const px0 = (await pos()).x;
+  await p.evaluate(g => window.__pg.fakePad(g), pad({ axes: [1, 0, 0, 0] })); await p.waitForTimeout(500);
+  ok('the stick right walks the character right', (await pos()).x > px0 + 60 && (await p.evaluate(() => window.__pg.padState())).input.right === true, { from: px0, to: (await pos()).x });
+  await p.evaluate(g => window.__pg.fakePad(g), pad()); await p.waitForTimeout(150);
+  ok('letting go stops', (await p.evaluate(() => window.__pg.padState())).input.right === false);
+  const py0 = (await pos()).y;
+  await p.evaluate(g => window.__pg.fakePad(g), pad({ press: [0] })); await p.waitForTimeout(60);
+  let top = py0; for (let i = 0; i < 12; i++){ await p.waitForTimeout(40); const q = await pos(); if (q.y < top) top = q.y; }
+  ok('A jumps', top < py0 - 25, { py0, top });
+  await p.evaluate(g => window.__pg.fakePad(g), pad()); await p.waitForTimeout(600);
+  // the keys and the pad add up: a key held plus a stick released still walks
+  await p.keyboard.down('ArrowLeft'); await p.evaluate(g => window.__pg.fakePad(g), pad({ axes: [1, 0, 0, 0] })); await p.waitForTimeout(60);
+  ok('a key and the stick both count', (await p.evaluate(() => window.__pg.padState())).input.left === true && (await p.evaluate(() => window.__pg.padState())).input.right === true);
+  await p.evaluate(g => window.__pg.fakePad(g), pad()); await p.waitForTimeout(60);
+  ok('the stick let go, the key still walks', (await p.evaluate(() => window.__pg.padState())).input.left === true && (await p.evaluate(() => window.__pg.padState())).input.right === false);
+  await p.keyboard.up('ArrowLeft');
+  // grab with X
+  await standAt(X+120, Y+60); await p.waitForTimeout(200);
+  await p.evaluate(g => window.__pg.fakePad(g), pad({ press: [2] })); await p.waitForTimeout(250);
+  ok('X grabs the sponge beside you', await p.evaluate(() => window.__pg.grabbing ? window.__pg.grabbing() : window.__pg.isGrabbing()));
+  await p.evaluate(g => window.__pg.fakePad(g), pad()); await p.waitForTimeout(150);
+  ok('and lets go', !(await p.evaluate(() => window.__pg.grabbing ? window.__pg.grabbing() : window.__pg.isGrabbing())));
+  await build();
+  // a launcher: the right stick aims, the trigger fires
+  const gunP = await place('gun', X-300, Y+40);
+  await play(); await standAt(X-300, Y+60); await p.waitForTimeout(300);
+  ok('armed', (await p.evaluate(() => window.__pg.gun())) !== null);
+  await p.evaluate(g => window.__pg.fakePad(g), pad({ axes: [0, 0, 1, 0] })); await p.waitForTimeout(100);
+  const aim = (await p.evaluate(() => window.__pg.padState())).aim;
+  ok('the right stick aims to the right of the character', aim && aim.x > (await pos()).x + 100, aim);
+  await p.evaluate(g => window.__pg.fakePad(g), pad({ axes: [0, 0, 1, 0], press: [7] }));
+  const trace = []; for (let i = 0; i < 6; i++){ await p.waitForTimeout(35); trace.push(await p.evaluate(() => window.__pg.projectiles().map(q => [Math.round(q.pos.x), Math.round(q.pos.y), q.hit]))); }
+  ok('the trigger fires that way — bullets seen flying right of the character', trace.some(t => t.length && t[0][0] > 150) && trace.filter(t => t.length).length >= 3, trace);
+  await p.evaluate(() => window.__pg.fakePad(null)); await p.waitForTimeout(100);
+  ok('the pad unplugged, nothing is held', !(await p.evaluate(() => window.__pg.padState())).seen && (await p.evaluate(() => window.__pg.padState())).input.right === false);
+  await p.evaluate(() => { window.__pgFakePad = undefined; });
+  await build();
+
   ok('no page errors', errs.length === 0, errs);
   console.log('\n' + (fail ? 'FAILED '+fail+' of ' : 'ALL ') + (pass+fail) + ' checks');
   await b.close();

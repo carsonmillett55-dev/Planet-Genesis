@@ -6879,6 +6879,62 @@
     if (!flying){ input.jumpQueued = true; input.jumpBufferUntil = performance.now() + JUMP_BUFFER_MS; }
   }
 
+  /* ---- A gamepad, read every frame (there are no events for sticks).
+     The first pad drives the character beside the keyboard: the left
+     stick or the pad walks (up and down fly and swim, as the keys do), A
+     jumps, X or B grabs, Y is the interact key, the right bumper sprints,
+     Start is the pause menu; with a launcher in hand the right stick aims
+     and the right trigger fires. Held keys and held buttons both count —
+     `padHeld` is what the pad holds, merged into `input` with the keys'
+     own flags rather than overwriting them. The first stage of local
+     players: the second, third and fourth pads become their own
+     characters once there are several. ---- */
+  var padHeld = { left: false, right: false, up: false, down: false, sprint: false, grab: false, fire: false }, padPrev = {}, padAim = null, padSeen = false;
+  function padButton(gp, i){ var b = gp.buttons[i]; return !!(b && (b.pressed || b.value > 0.5)); }
+  function pollGamepad(){
+    var pads = navigator.getGamepads ? navigator.getGamepads() : null;
+    var gp = null;
+    if (pads) for (var i = 0; i < pads.length; i++){ if (pads[i] && pads[i].connected){ gp = pads[i]; break; } }
+    if (!gp){
+      if (padSeen){ padSeen = false; for (var k in padHeld) padHeld[k] = false; padAim = null; syncPadInput(); }
+      return;
+    }
+    if (!padSeen){ padSeen = true; showToast("🎮 Controller connected — stick to walk, A jumps, X grabs, Y uses, Start is the menu."); }
+    var ax = gp.axes[0] || 0, ay = gp.axes[1] || 0, dead = 0.3;
+    var was = { left: padHeld.left, right: padHeld.right, up: padHeld.up, down: padHeld.down, sprint: padHeld.sprint, grab: padHeld.grab, fire: padHeld.fire };
+    padHeld.left = ax < -dead || padButton(gp, 14);
+    padHeld.right = ax > dead || padButton(gp, 15);
+    padHeld.up = ay < -dead || padButton(gp, 12);
+    padHeld.down = ay > dead || padButton(gp, 13);
+    padHeld.sprint = padButton(gp, 5) || padButton(gp, 4);
+    padHeld.grab = padButton(gp, 2) || padButton(gp, 1);
+    padHeld.fire = padButton(gp, 7);
+    var rx = gp.axes[2] || 0, ry = gp.axes[3] || 0;
+    padAim = Math.hypot(rx, ry) > 0.35 ? { x: rx, y: ry } : null;
+    // presses: what went down this frame
+    var jump = padButton(gp, 0), interact = padButton(gp, 3), start = padButton(gp, 9);
+    if (jump && !padPrev.jump) handleJumpOrFlyToggle();
+    if (interact && !padPrev.interact && runner.enabled){ var dn = doorNearPlayer(); if (dn) enterDoor(dn); else useLever(); }
+    if (!interact && padPrev.interact) releaseLevers();
+    if (start && !padPrev.start){ if (pauseOverlay.hidden) openPauseMenu(); else closePauseMenu(); }
+    padPrev.jump = jump; padPrev.interact = interact; padPrev.start = start;
+    if (padHeld.grab !== was.grab && !grabMouse) setGrabHeld(padHeld.grab || keyHeld.grab);
+    syncPadInput();
+    // the launcher: the right stick aims, the trigger fires
+    if (mode === "play" && playerGun && player){
+      if (padAim){ var reach = 260; gunAim = { x: player.position.x + padAim.x * reach, y: player.position.y + padAim.y * reach }; }
+      if (padHeld.fire && gunAim) gunFire(gunAim);
+    }
+  }
+  var keyHeld = { left: false, right: false, up: false, down: false, sprint: false, grab: false };
+  var gunAim = null;   // where the pad is aiming the launcher, world px
+  function syncPadInput(){
+    input.left = keyHeld.left || padHeld.left;
+    input.right = keyHeld.right || padHeld.right;
+    input.up = keyHeld.up || padHeld.up;
+    input.down = keyHeld.down || padHeld.down;
+    input.sprint = keyHeld.sprint || padHeld.sprint;
+  }
   window.addEventListener("keydown", function(e){
     if (document.activeElement && document.activeElement.tagName === "INPUT") return;
     if (captureKeyBind(e)) return;           // Settings is waiting for a key to assign
@@ -6938,19 +6994,19 @@
       }
       return;
     }
-    if (isAction("left", e.code)) input.left = true;
-    if (isAction("right", e.code)) input.right = true;
+    if (isAction("left", e.code)){ keyHeld.left = true; input.left = true; }
+    if (isAction("right", e.code)){ keyHeld.right = true; input.right = true; }
     // Up/Down are recorded whatever you're doing; what they mean is up
     // to the movement code, which uses them for flying AND for swimming.
-    if (isAction("up", e.code)){ input.up = true; e.preventDefault(); }
-    if (isAction("down", e.code)){ input.down = true; e.preventDefault(); }
+    if (isAction("up", e.code)){ keyHeld.up = true; input.up = true; e.preventDefault(); }
+    if (isAction("down", e.code)){ keyHeld.down = true; input.down = true; e.preventDefault(); }
     if (isAction("jump", e.code)){
       e.preventDefault();
       if (!e.repeat) handleJumpOrFlyToggle();
     }
     if (isAction("interact", e.code) && !e.repeat && runner.enabled){ var dn = doorNearPlayer(); if (dn){ e.preventDefault(); enterDoor(dn); } else if (useLever()) e.preventDefault(); }
-    if (isAction("grab", e.code)){ e.preventDefault(); setGrabHeld(true); }
-    if (isAction("sprint", e.code)){ input.sprint = true; }
+    if (isAction("grab", e.code)){ e.preventDefault(); keyHeld.grab = true; setGrabHeld(true); }
+    if (isAction("sprint", e.code)){ keyHeld.sprint = true; input.sprint = true; }
     if (isAction("pauseMenu", e.code) && !e.repeat){
       e.preventDefault();
       // Esc backs out of whatever is half done before it means "menu".
@@ -7032,14 +7088,14 @@
     showToast("🎨 " + matOf(id).label);
   }
   window.addEventListener("keyup", function(e){
-    if (isAction("left", e.code)) input.left = false;
-    if (isAction("right", e.code)) input.right = false;
-    if (isAction("up", e.code)) input.up = false;
-    if (isAction("down", e.code)) input.down = false;
+    if (isAction("left", e.code)){ keyHeld.left = false; input.left = padHeld.left; }
+    if (isAction("right", e.code)){ keyHeld.right = false; input.right = padHeld.right; }
+    if (isAction("up", e.code)){ keyHeld.up = false; input.up = padHeld.up; }
+    if (isAction("down", e.code)){ keyHeld.down = false; input.down = padHeld.down; }
     if (isAction("glue", e.code)){ exitGlueMode(); }
     if (isAction("interact", e.code)) releaseLevers();
-    if (isAction("grab", e.code) && !grabMouse) setGrabHeld(false);
-    if (isAction("sprint", e.code)) input.sprint = false;
+    if (isAction("grab", e.code)){ keyHeld.grab = false; if (!grabMouse && !padHeld.grab) setGrabHeld(false); }
+    if (isAction("sprint", e.code)){ keyHeld.sprint = false; input.sprint = padHeld.sprint; }
   });
   window.addEventListener("blur", function(){ exitGlueMode(); });
 
@@ -9601,6 +9657,15 @@
   function isMaterialTool(){ return !!matOf(currentTool) && !GADGET_TOOL_KIND[currentTool]; }
   function drawCursorOverlay(){
     var showCustom = false;
+    if (mode === "play" && playerGun && player && padAim && gunAim){
+      // the controller's aim: a crosshair on the stick's direction, the line of the shot
+      var pr = 11/camScale;
+      ctx.save();
+      ctx.lineWidth = 2/camScale; ctx.strokeStyle = "rgba(43,27,18,.8)";
+      ctx.beginPath(); ctx.arc(gunAim.x, gunAim.y, pr, 0, Math.PI*2); ctx.stroke();
+      ctx.globalAlpha = 0.25; ctx.setLineDash([4/camScale, 6/camScale]); ctx.beginPath(); ctx.moveTo(player.position.x, player.position.y); ctx.lineTo(gunAim.x, gunAim.y); ctx.stroke(); ctx.setLineDash([]);
+      ctx.restore();
+    }
     if (mouseOnCanvas && !anyOverlayOpen() && !camPan && !shapeDrag){
       if (mode === "play"){
         var rr = 4/camScale;
@@ -10190,6 +10255,7 @@
   }
   function drawFrame(now){
     var frameK = Math.max(0.2, Math.min(3, (now - lastFrameT)/16.666));
+    pollGamepad();
     if (showPerf){
       var gap = now - lastFrameT;
       if (gap > 0 && gap < 1000){ perfAvg += (gap - perfAvg) * 0.08; if (gap > perfWorst || now - perfWorstAt > 2000){ perfWorst = gap; perfWorstAt = now; } }

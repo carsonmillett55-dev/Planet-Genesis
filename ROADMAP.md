@@ -433,7 +433,8 @@ Minigame keep their rules so they play right when players can join.
 **Still to do, in order** — see Part E for what needs a backend:
 
 1. **Local players first.** Several characters on one machine — gamepads
-   and a second set of keys — before anything online: the same bodies,
+   and a second set of keys — before anything online (a controller drives
+   the one character now, 2026-09-12): the same bodies,
    inputs and cameras are what online play will drive later. The single
    `player` and its thirty-odd globals become `players[]`; sensors, buttons,
    creatures and the crush read "any player"; each player has their own

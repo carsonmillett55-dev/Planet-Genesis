@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1198 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` | Playwright suites, 1210 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1198 checks + checkgeom, in order
+npm test                   # all 1210 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -73,7 +73,7 @@ node tlogic.js             # 43 — tags and tag sensors, impact sensors, timers
 node tproj.js              # 42 — the launcher (bullets, shots that run out, a ray, a saved object), a drawn projectile that hurts a creature, an emitter firing bullets, the save tabs; how it flies is the firer's, the Impact drawing, an emitter firing rays, the projectile sensor's every-Nth-hit, named projectile, box, painted spots and destroy; the missile's hole, scorch and launcher
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
-node tui.js                # 146 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider; My World and level doors, a level's character size; level types and their rules
+node tui.js                # 158 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider; My World and level doors, a level's character size; level types and their rules; a controller
 node tgame.js              # 85 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -2307,6 +2307,25 @@ rubs out; bars, Clear this track, Tempo, Volume, "Plays in the level",
 "Throw the tune away". A level with no tune shows one button, "Write a
 tune". Not done: a music gadget (LBP2's sequencer as a thing on the
 level), saving tunes to the device, more voices.
+
+## A controller
+
+The first stage of local players. `pollGamepad()`, at the top of every
+frame (the Gamepad API has no events for sticks): the first connected
+pad drives the character beside the keyboard — the left stick or the
+pad walks (up and down fly and swim, as the keys do), A jumps (through
+`handleJumpOrFlyToggle`, so a double-tap flies in Build), X or B grabs,
+Y is the interact key (doors and levers), the bumpers sprint, Start
+opens and closes the pause menu; with a launcher in hand the right
+stick aims (`gunAim`, a crosshair drawn by `drawCursorOverlay` on the
+stick's direction, 260px out) and the right trigger fires. **Held keys
+and held buttons add up**: the keyboard's own flags are `keyHeld`, the
+pad's `padHeld`, and `syncPadInput` ORs them into `input`, so a key let
+go does not cancel a stick, nor the other way round; the grab is set
+from either. A pad unplugged clears what it held. A toast the first time
+one is seen. `mkprev.py` rewrites the `getGamepads` line so a suite can
+plant `window.__pgFakePad` — an object shaped like a Gamepad — and the
+shipping file never reads it.
 
 ## Level types
 
