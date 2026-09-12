@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` | Playwright suites, 1245 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` `tversus.js` `ttopdown.js` | Playwright suites, 1308 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1245 checks + checkgeom, in order
+npm test                   # all 1308 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -74,7 +74,9 @@ node tproj.js              # 42 — the launcher (bullets, shots that run out, a
 node tskins.js             # 70 — the Custom creature and Custom object wizards (size, look, hitbox, weak spot, danger), a fresh one held still with no collision until its hitbox is drawn, undo on a step, the marker in the hitbox's middle and moving the whole thing, placing in a drag-out shape mode, the old body names, death and attack animations, facing, no-collision, particles with pictures and their opacity
 node tcam.js               # 92 — Play's own zoom and height, the World page's live preview, zooming on the cursor, Camera gadgets (zone box, view frame, dragging both, the honest frame, mid-air cameras, wired, three holds, glide, shake, freeze, the Build preview), walking and sprinting pace, grab reach
 node tui.js                # 158 — Play from here, the minimap (a click looks, the right button goes), level pictures, the tips, the device's room, backgrounds, music, Ctrl+Z pausing, the menu holding still under a slider; My World and level doors, a level's character size; level types and their rules; a controller
-node tplayers.js           # 35 — local players: a second pad joins on Start, each pad drives its own character, the keyboard the first; a sensor sees any of them; the camera on the first and a bubble for one left behind, or one who dies; back to Build together; a pad gone and its player leaving
+node tplayers.js           # 43 — local players: a second pad joins on Start, each pad drives its own character, the keyboard the first; a sensor sees any of them; the camera on the first and a bubble for one left behind, or one who dies; back to Build together; a pad gone and its player leaving; a second player on the keyboard (U joins, I J K L walk)
+node tversus.js            # 29 — Versus: players collide (one on the other's head), the camera frames everyone, a launcher's shot is a knockout credited to the shooter, the HUD chips, the winner named and a new round, lives putting a player out, a hazard for nobody's credit, an adventure's shot only splatting
+node ttopdown.js           # 26 — Top-down: no gravity, a disc of a body, the arrows every way and no jump, looking at the cursor, a shove that slides and stops, water a still pool, a creature chasing down the screen, gravity back in an adventure, saved
 node tgame.js              # 85 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -2382,9 +2384,108 @@ ever, and out of lives or time's up respawns everyone
 (`respawnAllPlayers`). Play from here drops everyone at the spot; a
 level's character size applies to all; leaving Play `gatherPlayers`
 the rest beside the first, bubbles popped. Snapshots carry the first
-player only (the others are gathered on the way back). Still to come:
-Versus (several starts, per-player knockouts), the camera that frames
-everyone, emotes and the launcher HUD for pad players.
+player only (the others are gathered on the way back). **A second player on the same keyboard** (`KEYS2`: I J K L walk, U
+jumps, O grabs, Y uses): U in Play joins them (`keys2Down`, as Start
+does for a pad — `addPlayer(null, true)`, `P.keyboard2`), the keys are
+theirs only while the first player has not bound them to something
+(`boundToP1`), and both handlers route them through `withPlayer`
+before the first player's own keys are read; the pad loop leaves a
+keyboard player alone; Settings → More players says so and has the
+leave button. Still to come: emotes and the launcher HUD for pad
+players.
+
+**Each player has their own collision group** (`carryGroup()`,
+`CARRY_GROUP - slot`): their own body, what they carry and what they
+fire never touch them; another player's do — so two characters stand
+on each other, as LBP's do, and a launcher's shot reaches an opponent.
+A pair between two players is handed to **both** (`groundContacts`,
+the hazard touch), and `groundPair` / `touchPair` tell "mine" by the
+bound body (`ownPart`), not by `isPlayerPart`, which is any player's.
+
+## Top-down (2.5D)
+
+Carson's 2.5D idea from the roadmap: "top-down view, WASD moves in
+every direction, the character looks at the cursor, same material
+editing". A level type (`topdownNow()`), not a second editor — the
+same painting, the same gadgets, seen from above:
+
+- **No gravity**: `applyWorldSettings` sets `engine.gravity.y` to 0
+  (called when the type is picked, on a new level and on load; the
+  Gravity slider gives way to a note). Nothing falls; a loose thing
+  shoved slides and stops — `TOPDOWN_DRAG` (0.94 a step) on every
+  dynamic body but projectiles, in the speed-cap step.
+- **The body is a disc** (`buildPlayerBody`: `Bodies.circle` at
+  0.48 of the shorter side, PW/PH the art box), since the picture
+  turns; `me.bodyTopdown` remembers which kind was built and a frame
+  check in `drawFrame` rebuilds in place (`respawnSameSpot`) when the
+  type changes either way.
+- **The arrows walk every way** (`moveStep`, a branch before the
+  hanging/flying/walking code): Up and Down are a velocity like Left
+  and Right, diagonals normalised, 0.6 in water (`playerWetness`), no
+  crouch, no jump (the queued jump is dropped); the paused walk
+  (`freeMoveOne`) does the same by `tryMovePlayer`. Grabbing and
+  carrying still work — the carry is driven above the branch.
+- **The character looks where it is pointed**: `lookAngle()` — the
+  mouse for the keyboard player, a pad's right stick, else the way
+  they last walked (`me.moveAng`); `drawPlayer` keeps it in
+  `me.lookAng` each frame and `drawCharacter` turns the picture by
+  `lookAng + π/2` (canvas turns clockwise, so the drawing's top ends
+  up along the look) over a soft shadow, no squish, no mirroring.
+- **Water is a still pool**: `tickWater` does not step; the player's
+  buoyancy is skipped (the objects' lift is zero anyway with no
+  gravity, their drag stays). **Creatures chase every way**
+  (`fly2 = g.fly || topdownNow()` in `creatureStep`). No fall line,
+  no landing puff. The camera aims straight at the character
+  (`playerAim`, `groupAim`: no `camHeight`).
+- **The ground** (`paintTopdownBackdrop`): dry earth with soft
+  patches and pebbles hashed by world cell, so walking reads as
+  ground going by; the level's own drawn background and plain colour
+  still apply over it.
+
+Not yet: a top-down character rig of its own (the side-on drawing is
+turned), a dash on Space, creatures turning to face, a level's
+"north". Hooks: `gravityY`, `look`, `bodyKind`. `ttopdown.js`.
+
+## Versus
+
+The level types Versus and Minigame (`pvpNow()`): players against each
+other. Each keeps their own count on the struct — `P.kos`, `P.dead`,
+`P.livesLeft`, `P.out` — reset by `startPlayRun`. A death in Play goes
+through `pvpDeath(msg, by)` instead of the shared lives: `by` is the
+player who caused it (a launcher's shot: `pj.ownerP`, the struct
+recorded at `spawnProjectile`; a ray: the shooter), and gets the
+knockout; a hazard or the fall line is nobody's. With lives on, the
+last life gone puts the player **out** for the round — a bubble with
+`out` set that drifts to the middle of the group and waits
+(`bubbleStep`); alone in a Versus level, out of lives is the start
+again. Otherwise `respawnPlayer`, which in a Versus level spreads the
+players side by side at the start (`PW + 14` apart by index).
+`checkRoundWinner`: first to `worldSettings.knockouts` (Versus), or
+the last one not out (lives) — named in a toast, `playRun.over`, and
+2.6s later a new round (`startPlayRun`, `respawnAllPlayers`,
+`resetGadgetsForPlay`); everyone out is "again" after 1.2s. In an
+adventure a friend's shot does nothing but splat (the projectile still
+breaks on them). `projectileHit`: a player hit is `playerOf(other)`;
+the owner's own shot never counts, and an emitter's shot (no owner)
+counts against anyone in a Versus level.
+
+**The camera frames everyone** (`groupAim`): the box round every
+player (bubbles included) padded `GROUP_PAD` (260px), centred, at the
+zoom that fits it — never closer than the level's own zoom, never
+further than `GROUP_ZOOM_MIN` (0.3); `camScale = baseScale × zoom` and
+`visW = viewRectW / camScale`, so the fit is `viewRectW / w /
+baseScale`. `updatePlayCamera` takes it over `playerAim` in Play in a
+Versus level with no camera gadget active, and eases the zoom at 0.08
+a frame (a snap would jitter as they move). No "left behind" bubbles
+in a Versus level — nobody is off the screen.
+
+**The HUD**: `#playersHud`, a chip per player in their colour
+(`updatePlayersHud`, from `updateRunHud`, rebuilt only when its text
+changes): "Player 2 · ⚔ 1 · ❤ 2" — knockouts in Versus, lives when the
+level has them; an out player's chip is struck through. Shown in Play
+in a Versus or Minigame level with more than one player; the shared
+lives pill hides then. The Level page's note says how to join. Hooks:
+`pvp`, `playersHud`, `fireAt`, `armAll`. `tversus.js`.
 
 `mkprev.py` rewrites the `getGamepads` line to read `window.__pgFakePads`
 (a list) or `window.__pgFakePad`; `players()`, `fakePads`, `addPlayer`,

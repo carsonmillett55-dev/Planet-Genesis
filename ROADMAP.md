@@ -371,7 +371,7 @@ it emits while the signal is on.
   scale on a bit of level next to a 100px crate), and the hitbox is drawn.
   A crouch's shorter box waits on the crouch.
 
-### 2.5D create mode
+### 2.5D create mode — first cut DONE 2026-09-12 (a level type, "Top-down")
 
 A whole second mode:
 
@@ -436,18 +436,27 @@ Minigame keep their rules so they play right when players can join.
    machine: the keyboard and the first pad are player one, every further
    pad joins with Start as its own character (up to four), each with
    their own grab, gun and footing; sensors, buttons, creatures, the fan,
-   the goal and the crush see all of them. Not yet: a second set of keys,
-   emotes and the launcher's ammo readout for pad players.
+   the goal and the crush see all of them; a second player on the same
+   keyboard (U joins, I J K L walk, O grabs, Y uses). Not yet: emotes and
+   the launcher's ammo readout for pad players.
 2. **The camera for a group**: DONE 2026-09-12 for the platformer — the
    camera follows player one, and a player left off the screen (or who
    dies) goes into a bubble that floats back to them and pops (Carson's
-   Mario mechanic; jump hurries it). Still to do: a camera that frames
-   everyone, for Versus.
-3. **Versus rules**: several start points, knockouts counted per player,
-   friendly fire for launchers, the winner named.
+   Mario mechanic; jump hurries it). The camera that frames everyone: DONE
+   2026-09-12, in Versus and Minigame levels.
+3. **Versus rules**: DONE 2026-09-12 — each player's own knockouts and
+   lives, a launcher's shot a knockout for the shooter, the last one
+   standing or the first to the count named the winner and a new round;
+   players collide with each other now (one can stand on the other's
+   head, as in LBP). Not yet: several start points (players spawn side by
+   side at the one start), a per-player score in Minigames, melee.
 4. **Online**: rooms, joining, the level sent to everyone — Part E.
-5. **Top-down (2.5D)**: its own mode — a second character rig, gravity off,
-   the camera from above.
+5. **Top-down (2.5D)**: DONE 2026-09-12 as a level type — gravity off,
+   the arrows walk every way, no jump, the character looks at the cursor
+   (a pad's right stick), loose things slide and stop, water a still
+   pool, creatures chase every way, a ground seen from above. Not yet: a
+   character rig drawn for the top-down view (the side-on drawing is
+   turned), a dash.
 
 ### Level doors — first cut DONE 2026-09-12
 

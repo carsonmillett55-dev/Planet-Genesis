@@ -65,7 +65,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.waitForTimeout(120);
   ps = await players();
   ok('Start on the free pad joins a second player, with that pad', ps.length === 2 && ps[1].pad === 1 && !ps[1].keyboard, ps);
-  ok('spawned beside the first', ps.length === 2 && Math.abs(ps[1].x - ps[0].x) < 30 && Math.abs(ps[1].y - ps[0].y) < 80, ps);
+  ok('spawned beside the first (and nudged apart — players collide)', ps.length === 2 && Math.abs(ps[1].x - ps[0].x) < 70 && Math.abs(ps[1].y - ps[0].y) < 80, ps);
   ok('in their own colour', ps.length === 2 && ps[1].color !== ps[0].color, ps);
   ok('and it says so', /Player 2 joined/.test(await toast()));
   ok('the pause menu did not open on that Start', await p.evaluate(() => document.getElementById('pauseOverlay').hidden));
@@ -167,6 +167,37 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await p.evaluate(() => { window.__pgFakePads = null; window.__pgFakePad = undefined; });
   await p.waitForTimeout(150);
   ok('and the first player is as they were', (await players()).length === 1 && (await players())[0].bound);
+
+  console.log('== a second player on the keyboard: U joins, I J K L walk ==');
+  await fresh();
+  await rect('wood', 1, X-380, Y+100, X+800, Y+140);
+  await lockAll();
+  await play(); await standAt(X+200, Y+60);
+  await p.keyboard.press('KeyU'); await p.waitForTimeout(150);
+  ps = await players();
+  ok('U in Play joins a second player on the keyboard', ps.length === 2 && ps[1].keyboard2 && ps[1].pad === null, ps);
+  ok('and says which keys', /I J K L/.test(await toast()), await toast());
+  await p.waitForTimeout(400);
+  const kb0 = await players();
+  await p.keyboard.down('KeyL'); await p.waitForTimeout(400); await p.keyboard.up('KeyL');
+  ps = await players();
+  ok('L walks player two right', ps[1].x > kb0[1].x + 50, { from: kb0[1].x, to: ps[1].x });
+  ok('and not player one', Math.abs(ps[0].x - kb0[0].x) < 10, { from: kb0[0].x, to: ps[0].x });
+  await p.waitForTimeout(200);
+  const kb1 = await players();
+  await p.keyboard.press('KeyU');
+  let ktop = kb1[1].y; for (let i = 0; i < 14; i++){ await p.waitForTimeout(40); const q2 = await players(); if (q2[1].y < ktop) ktop = q2[1].y; }
+  ok('U jumps player two', ktop < kb1[1].y - 25, { from: kb1[1].y, top: ktop });
+  await p.waitForTimeout(600);
+  const kb2 = await players();
+  await p.keyboard.down('ArrowRight'); await p.waitForTimeout(300); await p.keyboard.up('ArrowRight');
+  ps = await players();
+  ok('the arrows still walk player one only', ps[0].x > kb2[0].x + 40 && Math.abs(ps[1].x - kb2[1].x) < 10, { p1: [kb2[0].x, ps[0].x], p2: [kb2[1].x, ps[1].x] });
+  await p.waitForTimeout(300);
+  ok('the pad loop leaves the keyboard player be', (await players()).length === 2);
+  await p.evaluate(() => window.__pg.removePlayer(1));
+  ok('leaving', (await players()).length === 1);
+  await build();
 
   console.log('== no page errors ==');
   ok('no errors', errs.length === 0, errs);

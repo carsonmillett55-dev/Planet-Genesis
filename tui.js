@@ -476,7 +476,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const worldPagesT = await p.evaluate(() => { window.__pg.menu('world'); return Array.from(document.querySelectorAll('#pmPages button')).map(b => b.textContent.trim()); });
   ok('World starts with a Level page', worldPagesT[0] === 'Level', worldPagesT);
   const levelBody = await p.evaluate(() => { Array.from(document.querySelectorAll('#pmPages button')).filter(b => b.textContent.trim() === 'Level')[0].click(); return document.getElementById('pmBody').innerText; });
-  ok('with the five kinds on it, Top-down marked as coming', /Adventure/.test(levelBody) && /Versus/.test(levelBody) && /Minigame/.test(levelBody) && /Hub/.test(levelBody) && /Top-down/.test(levelBody) && (await p.evaluate(() => Array.from(document.querySelectorAll('#pmBody .typeCard.soon')).length)) === 1);
+  ok('with the five kinds on it, all of them pickable now', /Adventure/.test(levelBody) && /Versus/.test(levelBody) && /Minigame/.test(levelBody) && /Hub/.test(levelBody) && /Top-down/.test(levelBody) && (await p.evaluate(() => Array.from(document.querySelectorAll('#pmBody .typeCard.soon')).length)) === 0);
   await p.evaluate(() => { Array.from(document.querySelectorAll('#pmBody .typeCard')).filter(c => /Versus/.test(c.textContent))[0].click(); }); await p.waitForTimeout(100);
   ok('picking Versus shows its rules: lives, time, knockouts, a fall line', (await p.evaluate(() => window.__pg.levelType())) === 'versus' && /Knockouts to win/.test(await p.evaluate(() => document.getElementById('pmBody').innerText)) && /fall line/i.test(await p.evaluate(() => document.getElementById('pmBody').innerText)));
   await p.evaluate(() => window.__pg.menu(null));
@@ -535,9 +535,9 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const oldHub = JSON.parse(JSON.stringify(dT)); oldHub.hub = true; delete oldHub.world.levelType;
   await p.evaluate(d => window.__pg.load(d), oldHub); await p.waitForTimeout(150);
   ok('a file from before level types with the hub flag loads as a hub', (await p.evaluate(() => window.__pg.levelType())) === 'hub');
-  const badT = JSON.parse(JSON.stringify(dT)); badT.world.levelType = 'topdown';
+  const badT = JSON.parse(JSON.stringify(dT)); badT.world.levelType = 'nonsense';
   await p.evaluate(d => window.__pg.load(d), badT); await p.waitForTimeout(150);
-  ok('a kind that is not built yet loads as an adventure', (await p.evaluate(() => window.__pg.levelType())) === 'adventure');
+  ok('a kind that does not exist loads as an adventure', (await p.evaluate(() => window.__pg.levelType())) === 'adventure');
   // the chooser when a level is made
   ok('a new level asks what kind it is', await p.evaluate(() => window.__pg.askType()));
   ok('and picking one closes the chooser', await p.evaluate(() => window.__pg.pickType('Hub')) && (await p.evaluate(() => document.getElementById('typeOverlay').hidden)));

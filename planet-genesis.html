@@ -992,6 +992,14 @@
   #timeHud{ left:9.6rem; }
   #timeHud.low{ background:rgba(179,38,30,.92); color:#F6ECD9; }
   #livesHud[hidden], #timeHud[hidden]{ display:none !important; }
+  #playersHud{ position:absolute; top:5.2rem; left:.6rem; z-index:16; pointer-events:none; display:flex; gap:.35rem; flex-wrap:wrap; }
+  #playersHud[hidden]{ display:none !important; }
+  #playersHud .pchip{
+    background:var(--c, #E8567A); border:2px solid var(--ink); border-radius:999px; color:#F6ECD9;
+    font-family:'Patrick Hand',cursive; font-weight:700; font-size:.85rem; padding:.2rem .7rem; white-space:nowrap;
+    text-shadow:0 1px 0 rgba(0,0,0,.35);
+  }
+  #playersHud .pchip.out{ opacity:.55; text-decoration:line-through; }
   #leaveHud{
     position:absolute; top:2.7rem; right:.6rem; z-index:16; cursor:pointer;
     background:rgba(142,91,181,.92); border:2px solid var(--ink); border-radius:999px;
@@ -1391,6 +1399,7 @@
       <div id="scoreHud" hidden>⭐ 0</div>
       <div id="livesHud" hidden>❤ 3</div>
       <div id="timeHud" hidden>⏱ 0:00</div>
+      <div id="playersHud" hidden></div>
       <button id="leaveHud" hidden title="Back through the door to where you came from">🚪 Leave</button>
       <canvas id="minimap" width="240" height="120" title="The level — click to look there, right-click to go there (M hides it)"></canvas>
 
@@ -4134,14 +4143,14 @@
     applyDrawnSteps(g);
     if (objects.indexOf(host) < 0) return null;
     host.projectile = { born: performance.now(), life: opts.life != null ? opts.life : def.life, grav: opts.grav != null ? opts.grav : def.grav, breaks: opts.breaks != null ? opts.breaks : def.breaks, hurts: opts.hurts != null ? opts.hurts : def.hurts,
-                        owner: opts.owner || null, ownerObj: opts.ownerObj || null, hit: false, name: def.name, def: def };
+                        owner: opts.owner || null, ownerP: opts.owner === "player" ? me : null, ownerObj: opts.ownerObj || null, hit: false, name: def.name, def: def };
     host.emitted = opts.emittedBy ? { by: opts.emittedBy, at: performance.now() } : { by: "projectile", at: performance.now() };
     Body.setAngle(host.body, angle);
     Body.setInertia(host.body, Infinity);
     host.body.frictionAir = 0; host.body.parts.forEach(function(pt){ pt.frictionAir = 0; });   // nothing slows it but gravity
     var v = (opts.speed != null ? opts.speed : def.speed) / STEPS_PER_SEC;
     Body.setVelocity(host.body, { x: Math.cos(angle) * v, y: Math.sin(angle) * v });
-    if (opts.owner === "player" && player) host.body.collisionFilter = { group: CARRY_GROUP, category: 1, mask: 0xFFFFFFFF };   // never against the one who fired it
+    if (opts.owner === "player" && player) host.body.collisionFilter = { group: carryGroup(), category: 1, mask: 0xFFFFFFFF };   // never against the one who fired it
     return host;
   }
   onStep("beforeUpdate", function(){
@@ -4214,7 +4223,18 @@
   function projectileHit(o, other, supports){
     var pj = o.projectile; if (!pj || pj.hit) return;
     var po = other.parent || other, obj = po.plugin && po.plugin.obj;
-    if (pj.owner === "player" && isPlayerPart(other)) return;
+    var hp = playerOf(other);
+    if (hp){
+      if (pj.owner === "player" && (hp === pj.ownerP || !pj.ownerP)) return;   // never the one who fired it
+      // in a Versus or Minigame level a shot that hurts is a knockout for
+      // whoever fired it; in an adventure a friend's shot just splats
+      if (pvpNow() && pj.hurts && mode === "play") withPlayer(hp, function(){
+        if (performance.now() < hazardSafeUntil || me.bubble) return;
+        sfx("zap"); shake(8);
+        puff(player.position.x, player.position.y, 16, { color:"#F2B705", speed:3, g:0.05, r:2.6, shape:"spark", life:22 });
+        playerDied("Hit by " + (pj.name || "a shot") + "!", pj.ownerP || null);
+      });
+    }
     if (obj && obj.projectile) return;                          // two in flight pass each other
     if (obj && obj === pj.ownerObj && performance.now() - pj.born < 250) return;   // the thing it was fired from, on the way out
     if (pj.breaks) pj.hit = true;
@@ -4261,6 +4281,13 @@
       for (var it = 0; it < 18; it++){ var mid = (lo + hi) / 2, q = { x: from.x + Math.cos(ang) * mid, y: from.y + Math.sin(ang) * mid }; if (Query.point([nearest], q).length) hi = mid; else lo = mid; }
       hitPt = { x: from.x + Math.cos(ang) * hi, y: from.y + Math.sin(ang) * hi };
       var po = nearest.parent || nearest, obj = po.plugin && po.plugin.obj;
+      var rp = playerOf(nearest), shooter = me;
+      if (rp && rp !== shooter && pvpNow() && mode === "play") withPlayer(rp, function(){
+        if (performance.now() < hazardSafeUntil || me.bubble) return;
+        sfx("zap"); shake(8);
+        puff(player.position.x, player.position.y, 16, { color:"#7FD4D9", speed:3, g:0.05, r:2.6, shape:"spark", life:22 });
+        playerDied("Zapped by a ray!", shooter);
+      });
       if (obj) gadgets.forEach(function(g){
         if (g.kind === "projsensor" && g.obj === obj) projSensorHit(g, "Ray", hitPt, { x: Math.cos(ang), y: Math.sin(ang) });
         if ((g.kind === "creature" || g.kind === "eye") && g.obj === obj && !g.dying && mode === "play") creaturePop(g);
@@ -4478,6 +4505,7 @@
     var pP = nearestPlayer(g.pos), pl = pP ? playerBody(pP) : null, sees = eyeSees(g);
     if (sees){ var lx = pl.position.x - g.pos.x, ly = pl.position.y - g.pos.y, ll = Math.hypot(lx, ly) || 1; g.look = { x: lx / ll, y: ly / ll }; }
     var v = g.speed / STEPS_PER_SEC;              // px per step
+    var fly2 = !!g.fly || topdownNow();           // from above every creature moves every way
     var dx = pl ? pl.position.x - b.position.x : 0, dy = pl ? pl.position.y - b.position.y : 0;
     var plW = pP ? (pP === me ? PW : pP.PW) : PW, plH = pP ? (pP === me ? PH : pP.PH) : PH;   // the nearest player's size
     if (o.studioHold) return;                     // being drawn on: it holds still
@@ -4487,7 +4515,7 @@
       // floating whichever way it is set
       if (!sees) return;
       var sx0 = (b.bounds.max.x - b.bounds.min.x) / 2 + plW / 2 + 8, sy0 = (b.bounds.max.y - b.bounds.min.y) / 2 + plH / 2 + 8;
-      var mx = Math.abs(dx) > sx0 ? (dx > 0 ? v : -v) : 0, my = g.fly && Math.abs(dy) > sy0 ? (dy > 0 ? v : -v) : 0;
+      var mx = Math.abs(dx) > sx0 ? (dx > 0 ? v : -v) : 0, my = fly2 && Math.abs(dy) > sy0 ? (dy > 0 ? v : -v) : 0;
       if (Math.abs(dx) > 4) g.face = dx > 0 ? 1 : -1;
       g.moving = !!(mx || my);
       if (mx || my) Body.setPosition(b, { x: b.position.x + mx, y: b.position.y + my });
@@ -4500,10 +4528,10 @@
     if (sees){
       var stopX = (b.bounds.max.x - b.bounds.min.x) / 2 + plW / 2 + 8;   // stop short of the player
       vx = Math.abs(dx) > stopX ? (dx > 0 ? v : -v) : 0;
-      if (g.fly){ var stopY = (b.bounds.max.y - b.bounds.min.y) / 2 + plH / 2 + 8; vy = Math.abs(dy) > stopY ? (dy > 0 ? v : -v) : 0; }
+      if (fly2){ var stopY = (b.bounds.max.y - b.bounds.min.y) / 2 + plH / 2 + 8; vy = Math.abs(dy) > stopY ? (dy > 0 ? v : -v) : 0; }
     } else {
       vx = 0;
-      if (g.fly) vy = 0;                          // a flier hangs where it is
+      if (fly2) vy = 0;                           // a flier hangs where it is
     }
     Body.setVelocity(b, { x: vx, y: vy });
     if (Math.abs(b.angle - g.homeAngle) > 1e-6) Body.setAngle(b, g.homeAngle);
@@ -5281,6 +5309,7 @@
         if (spin > MAX_SPIN) Body.setAngularVelocity(cb, Math.sign(cb.angularVelocity) * MAX_SPIN);
       }
       if (toBreak) toBreak.forEach(breakApart);
+      if (topdownNow()) for (var di = 0; di < objects.length; di++){ var db = objects[di].body; if (!db || db.isStatic || objects[di].projectile) continue; Body.setVelocity(db, { x: db.velocity.x * TOPDOWN_DRAG, y: db.velocity.y * TOPDOWN_DRAG }); Body.setAngularVelocity(db, db.angularVelocity * TOPDOWN_DRAG); }   // the floor's drag: a shove slides and stops
       eachPlayerBody(function(pb){
         var psp = Math.hypot(pb.velocity.x, pb.velocity.y);
         if (psp > MAX_SPEED) Body.setVelocity(pb, { x: pb.velocity.x / psp * MAX_SPEED, y: pb.velocity.y / psp * MAX_SPEED });
@@ -5955,7 +5984,7 @@
 
     // The player floats too — you bob up to the surface and can swim
     // along it rather than trudging around on the bottom.
-    if (!noWater) forEachPlayer(function(P){
+    if (!noWater && !topdownNow()) forEachPlayer(function(P){
       if (!player || flying || P.bubble) return;
       var pw = waterAt(player.position.x, player.position.y, PH/2);
       if (pw > 0.02){
@@ -6195,11 +6224,11 @@
      first player's size and its own colour, spawned beside the first.
      The press that joined is not a jump. A player whose pad has been
      gone for a while leaves; the first player never does. ---- */
-  function addPlayer(padIndex){
+  function addPlayer(padIndex, keyboard2){
     if (players.length >= PLAYER_MAX) return null;
     var used = {}, slot = 0; players.forEach(function(Q){ used[Q.slot] = true; }); while (used[slot]) slot++;
     var P = makePlayerShell(slot), lead = players[0];
-    P.keyboard = false; P.pad = padIndex;
+    P.keyboard = false; P.pad = padIndex == null ? null : padIndex; P.keyboard2 = !!keyboard2;
     P.charScale = lead === me ? charScale : lead.charScale;
     P.charColor = CHAR_COLORS[slot % CHAR_COLORS.length];
     P.padPrev = { jump: true, start: true, interact: false };
@@ -6207,9 +6236,43 @@
     players.push(P);
     var lb = playerBody(lead);
     withPlayer(P, function(){ spawnPlayer(lb ? { x: lb.position.x, y: lb.position.y - 4 } : null); });
-    showToast("🎮 Player " + (slot + 1) + " joined!");
+    showToast(keyboard2 ? "⌨ Player " + (slot + 1) + " joined on the keyboard — I J K L walk, U jumps, O grabs, Y uses." : "🎮 Player " + (slot + 1) + " joined!");
     sfx("place");
     return P;
+  }
+  /* ---- A second player on the same keyboard: I J K L walk, U jumps, O
+     grabs, Y uses — Carson's "a second set of keys", and a way to try
+     two players with no pad. U in Play joins them (as Start does for a
+     pad); the Settings page has a button for leaving. The keys are only
+     theirs while the first player has not bound them to something. ---- */
+  var KEYS2 = { left:"KeyJ", right:"KeyL", up:"KeyI", down:"KeyK", jump:"KeyU", grab:"KeyO", interact:"KeyY" };
+  function keys2Action(code){ for (var k in KEYS2) if (KEYS2[k] === code) return k; return null; }
+  function boundToP1(code){ for (var i = 0; i < KEY_ACTIONS.length; i++) if (isAction(KEY_ACTIONS[i].id, code)) return true; return false; }
+  function keyboard2Player(){ for (var i = 0; i < players.length; i++) if (players[i].keyboard2) return players[i]; return null; }
+  function keys2Down(act, e){
+    var P2 = keyboard2Player();
+    if (!P2){
+      if (act !== "jump" || mode !== "play" || e.repeat || players.length >= PLAYER_MAX) return false;
+      P2 = addPlayer(null, true); if (!P2) return false;
+      e.preventDefault(); return true;
+    }
+    e.preventDefault();
+    withPlayer(P2, function(){
+      if (act === "left" || act === "right" || act === "up" || act === "down"){ keyHeld[act] = true; syncPadInput(); }
+      else if (act === "jump"){ if (!e.repeat) handleJumpOrFlyToggle(); }
+      else if (act === "grab"){ keyHeld.grab = true; setGrabHeld(true); }
+      else if (act === "interact"){ if (!e.repeat && runner.enabled){ var dn = doorNearPlayer(); if (dn) enterDoor(dn); else useLever(); } }
+    });
+    return true;
+  }
+  function keys2Up(act){
+    var P2 = keyboard2Player(); if (!P2) return false;
+    withPlayer(P2, function(){
+      if (act === "left" || act === "right" || act === "up" || act === "down"){ keyHeld[act] = false; syncPadInput(); }
+      else if (act === "grab"){ keyHeld.grab = false; if (!padHeld.grab) setGrabHeld(false); }
+      else if (act === "interact") releaseLevers();
+    });
+    return true;
   }
   function removePlayer(P){
     var i = players.indexOf(P);
@@ -6254,8 +6317,19 @@
     if (players.length < 2 || mode !== "play") return;
     var lead = players[0], lb = playerBody(lead); if (!lb) return;
     var visW = viewRectW / camScale, visH = viewRectH / camScale, mx = visW * BUBBLE_MARGIN, my = visH * BUBBLE_MARGIN, now = performance.now();
+    var pvp = pvpNow(), ga = pvp ? groupAim() : null;
     forEachPlayer(function(P, i){
-      if (i === 0 || !player) return;
+      if ((i === 0 && !me.bubble) || !player) return;
+      if (me.bubble && me.bubble.out){
+        // out for the round: the bubble drifts to the middle of the group and waits there
+        var ob = me.bubble, ox = ga ? ga.x : lb.position.x, oy = (ga ? ga.y : lb.position.y) - visH * 0.3;
+        var odx = ox - ob.x, ody = oy - ob.y, od = Math.hypot(odx, ody) || 1, ostep = Math.min(BUBBLE_SPEED * 0.6, od);
+        ob.x += odx / od * ostep; ob.y += ody / od * ostep;
+        input.jumpQueued = false;
+        return;
+      }
+      if (i === 0) return;
+      if (pvp && !me.bubble) return;   // nobody is left behind when the camera frames everyone
       if (me.bubble){
         var bb = me.bubble, tx = lb.position.x, ty = lb.position.y - PH * 0.9;   // above the first player's head
         var dx = tx - bb.x, dy = ty - bb.y, d = Math.hypot(dx, dy) || 1;
@@ -6338,6 +6412,10 @@
      what makes riding what you hold impossible, and it is the other half
      of the clipping fix: nothing you hold can push on you. */
   var CARRY_GROUP = -9;
+  // each player's own group — theirs and what they carry and fire never
+  // touch them; another player's do, so two characters stand on each other
+  // and, in a Versus level, a launcher's shot lands on an opponent
+  function carryGroup(){ return CARRY_GROUP - (me ? me.slot : 0); }
   /* How much of a jump is left with the load in hand: nothing off it for
      something feather-light, a hop for something three times your weight. */
   function carryJumpScale(){
@@ -6347,7 +6425,7 @@
   }
   function dropCarried(){
     if (!carried) return;
-    if (carried.body && carried.body.collisionFilter && carried.body.collisionFilter.group === CARRY_GROUP) carried.body.collisionFilter.group = 0;
+    if (carried.body && carried.body.collisionFilter && carried.body.collisionFilter.group === carryGroup()) carried.body.collisionFilter.group = 0;
     carried = null;
   }
   /* The carried object does not collide with the player (CARRY_GROUP), so
@@ -6509,8 +6587,8 @@
   function getSpawnPos(){ return checkpoints[activeCheckpoint] || checkpoints[0]; }
 
   function playerFilter(){
-    if (flying) return { category: CAT_LAYER[MID_LAYER], mask: CAT_WALL, group: CARRY_GROUP }; // fly straight through objects, still bounded by the sealed world
-    var f = layerFilter(MID_LAYER); f.group = CARRY_GROUP; return f;   // see CARRY_GROUP: the only other member is what is being carried
+    if (flying) return { category: CAT_LAYER[MID_LAYER], mask: CAT_WALL, group: carryGroup() }; // fly straight through objects, still bounded by the sealed world
+    var f = layerFilter(MID_LAYER); f.group = carryGroup(); return f;   // see CARRY_GROUP: the only other member is what is being carried
   }
   /* The body: the rounded box, or the drawn hitbox as convex parts. A
      drawn hitbox makes the body's centre its own centroid; PW/PH become
@@ -6537,6 +6615,13 @@
   function buildPlayerBody(sp){
     var opts = { friction:0.02, frictionAir:0.01, restitution:0, density:0.006, label:"player", collisionFilter: playerFilter() };
     var artW = Math.round(CHAR_BASE_W * charScale), artH = Math.round(CHAR_BASE_H * charScale);
+    if (me) me.bodyTopdown = topdownNow();
+    if (topdownNow()){
+      // seen from above the character turns to face where it looks, so
+      // the body is a disc — the picture turns over it
+      PW = artW; PH = artH; charArt = { x: -PW/2, y: -PH/2, w: PW, h: PH };
+      return Bodies.circle(sp.x, sp.y, Math.min(PW, PH) * 0.48, opts);
+    }
     // the drawn hitbox if there is one; otherwise the drawing itself — a
     // character drawn as a stick is a stick to the world, not the box
     // round it. Carson: "draw a massive diagonal line, the hitbox is huge"
@@ -6799,7 +6884,7 @@
     if (grounded){ lastGroundedAt = performance.now(); airJumps = 0; }
     // a landing worth hearing: you were airborne, coming down fast, and
     // now you're not
-    if (player && !wasGrounded && grounded && lastFallSpeed > 5 && !flying){
+    if (player && !wasGrounded && grounded && lastFallSpeed > 5 && !flying && !topdownNow()){
       sfx("land");
       puff(player.position.x, player.position.y + PH/2, Math.min(9, 2 + (lastFallSpeed|0)),
            { color:"#E0D2B0", speed:1.1 + lastFallSpeed*0.05, g:0.05, spread:Math.PI*2, life:18, r:2.6 });
@@ -6815,11 +6900,13 @@
   // as airborne for one step and cancel the slide it was made for.
   function groundContacts(ev){
     if (!player) return;
-    if (players.length > 1){ ev.pairs.forEach(function(p){ var P = playerOf(p.bodyA) || playerOf(p.bodyB); if (P) withPlayer(P, function(){ groundPair(p); }); }); return; }
+    // each pair to its own player — both of them, when two players touch
+    if (players.length > 1){ ev.pairs.forEach(function(p){ var PA = playerOf(p.bodyA), PB = playerOf(p.bodyB); if (PA) withPlayer(PA, function(){ groundPair(p); }); if (PB && PB !== PA) withPlayer(PB, function(){ groundPair(p); }); }); return; }
     ev.pairs.forEach(groundPair);
   }
+  function ownPart(b){ return !!b && (b === player || b.parent === player); }   // the bound player's own body or one of its parts
   function groundPair(p){
-      if (!isPlayerPart(p.bodyA) && !isPlayerPart(p.bodyB)) return;
+      if (!ownPart(p.bodyA) && !ownPart(p.bodyB)) return;
       // Sensors overlap without holding anything up — a rope, a Back-layer
       // decoration, a walk-through light. Only a solid counts as ground.
       if (p.bodyA.isSensor || p.bodyB.isSensor) return;
@@ -6836,18 +6923,18 @@
       for (var si = 0; si < sup.length; si++){ if (sup[si]){ sy += sup[si].y; sn++; } }
       if (sn && sy / sn < player.position.y + PH * 0.2) return;
       groundedNext = true;
-      var gb = isPlayerPart(p.bodyA) ? p.bodyB : p.bodyA; groundBodyNext = gb.parent || gb;
+      var gb = ownPart(p.bodyA) ? p.bodyB : p.bodyA; groundBodyNext = gb.parent || gb;
       groundMatNext = gb.plugin && gb.plugin.materialId ? matOf(gb.plugin.materialId) : null;   // the part touched, not the whole object
   }
   onStep("collisionActive", groundContacts);
   onStep("collisionStart", groundContacts);
   onStep("collisionStart", function(ev){
     if (!player || mode !== "play") return;
-    if (players.length > 1){ ev.pairs.forEach(function(p){ var P = playerOf(p.bodyA) || playerOf(p.bodyB); if (P) withPlayer(P, function(){ touchPair(p); }); }); return; }
+    if (players.length > 1){ ev.pairs.forEach(function(p){ var PA = playerOf(p.bodyA), PB = playerOf(p.bodyB); if (PA) withPlayer(PA, function(){ touchPair(p); }); if (PB && PB !== PA) withPlayer(PB, function(){ touchPair(p); }); }); return; }
     ev.pairs.forEach(touchPair);
   });
   function touchPair(p){
-      var other = isPlayerPart(p.bodyA) ? p.bodyB : (isPlayerPart(p.bodyB) ? p.bodyA : null);
+      var other = ownPart(p.bodyA) ? p.bodyB : (ownPart(p.bodyB) ? p.bodyA : null);
       if (!other) return;
       // Matter reports compound collisions at the PART level — pair.bodyA/
       // bodyB are the individual circle that actually touched, not the
@@ -6925,6 +7012,7 @@
      sensitive on purpose. Never while flying, hanging on a grab, or in
      the grace after a respawn. */
   var CRUSH_FRAC = 0.42, CRUSH_STEPS = 10, crushSteps = 0, crushesSeen = 0;
+  var TOPDOWN_DRAG = 0.94;   // a loose thing seen from above loses this much of its speed a step
   function crushCheck(){
     if (!player || flying || (me && me.bubble) || !runner.enabled || grabConstraint || performance.now() < hazardSafeUntil){ crushSteps = 0; return; }
     var solids = [], pb = player.bounds;
@@ -6993,8 +7081,47 @@
      just a respawn. `playRun` is the run's state: lives left, the clock,
      the deaths. The HUD shows what the level counts. */
   var playRun = { lives: 0, deaths: 0, t0: 0, over: false };
-  function startPlayRun(){ playRun = { lives: worldSettings.lives || 0, deaths: 0, t0: performance.now(), over: false }; updateRunHud(); }
-  function playerDied(msg){
+  function startPlayRun(){
+    playRun = { lives: worldSettings.lives || 0, deaths: 0, t0: performance.now(), over: false };
+    players.forEach(function(P){ P.kos = 0; P.dead = 0; P.livesLeft = worldSettings.lives || 0; P.out = false; });
+    updateRunHud();
+  }
+  /* ---- Versus and Minigame: players against each other. Each player
+     keeps their own count (`P.kos`, `P.dead`, `P.livesLeft`, `P.out`,
+     reset with the run): a death is a knockout for whoever caused it —
+     a launcher's shot, `by` — and with lives on, the last life gone puts
+     that player out for the round, in a bubble that keeps to the
+     middle. The round is won by the first to `knockouts`, or the last
+     one still in; the winner is named and the round starts over. A
+     player who is not out respawns at the start, spread out beside the
+     others. One player alone in a Versus level just respawns. ---- */
+  function pvpNow(){ var t = levelType(); return t === "versus" || t === "minigame"; }
+  function playerName(P){ return "Player " + (P.slot + 1); }
+  function pvpDeath(msg, by){
+    me.dead = (me.dead || 0) + 1;
+    if (by && by !== me && players.indexOf(by) >= 0){ by.kos = (by.kos || 0) + 1; if (msg) msg += " — a knockout for " + playerName(by) + "!"; }
+    if (msg) showToast(msg);
+    var lives = worldSettings.lives || 0, out = false;
+    if (lives > 0){ me.livesLeft = Math.max(0, (me.livesLeft == null ? lives : me.livesLeft) - 1); if (me.livesLeft <= 0){ me.out = true; out = true; } }
+    if (out && players.length < 2){ showToast("Out of lives — from the start again."); sfx("deny"); startPlayRun(); respawnPlayer(); return; }
+    updateRunHud();
+    if (out){ bubbleUp(); if (me.bubble) me.bubble.out = true; }
+    else respawnPlayer();
+    checkRoundWinner();
+  }
+  function checkRoundWinner(){
+    if (playRun.over || players.length < 2) return;
+    var winner = null, alive = players.filter(function(P){ return !P.out; });
+    if (worldSettings.lives > 0 && alive.length <= 1) winner = alive[0] || null;
+    if (levelType() === "versus") players.forEach(function(P){ if ((P.kos || 0) >= (worldSettings.knockouts || 3)) winner = P; });
+    if (!winner && !(worldSettings.lives > 0 && alive.length === 0)) return;
+    playRun.over = true;
+    showToast(winner ? "🏆 " + playerName(winner) + " wins!" : "Everyone is out — again!");
+    sfx(winner ? "complete" : "deny");
+    setTimeout(function(){ if (mode === "play"){ activeCheckpoint = 0; score = 0; comboMult = 1; updateScoreHud(); startPlayRun(); respawnAllPlayers(); resetGadgetsForPlay(); } }, winner ? 2600 : 1200);
+  }
+  function playerDied(msg, by){
+    if (mode === "play" && pvpNow()){ playRun.deaths++; pvpDeath(msg, by); return; }
     if (mode === "play" && levelType() !== "hub"){
       playRun.deaths++;
       if (worldSettings.lives > 0){
@@ -7017,12 +7144,33 @@
   }
   function runTimeLeft(){ return worldSettings.timeLimit > 0 ? Math.max(0, worldSettings.timeLimit - (performance.now() - playRun.t0) / 1000) : null; }
   function fmtClock(sec){ var m = Math.floor(sec / 60), s2 = Math.floor(sec % 60); return m + ":" + (s2 < 10 ? "0" : "") + s2; }
+  var playersHudKey = "";
+  function updatePlayersHud(){
+    var el = document.getElementById("playersHud"); if (!el) return;
+    var show = mode === "play" && pvpNow() && players.length > 1;
+    if (el.hidden !== !show) el.hidden = !show;
+    if (!show){ playersHudKey = ""; return; }
+    var key = players.map(function(P){ return P.slot + ":" + (P.kos || 0) + ":" + (P.livesLeft == null ? "" : P.livesLeft) + ":" + (P.out ? 1 : 0) + ":" + (P === me ? charColor : P.charColor); }).join("|");
+    if (key === playersHudKey) return;
+    playersHudKey = key;
+    el.innerHTML = "";
+    players.forEach(function(P){
+      var c = document.createElement("span"); c.className = "pchip" + (P.out ? " out" : "");
+      c.style.setProperty("--c", P === me ? charColor : P.charColor);
+      var txt = playerName(P);
+      if (levelType() === "versus") txt += " · ⚔ " + (P.kos || 0);
+      if (worldSettings.lives > 0) txt += " · ❤ " + (P.livesLeft == null ? worldSettings.lives : P.livesLeft);
+      c.textContent = txt;
+      el.appendChild(c);
+    });
+  }
   function updateRunHud(){
     var lv = document.getElementById("livesHud"), tm = document.getElementById("timeHud");
     if (!lv || !tm) return;
-    var showLives = mode === "play" && worldSettings.lives > 0 && levelType() !== "hub";
+    updatePlayersHud();
+    var showLives = mode === "play" && worldSettings.lives > 0 && levelType() !== "hub" && !(pvpNow() && players.length > 1);
     if (lv.hidden !== !showLives) lv.hidden = !showLives;
-    if (showLives){ var lt = "❤ " + playRun.lives; if (lv.textContent !== lt) lv.textContent = lt; }
+    if (showLives){ var lt = "❤ " + (pvpNow() && me && me.livesLeft != null ? me.livesLeft : playRun.lives); if (lv.textContent !== lt) lv.textContent = lt; }
     var left = mode === "play" && levelType() !== "hub" ? runTimeLeft() : null;
     if (tm.hidden !== (left == null)) tm.hidden = left == null;
     if (left != null){ var tt = "⏱ " + fmtClock(left); if (tm.textContent !== tt) tm.textContent = tt; tm.classList.toggle("low", left <= 10); }
@@ -7039,7 +7187,7 @@
       setTimeout(function(){ if (mode === "play"){ activeCheckpoint = 0; score = 0; comboMult = 1; updateScoreHud(); startPlayRun(); respawnAllPlayers(); resetGadgetsForPlay(); } }, 900);
       return;
     }
-    if (worldSettings.fallLine != null) forEachPlayer(function(P){
+    if (worldSettings.fallLine != null && !topdownNow()) forEachPlayer(function(P){
       if (!player || P.bubble) return;
       if (player.position.y > worldSettings.fallLine && performance.now() > hazardSafeUntil){
         puff(player.position.x, player.position.y, 14, { color:"#F6ECD9", speed:2.2, g:0.02, r:2.4, life:22 });
@@ -7051,9 +7199,11 @@
   function respawnPlayer(msg){
     if (msg) showToast(msg);
     if (me && me.bubble) unbubble();
+    if (me) me.out = false;
     hazardSafeUntil = performance.now() + 900;
     if (flying) setFlying(false);
     var sp = getSpawnPos();
+    if (players.length > 1 && pvpNow()){ var idx = players.indexOf(me); sp = { x: sp.x + (idx - (players.length - 1) / 2) * (PW + 14), y: sp.y }; }   // side by side, not in a heap
     Body.setPosition(player, { x: sp.x, y: sp.y });
     Body.setVelocity(player, {x:0,y:0});
     releaseRope();
@@ -7222,6 +7372,7 @@
     }
     for (i = players.length - 1; i > 0; i--){
       var Pq = players[i];
+      if (Pq.keyboard2) continue;
       if (Pq.pad != null){ Pq.padLostAt = 0; continue; }
       if (!Pq.padLostAt) Pq.padLostAt = now;
       else if (now - Pq.padLostAt > PAD_GONE_MS) removePlayer(Pq);
@@ -7284,6 +7435,8 @@
     }
       return;
     }
+    // the second keyboard player's keys, when the first has not taken them
+    if (!e.ctrlKey && !e.metaKey && !e.altKey){ var k2 = keys2Action(e.code); if (k2 && !boundToP1(e.code) && keys2Down(k2, e)) return; }
     // Modifier combos first, and they never leak into movement — Ctrl+D
     // used to walk you to the right while it duplicated.
     if (e.ctrlKey || e.metaKey){
@@ -7422,6 +7575,7 @@
     showToast("🎨 " + matOf(id).label);
   }
   window.addEventListener("keyup", function(e){
+    var k2u = keys2Action(e.code); if (k2u && !boundToP1(e.code)) keys2Up(k2u);
     if (isAction("left", e.code)){ keyHeld.left = false; input.left = padHeld.left; }
     if (isAction("right", e.code)){ keyHeld.right = false; input.right = padHeld.right; }
     if (isAction("up", e.code)){ keyHeld.up = false; input.up = padHeld.up; }
@@ -7452,6 +7606,15 @@
   });
   // where a carried thing is held out toward: the mouse for the keyboard
   // player, the right stick for a pad player, else ahead of them
+  // seen from above: where the character looks — the mouse for the
+  // keyboard player, the right stick for a pad player, else the way they walk
+  function lookAngle(){
+    if (!player) return -Math.PI / 2;
+    if (me && me.keyboard && mouseOnCanvas !== false){ var ldx = mouseWorld.x - player.position.x, ldy = mouseWorld.y - player.position.y; if (Math.hypot(ldx, ldy) > 6) return Math.atan2(ldy, ldx); }
+    if (padAim) return Math.atan2(padAim.y, padAim.x);
+    if (me && me.moveAng != null) return me.moveAng;
+    return me && me.lookAng != null ? me.lookAng : -Math.PI / 2;
+  }
   function carryAimPoint(){
     if (!me || me.keyboard) return mouseWorld;
     if (padAim) return { x: player.position.x + padAim.x * 200, y: player.position.y + padAim.y * 200 };
@@ -7465,7 +7628,7 @@
     var frozen = cameraFreezesPlayer();   // a camera shot with the controls off
     // crouch: Down on the ground; a slide out of a run keeps the speed for a
     // moment with the keys off; let go of Down and you stand once there is room
-    var wantCrouch = input.down && !frozen && !flying && !grabConstraint && grounded && playerWetness() < 0.35;
+    var wantCrouch = input.down && !frozen && !flying && !grabConstraint && grounded && !topdownNow() && playerWetness() < 0.35;
     if (wantCrouch && !crouching){
       var runSpeed = Math.abs(player.velocity.x - groundVel().x);
       if (runSpeed > walkSpeedNow() * 0.8){ sliding = true; slideUntil = performance.now() + SLIDE_MS; slideDir = player.velocity.x > 0 ? 1 : -1; slideV = runSpeed; sfx("land"); }
@@ -7486,7 +7649,7 @@
       if (objects.indexOf(carried) < 0 || !carried.body || carried.body.isStatic){ dropCarried(); }
       else {
         var cb = carried.body;
-        if (cb.collisionFilter.group !== CARRY_GROUP) cb.collisionFilter.group = CARRY_GROUP;   // re-applied every step: a rebuild hands the object a fresh body
+        if (cb.collisionFilter.group !== carryGroup()) cb.collisionFilter.group = carryGroup();   // re-applied every step: a rebuild hands the object a fresh body
         var aimAt = carryAimPoint(), tx = aimAt.x - player.position.x, ty = aimAt.y - player.position.y;
         var td = Math.hypot(tx, ty);
         if (td > 8){
@@ -7511,6 +7674,19 @@
         Body.setAngularVelocity(cb, cb.angularVelocity * 0.8);
       }
       // and the player walks, jumps and everything as usual, carrying it
+    }
+    if (topdownNow() && !flying && !grabConstraint){
+      // seen from above: the arrows walk in every direction, slower in
+      // water, no jump; the character looks where it is pointed
+      var tvy = 0, tsp = speed * (playerWetness() > 0.35 ? 0.6 : 1);
+      if (input.up && !frozen) tvy -= tsp;
+      if (input.down && !frozen) tvy += tsp;
+      var tvx = vx * (playerWetness() > 0.35 ? 0.6 : 1);
+      if (tvx && tvy){ tvx *= 0.7071; tvy *= 0.7071; }
+      Body.setVelocity(player, { x: tvx, y: tvy });
+      if (tvx || tvy) me.moveAng = Math.atan2(tvy, tvx);
+      input.jumpQueued = false; input.jumpBufferUntil = 0;
+      return;
     }
     if (grabConstraint){
       // hanging on: left/right pump the swing, gently, and the swing is
@@ -7631,6 +7807,16 @@
       if (input.up) dy -= speed;
       if (input.down) dy += speed;
       if (dx || dy) Body.translate(player, { x:dx, y:dy });
+      pausedVy = 0;
+      return;
+    }
+    if (topdownNow()){
+      // from above: any direction, through nothing
+      if (input.up) dy -= speed;
+      if (input.down) dy += speed;
+      if (dx) tryMovePlayer(dx, 0);
+      if (dy) tryMovePlayer(0, dy);
+      if (dx || dy) me.moveAng = Math.atan2(dy, dx);
       pausedVy = 0;
       return;
     }
@@ -7944,7 +8130,7 @@
   }
 
   function applyWorldSettings(){
-    engine.gravity.y = BASE_GRAVITY * worldNum("gravity");
+    engine.gravity.y = topdownNow() ? 0 : BASE_GRAVITY * worldNum("gravity");   // seen from above there is no down
   }
   function packWorldSettings(){
     var w = {}; for (var k in WORLD_DEFAULTS) w[k] = worldSettings[k]; return w;
@@ -7970,13 +8156,14 @@
      Top-down is the 2.5D idea, listed so it is not forgotten, not built. */
   var LEVEL_TYPES = [
     { id:"adventure", icon:"🏁", label:"Adventure", blurb:"Start to finish. Checkpoints along the way, a goal at the end.", lives:true, time:true, fall:true },
-    { id:"versus",    icon:"⚔️", label:"Versus", blurb:"Players against each other in an arena: lives, knockouts, a fall line. For when more than one can play — coming.", lives:true, time:true, fall:true, knockouts:true, soonPlayers:true },
-    { id:"minigame",  icon:"🎯", label:"Minigame", blurb:"A quick round for lots of players — a time limit and a score. More players coming.", time:true, fall:true, soonPlayers:true },
+    { id:"versus",    icon:"⚔️", label:"Versus", blurb:"Players against each other in an arena: lives, knockouts, a fall line. Launchers hit other players; the camera keeps everyone in view.", lives:true, time:true, fall:true, knockouts:true, pvp:true },
+    { id:"minigame",  icon:"🎯", label:"Minigame", blurb:"A quick round for lots of players — a time limit and a score. Launchers hit other players.", time:true, fall:true, pvp:true },
     { id:"hub",       icon:"🏠", label:"Hub", blurb:"A place to hang out and build in. No start, no finish, no running out of lives.", hub:true },
-    { id:"topdown",   icon:"🧭", label:"Top-down (2.5D)", blurb:"Seen from above, walking in every direction. Coming later.", soon:true }
+    { id:"topdown",   icon:"🧭", label:"Top-down (2.5D)", blurb:"Seen from above: walk in every direction, the character looks where you point. No gravity, no jumping — loose things slide and stop.", lives:true, time:true, topdown:true }
   ];
   function levelTypeDef(id){ for (var i = 0; i < LEVEL_TYPES.length; i++) if (LEVEL_TYPES[i].id === id) return LEVEL_TYPES[i]; return LEVEL_TYPES[0]; }
   function levelType(){ return worldSettings.levelType || "adventure"; }
+  function topdownNow(){ return worldSettings.levelType === "topdown"; }
   function levelIsHubNow(){ return levelType() === "hub"; }
   function unpackPlayerSettings(w){
     var lt = levelTypeDef(w.levelType); worldSettings.levelType = lt.soon ? "adventure" : lt.id;
@@ -8082,7 +8269,25 @@
   /* Where the camera aims when it aims at the character: a little above
      them (worldSettings.camHeight, negative is up), so there is more level
      over their head than under their feet. LBP frames Sackboy that way. */
-  function playerAim(){ return { x: player.position.x, y: player.position.y + worldNum("camHeight") }; }
+  function playerAim(){ return { x: player.position.x, y: player.position.y + (topdownNow() ? 0 : worldNum("camHeight")) }; }
+  /* Every player on the screen at once: the box round all of them
+     (bubbles included), padded, and the zoom that fits it — never closer
+     than the level's own zoom, never further than GROUP_ZOOM_MIN. */
+  var GROUP_ZOOM_MIN = 0.3, GROUP_PAD = 260;
+  function groupAim(){
+    if (players.length < 2) return null;
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, n = 0;
+    for (var i = 0; i < players.length; i++){
+      var P = players[i], b = playerBody(P), pt = P.bubble ? P.bubble : (b ? b.position : null);
+      if (!pt) continue;
+      n++; x0 = Math.min(x0, pt.x); y0 = Math.min(y0, pt.y); x1 = Math.max(x1, pt.x); y1 = Math.max(y1, pt.y);
+    }
+    if (!n) return null;
+    var pz = mode === "play" ? worldNum("playZoom") : camZoom;
+    var w = (x1 - x0) + GROUP_PAD * 2, h = (y1 - y0) + GROUP_PAD * 2;
+    var fit = Math.min(viewRectW / w, viewRectH / h) / Math.max(1e-6, baseScale);   // camScale = baseScale × zoom, visW = viewRectW / camScale
+    return { x: (x0 + x1) / 2, y: (y0 + y1) / 2 + (topdownNow() ? 0 : worldNum("camHeight")), zoom: Math.max(GROUP_ZOOM_MIN, Math.min(pz, fit)) };
+  }
   function cameraShotRect(g){
     var c = cameraView(g), t = g.tracking || 0;
     if (player && t > 0){ var pa = cameraShotRectAim(); c = { x: c.x + (pa.x - c.x) * t, y: c.y + (pa.y - c.y) * t }; }
@@ -8137,7 +8342,9 @@
     if (playCam.active && playCam.active !== cg && playCam.active.once && playCam.fired.indexOf(playCam.active) < 0) playCam.fired.push(playCam.active);
     playCam.active = cg;
     var wantZoom = cg ? cg.zoom : (mode === "play" ? worldNum("playZoom") : (edCam ? edCam.zoom : buildZoom));
-    var aim = playerAim(), wx = aim.x, wy = aim.y;
+    var ga = !cg && mode === "play" && pvpNow() ? groupAim() : null;   // Versus: everyone in the shot
+    var aim = ga || playerAim(), wx = aim.x, wy = aim.y;
+    if (ga) wantZoom = ga.zoom;
     if (cg){
       var gp = cameraView(cg), t = cg.tracking;
       if (cg.sweep){
@@ -8154,7 +8361,7 @@
     var k = playCam.easing ? 0.03 + 0.27 * playCam.lastSpeed : 1;
     if (!playCam.ever){ playCam.cx = wx; playCam.cy = wy; playCam.zoom = wantZoom; playCam.ever = true; k = 1; }
     playCam.cx += (wx - playCam.cx) * k; playCam.cy += (wy - playCam.cy) * k;
-    playCam.zoom += (wantZoom - playCam.zoom) * k;
+    playCam.zoom += (wantZoom - playCam.zoom) * (ga && !playCam.easing ? 0.08 : k);   // the group's zoom eases, or it would jitter as they move
     if (!cg && Math.abs(wx - playCam.cx) < 0.3 && Math.abs(wy - playCam.cy) < 0.3 && Math.abs(wantZoom - playCam.zoom) < 0.0005) playCam.easing = false;
     if (Math.abs(playCam.zoom - camZoom) > 1e-6){ camZoom = playCam.zoom; applyCamScale(); }
     var visW = viewRectW / camScale, visH = viewRectH / camScale;
@@ -9900,6 +10107,15 @@
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.scale(1 - squish*0.08, 1 + squish*0.08);
+    var topdown = topdownNow() && me && !me.bubble;
+    if (topdown){
+      // seen from above: a soft shadow under, and the picture turned so its
+      // top faces where the character looks (canvas turns clockwise, so
+      // "up" points along `a` after a turn of a + 90°)
+      ctx.save(); ctx.globalAlpha = 0.18; ctx.beginPath(); ctx.ellipse(3, 4, PW*0.5, PH*0.5, 0, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill(); ctx.restore();
+      ctx.rotate((me.lookAng == null ? -Math.PI/2 : me.lookAng) + Math.PI/2);
+      floaty = false;
+    }
     if (floaty){
       ctx.save();
       ctx.globalAlpha = 0.25;
@@ -9910,7 +10126,7 @@
     var usedCustom = false;
     var anim = currentCharAnim();
     if (anim && drawingHasArt(anim.frame)){
-      drawSpriteFrame(anim.frame, facing === -1);
+      drawSpriteFrame(anim.frame, facing === -1 && !topdown);
       usedCustom = true;
     }
     if (!usedCustom){
@@ -9949,8 +10165,9 @@
     if (!player) return;
     if (me && me.bubble){ drawBubbledPlayer(); return; }
     var p = player.position;
+    if (topdownNow()) me.lookAng = lookAngle();
     if (flying){ p = { x:p.x, y:p.y + Math.sin(performance.now()/260)*3 }; }
-    var squish = flying ? -0.12 : Math.min(1, Math.abs(player.velocity.y)/16) * (player.velocity.y>0?-1:1);
+    var squish = topdownNow() ? 0 : (flying ? -0.12 : Math.min(1, Math.abs(player.velocity.y)/16) * (player.velocity.y>0?-1:1));
     drawCharacter(p, squish, flying);
     if (grabConstraint){
       // hands closed on the hold
@@ -10420,6 +10637,22 @@
   // The whole soft backdrop, painted into `c` for a W x H viewport at
   // world scale S. Nothing here has a hard edge, which is exactly why it
   // can be drawn small and blown up (see drawBackground).
+  /* The ground, seen from above: dry earth with soft patches fixed to the
+     world (hashed by cell), so walking reads as ground going by. */
+  function paintTopdownBackdrop(c, W, H, S){
+    c.fillStyle = "#CFC192"; c.fillRect(0, 0, W, H);
+    var cell = 240, visW = viewRectW / camScale, visH = viewRectH / camScale;
+    var gx0 = Math.floor(camX / cell) - 1, gy0 = Math.floor(camY / cell) - 1, gx1 = Math.ceil((camX + visW) / cell) + 1, gy1 = Math.ceil((camY + visH) / cell) + 1;
+    for (var gy = gy0; gy <= gy1; gy++) for (var gx = gx0; gx <= gx1; gx++){
+      var h = (Math.imul(gx + 1000, 73856093) ^ Math.imul(gy + 1000, 19349663)) >>> 0;
+      var r1 = (h % 1000) / 1000, r2 = ((h >>> 10) % 1000) / 1000, r3 = ((h >>> 20) % 1000) / 1000;
+      if (r3 < 0.35) continue;                                  // bare ground between the patches
+      var wx = (gx + r1) * cell, wy = (gy + r2) * cell, rad = 30 + r3 * 70;
+      c.beginPath(); c.ellipse((wx - camX) * S, (wy - camY) * S, rad * S, rad * 0.7 * S, r3 * 3, 0, Math.PI * 2);
+      c.fillStyle = (h & 1) ? "rgba(118,142,72,0.13)" : "rgba(96,74,44,0.08)"; c.fill();
+      if (h & 2){ c.beginPath(); c.arc((wx - camX) * S + rad * 0.9 * S, (wy - camY) * S - rad * 0.3 * S, rad * 0.35 * S, 0, Math.PI * 2); c.fillStyle = "rgba(96,74,44,0.07)"; c.fill(); }   // a pebble beside it
+    }
+  }
   function paintBackdrop(c, W, H, S, now){
     // ---- sky: a depth gradient, mapped through the camera so the colour
     // you see depends on how high in the world you are ----
@@ -10526,7 +10759,7 @@
         var bc = bgBuf.getContext("2d");
         bc.setTransform(1,0,0,1,0,0);
         bc.clearRect(0,0,W,H);
-        paintBackdrop(bc, W, H, S, now);
+        if (topdownNow()) paintTopdownBackdrop(bc, W, H, S); else paintBackdrop(bc, W, H, S, now);
         bgKey = key; bgAt = now;
       }
       ctx.drawImage(bgBuf, 0, 0, viewRectW, viewRectH);
@@ -10589,7 +10822,7 @@
   function tickWater(now){
     var dt = now - lastWaterT;
     lastWaterT = now;
-    if (!runner.enabled || waterCount === 0) return;
+    if (!runner.enabled || waterCount === 0 || topdownNow()) return;   // from above, water is a still pool
     waterAccum += Math.min(60, dt);
     var steps = 0;
     while (waterAccum >= 16.666 && steps < 3){ stepWater(); waterAccum -= 16.666; steps++; }
@@ -10617,6 +10850,7 @@
   function drawFrame(now){
     var frameK = Math.max(0.2, Math.min(3, (now - lastFrameT)/16.666));
     pollGamepad();
+    if (players.length) forEachPlayer(function(P){ if (player && !P.bubble && topdownNow() !== !!P.bodyTopdown) respawnSameSpot(); });   // a disc from above, a box from the side
     if (showPerf){
       var gap = now - lastFrameT;
       if (gap > 0 && gap < 1000){ perfAvg += (gap - perfAvg) * 0.08; if (gap > perfWorst || now - perfWorstAt > 2000){ perfWorst = gap; perfWorstAt = now; } }
@@ -11739,7 +11973,7 @@
   function renderLevelTypeTab(el){
     var h = document.createElement("h3"); h.textContent = "Level"; el.appendChild(h);
     var t = levelTypeDef(levelType());
-    renderLevelTypeCards(el, function(id){ worldSettings.levelType = id; if (id === "hub"){ worldSettings.lives = 0; worldSettings.timeLimit = 0; } sfx("click"); updateHubButton(); renderPersonalMenu(); }, t.id);
+    renderLevelTypeCards(el, function(id){ worldSettings.levelType = id; if (id === "hub"){ worldSettings.lives = 0; worldSettings.timeLimit = 0; } applyWorldSettings(); sfx("click"); updateHubButton(); renderPersonalMenu(); }, t.id);
     var n = document.createElement("div"); n.className = "noteText"; n.textContent = t.blurb; el.appendChild(n);
     if (t.lives || t.time || t.fall || t.knockouts){ var rh = document.createElement("h3"); rh.textContent = "Rules"; el.appendChild(rh); }
     if (t.lives) el.appendChild(sliderRow("Lives", worldSettings.lives, 0, 20, 1, function(v){ worldSettings.lives = Math.round(v); }, function(v){ return v <= 0 ? "endless" : Math.round(v) + ""; }));
@@ -11755,7 +11989,8 @@
       if (worldSettings.fallLine != null) el.appendChild(sliderRow("Fall line", WORLD_H - worldSettings.fallLine, 0, WORLD_H, 20, function(v){ worldSettings.fallLine = WORLD_H - v; }, function(v){ return Math.round(v) + "px up from the bottom"; }));
       var fn = document.createElement("div"); fn.className = "noteText"; fn.textContent = "Falling past the fall line costs a life — a pit, or the edge of an arena. It draws as a red dashed line in Build."; el.appendChild(fn);
     }
-    if (t.soonPlayers){ var pn = document.createElement("div"); pn.className = "noteText"; pn.textContent = "This kind of level is for several players. The rules are kept with the level now, so it plays right when more players can join."; el.appendChild(pn); }
+    if (t.topdown){ var tn = document.createElement("div"); tn.className = "noteText"; tn.textContent = "The arrows or the stick walk in every direction; the character looks at the cursor (a pad's right stick). Water is a still pool; creatures chase every way; fans, movers, bolts and the rest work as they do."; el.appendChild(tn); }
+    if (t.pvp){ var pn = document.createElement("div"); pn.className = "noteText"; pn.textContent = "More players: plug in a controller and press Start on it — up to four on one machine. Each player's knockouts and lives count on their own; the winner is named and the round starts over."; el.appendChild(pn); }
     if (t.hub){ var hn = document.createElement("div"); hn.className = "noteText"; hn.textContent = "No lives, no clock. My World is a hub; any level can be one."; el.appendChild(hn); }
   }
   /* The chooser when a level is made: what kind is it? */
@@ -12004,7 +12239,8 @@
   }
   function renderWorldSettingsTab(el){
     var h = document.createElement("h3"); h.textContent = "World Settings"; el.appendChild(h);
-    el.appendChild(sliderRow("Gravity", worldSettings.gravity, 0.2, 2.5, 0.05, function(v){ worldSettings.gravity=v; applyWorldSettings(); }, function(v){ return v.toFixed(2)+"x"; }));
+    if (topdownNow()){ var gn = document.createElement("div"); gn.className = "noteText"; gn.textContent = "Seen from above — nothing falls. Loose things slide when pushed and come to a stop."; el.appendChild(gn); }
+    else el.appendChild(sliderRow("Gravity", worldSettings.gravity, 0.2, 2.5, 0.05, function(v){ worldSettings.gravity=v; applyWorldSettings(); }, function(v){ return v.toFixed(2)+"x"; }));
     el.appendChild(sliderRow("World Light", worldSettings.light == null ? 1 : worldSettings.light, 0, 1, 0.02,
       function(v){ worldSettings.light = v; if (!activeChanger()) worldLiveReset(); },
       function(v){ return v >= 0.995 ? "daylight" : (v <= 0.005 ? "night" : Math.round(v*100) + "%"); }));
@@ -16780,6 +17016,12 @@
     tNote.textContent = "A short note the first time you pick up a tool or a material, and never again for that one.";
     el.appendChild(tNote);
 
+    var ph = document.createElement("h3"); ph.textContent = "More players"; el.appendChild(ph);
+    var pNote = document.createElement("div"); pNote.className = "noteText";
+    pNote.textContent = "Up to four on one machine. A controller joins with Start (the first one drives player one beside the keyboard). A second player on this keyboard joins with U while playing: I J K L walk, U jumps, O grabs, Y uses.";
+    el.appendChild(pNote);
+    var P2k = keyboard2Player();
+    if (P2k){ var lvB = document.createElement("button"); lvB.className = "btn ghost small"; lvB.textContent = "Player " + (P2k.slot + 1) + " (keyboard) leaves"; lvB.addEventListener("click", function(){ removePlayer(P2k); sfx("click"); renderPauseMenu(); }); el.appendChild(lvB); }
     var kh = document.createElement("h3"); kh.textContent = "Controls"; el.appendChild(kh);
     var note = document.createElement("div"); note.className = "noteText";
     note.textContent = listeningFor
@@ -17343,6 +17585,7 @@
       askLevelType(function(type){
         starterLevel();
         worldSettings.levelType = type;
+        applyWorldSettings();
         document.getElementById("levelNameInput").value = type === "hub" ? "A hub" : "Untitled Level";
         /* A new level is not the old one — drop the ids or the first save
            would overwrite whatever was last open. */

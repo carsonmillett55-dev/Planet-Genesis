@@ -68,7 +68,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   console.log('== the camera keeps everyone in view ==');
   await standAt(X+100, Y+60); await standAt2(1, X+150, Y+60); await p.waitForTimeout(500);
   const vNear = await p.evaluate(() => window.__pg.view());
-  await standAt2(1, X+1000, Y+60); await p.waitForTimeout(1200);
+  await standAt2(1, X+1400, Y+60); await p.waitForTimeout(1200);   // past the floor's end: further than a screen at the level's zoom
   const vFar = await p.evaluate(() => window.__pg.view());
   ps = await players();
   ok('apart, the view holds both players', vFar.x < ps[0].x - 40 && vFar.x + vFar.w > ps[1].x + 40, { view: vFar, p1: ps[0].x, p2: ps[1].x });

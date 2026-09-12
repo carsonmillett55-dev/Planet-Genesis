@@ -3,7 +3,7 @@
   "private": true,
   "description": "Test harness for Planet Genesis. The game itself is planet-genesis.html and has no build step.",
   "scripts": {
-    "test": "node regress.js && node tsel.js && node tlayer.js && node tmat.js && node tlight.js && node tctx.js && node tmenu.js && node tbolt.js && node tgadget.js && node tlink.js && node tgrab.js && node tjump.js && node tcam.js && node tmover.js && node tworld.js && node tcreature.js && node twater.js && node tstudio.js && node tskins.js && node tfill.js && node tfan.js && node tstickers.js && node tlogic.js && node tproj.js && node tui.js && node tgame.js && node tplayers.js && node checkgeom.js",
+    "test": "node regress.js && node tsel.js && node tlayer.js && node tmat.js && node tlight.js && node tctx.js && node tmenu.js && node tbolt.js && node tgadget.js && node tlink.js && node tgrab.js && node tjump.js && node tcam.js && node tmover.js && node tworld.js && node tcreature.js && node twater.js && node tstudio.js && node tskins.js && node tfill.js && node tfan.js && node tstickers.js && node tlogic.js && node tproj.js && node tui.js && node tgame.js && node tplayers.js && node tversus.js && node ttopdown.js && node checkgeom.js",
     "perf": "node regress.js perf"
   },
   "dependencies": {
