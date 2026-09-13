@@ -18043,7 +18043,7 @@
 
     var ph = document.createElement("h3"); ph.textContent = "More players"; el.appendChild(ph);
     var pNote = document.createElement("div"); pNote.className = "noteText";
-    pNote.textContent = "Up to four on one machine. A controller joins with Start (the first one drives player one beside the keyboard). A second player on this keyboard joins with U while playing: I J K L walk, U jumps, O grabs, Y uses.";
+    pNote.textContent = "Up to four on one machine. A controller joins with Start (the first one drives player one beside the keyboard): the left stick walks, A jumps, X grabs, Y uses, the bumpers sprint, the right stick aims a launcher — or, with none in hand, a flick of it is an emote. A second player on this keyboard joins with U while playing: I J K L walk, U jumps, O grabs, Y uses.";
     el.appendChild(pNote);
     var P2k = keyboard2Player();
     if (P2k){ var lvB = document.createElement("button"); lvB.className = "btn ghost small"; lvB.textContent = "Player " + (P2k.slot + 1) + " (keyboard) leaves"; lvB.addEventListener("click", function(){ removePlayer(P2k); sfx("click"); renderPauseMenu(); }); el.appendChild(lvB); }
