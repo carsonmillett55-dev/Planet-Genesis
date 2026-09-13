@@ -41,6 +41,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   const pad = (over) => { const bt = []; for (let i = 0; i < 17; i++) bt.push({ pressed: false, value: 0 }); const g = { connected: true, axes: [0, 0, 0, 0], buttons: bt }; if (over){ if (over.axes) g.axes = over.axes; (over.press || []).forEach(i => { bt[i].pressed = true; bt[i].value = 1; }); } return g; };
   const pads = async (list) => { await p.evaluate(l => window.__pg.fakePads(l), list); await p.waitForTimeout(80); };
   const toast = () => p.evaluate(() => document.getElementById('toast').textContent);
+  const place = async (k, x, y) => { await p.evaluate(kk => { window.__pg.setLayer(1); window.__pg.setTool(kk); }, k); await p.evaluate(([x,y]) => window.__pg.gadgetAt(x,y), [x,y]); const gs = await p.evaluate(() => window.__pg.gadgets()); return gs.filter(g => g.kind === k).pop(); };
   // draw a track with the tool: a drag along the given world points
   async function drawTrack(pts){
     await p.evaluate(() => { window.__pg.setLayer(1); window.__pg.setTool('track'); });
@@ -148,6 +149,34 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   await build();
   ok('back in Build the coaster is at its start with nobody in it', (await tracks())[0].state === 'wait' && (await tracks())[0].riders.length === 0 && (await p.evaluate(() => window.__pg.riding())) === null);
   await pads([pad(), null]); await p.evaluate(() => { window.__pgFakePads = null; window.__pgFakePad = undefined; });
+
+  console.log('== wired: a switch sends it, nobody aboard ==');
+  await fresh();
+  await rect('wood', 1, X-380, Y+100, X+800, Y+140);
+  await rect('wood', 1, X+300, Y-40, X+360, Y+100);   // a post for a lever
+  await lockAll();
+  await drawTrack([[X-300, Y+60], [X-100, Y+60], [X+100, Y+60]]);
+  const lvT = await place('lever', X+330, Y+30);
+  const tr0 = (await tracks())[0];
+  ok('a wire from the lever to the track', await p.evaluate(([a, b]) => window.__pg.wire(a, b), [lvT.id, tr0.id]));
+  await play(); await standAt(X+280, Y+60); await p.waitForTimeout(300);
+  ok('wired and off, it waits', (await tracks())[0].state === 'wait' && (await tracks())[0].input === 0, await tracks());
+  await p.keyboard.press('KeyF'); await p.waitForTimeout(400);
+  ts = await tracks();
+  ok('the lever on sends it, with nobody in it', ts[0].state === 'run' && ts[0].riders.length === 0 && ts[0].s > 10, ts[0]);
+  ended = false; for (let i = 0; i < 60 && !ended; i++){ await p.waitForTimeout(100); ended = (await tracks())[0].state === 'end'; }
+  ok('it reaches the end', ended);
+  await p.waitForTimeout(1800);
+  ok('and waits there while the signal is on', (await tracks())[0].state === 'end');
+  await p.keyboard.press('KeyF'); await p.waitForTimeout(1800);
+  back = false; for (let i = 0; i < 60 && !back; i++){ await p.waitForTimeout(100); back = (await tracks())[0].state === 'wait'; }
+  ok('the lever off: it comes back', back);
+  await build();
+  const fileW = await p.evaluate(() => window.__pg.serialize());
+  ok('the level file keeps the wire to the track', fileW.wires.length === 1 && fileW.wires[0].toTrack === 0, fileW.wires);
+  await p.evaluate(() => { window.__pg.clear(); window.__pg.starter(); });
+  await p.evaluate(f => window.__pg.load(f), fileW); await p.waitForTimeout(200);
+  ok('and it loads back wired', (await p.evaluate(() => window.__pg.wires ? window.__pg.wires().length : 1)) === 1 && (await tracks())[0].input === 0, { input: (await tracks())[0].input });
 
   console.log('== no page errors ==');
   ok('no errors', errs.length === 0, errs);

@@ -3912,8 +3912,9 @@
       g.local = toBodyLocal(g.obj.body, g.pos);
     });
   }
-  function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter" || t.kind === "speech" || t.kind === "destroyer" || t.kind === "sound" || t.kind === "gate" || t.kind === "spot" || t.kind === "rocket" || t.kind === "score" || t.kind === "random" || t.kind === "music"); }
+  function trackById(id){ for (var i = 0; i < tracks.length; i++) if (tracks[i].id === id) return tracks[i]; return null; }
+  function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id) || trackById(id); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter" || t.kind === "speech" || t.kind === "destroyer" || t.kind === "sound" || t.kind === "gate" || t.kind === "spot" || t.kind === "rocket" || t.kind === "score" || t.kind === "random" || t.kind === "music" || !!t.pts); }   // a coaster track too
   function hasResetPort(t){ return !!t && (t.kind === "timer" || t.kind === "counter"); }
   function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun" && g.kind !== "speech" && g.kind !== "destroyer" && g.kind !== "sound" && g.kind !== "spot" && g.kind !== "rocket" && g.kind !== "door" && g.kind !== "score" && g.kind !== "music"; }
   function addWire(from, to, port){
@@ -4196,6 +4197,7 @@
     for (i = 0; i < bolts.length; i++) bolts[i].input = null;
     for (i = 0; i < gadgets.length; i++){ gadgets[i].input = null; if (hasResetPort(gadgets[i])) gadgets[i].inputReset = null; if (gadgets[i].kind === "gate"){ gadgets[i].inN = 0; gadgets[i].inOn = 0; } }
     for (i = 0; i < links.length; i++) links[i].input = null;
+    for (i = 0; i < tracks.length; i++) tracks[i].input = null;
     for (i = 0; i < wires.length; i++){
       var src = gadgetById(wires[i].from), tgt = receiverById(wires[i].to);
       if (!src || !tgt) continue;
@@ -5173,6 +5175,7 @@
   }
   function removeTrack(t){
     var i = tracks.indexOf(t); if (i < 0) return;
+    wires = wires.filter(function(w){ return w.to !== t.id; });
     t.riders.slice().forEach(function(P){ withPlayer(P, function(){ leaveCoaster(false); }); });
     tracks.splice(i, 1);
     if (selectedTrack === t) selectedTrack = null;
@@ -5247,20 +5250,23 @@
       var t = tracks[i], L = trackLen(t);
       // riders who are gone (a mode switch, a removal) let go of their seat
       for (var r = t.riders.length - 1; r >= 0; r--) if (players.indexOf(t.riders[r]) < 0 || t.riders[r].riding !== t) t.riders.splice(r, 1);
+      var wiredOn = t.input != null && t.input > 0;
       if (t.state === "wait"){
         t.s = trainStart(t); t.v = 0;
-        if (t.riders.length && now - t.boardAt > COASTER_WAIT_MS){ t.state = "run"; t.v = t.pace; sfx("mode"); }
+        // riders aboard for a moment set it off — or, wired, the signal does (nobody need be aboard)
+        if ((t.riders.length && now - t.boardAt > COASTER_WAIT_MS) || (wiredOn && !t.wasWired)){ t.state = "run"; t.v = t.pace; sfx("mode"); }
       } else if (t.state === "run"){
         var q = trackPointAt(t, t.s);
         t.v = Math.max(t.pace, Math.min(COASTER_MAX, t.v * 0.9985 + q.ty * COASTER_G));   // downhill (ty > 0) gathers speed; the lift never lets it under its pace
         t.s += t.v;
         if (t.s >= L){ t.s = L; t.v = 0; t.state = "end"; t.endAt = now; sfx("land"); }
       } else if (t.state === "end"){
-        if (!t.riders.length && now - t.endAt > COASTER_LEAVE_MS) t.state = "back";
+        if (!t.riders.length && now - t.endAt > COASTER_LEAVE_MS && !(t.input != null && wiredOn)) t.state = "back";   // wired on, it waits at the end until the signal drops
       } else if (t.state === "back"){
         t.s -= COASTER_BACK;
         if (t.s <= trainStart(t)){ t.s = trainStart(t); t.state = "wait"; t.boardAt = now; }
       }
+      t.wasWired = wiredOn;
       // the riders sit where their seats are, moving with them
       var vx = 0, vy = 0;
       if (t.state === "run" || t.state === "back"){ var q2 = trackPointAt(t, t.s), sp2 = t.state === "run" ? t.v : -COASTER_BACK; vx = q2.tx * sp2; vy = q2.ty * sp2; }
@@ -5410,7 +5416,7 @@
     var pushed2 = false;
     var sp = sliderRow("Pace", t.pace, 0.5, 8, 0.1, function(v){ if (!pushed2){ pushUndo("changing a track"); pushed2 = true; } t.pace = v; }, function(v){ return v <= 0.6 ? "crawl" : (v >= 7.5 ? "flat out" : Math.round(v * STEPS_PER_SEC) + " px/s"); });
     sp.style.flexBasis = "100%"; tr.appendChild(sp);
-    var pn = document.createElement("div"); pn.className = "noteText"; pn.textContent = "The pace is the slowest it goes — the lift up a climb. Downhill it gathers speed."; tr.appendChild(pn);
+    var pn = document.createElement("div"); pn.className = "noteText"; pn.textContent = "The pace is the slowest it goes — the lift up a climb. Downhill it gathers speed. Wire a switch to it (Connect to… from the switch's box) and the signal sends it, riders or none; it waits at the end until the signal drops."; tr.appendChild(pn);
     var lk = opSection("The seat");
     opBtn(lk, t.look ? "🎨 Redraw the seat" : "🎨 Draw the seat", "A seat of your own, drawn — every seat on the train wears it", function(){ openSeatStudio(t); }, t.look ? "on" : "");
     if (t.look) opBtn(lk, "Plain car", "Back to the plain car", function(){ pushUndo("changing a track"); t.look = null; renderSelBar(); sfx("tick"); });
@@ -8633,9 +8639,10 @@
     var lIdx = {}; links.forEach(function(l, i){ lIdx[l.id] = i; });
     var gIdx = {}; liveGadgets.forEach(function(g, i){ gIdx[g.id] = i; });
     var bIdx = {}; bolts.forEach(function(b, i){ bIdx[b.id] = i; });
+    var tIdx = {}; tracks.forEach(function(t, i){ tIdx[t.id] = i; });
     var wireSnaps = wires.map(function(w){
-      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to], toLink: lIdx[w.to], port: w.port || undefined };
-    }).filter(function(w){ return w.from != null && (w.toBolt != null || w.toGadget != null || w.toLink != null); });
+      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to], toLink: lIdx[w.to], toTrack: tIdx[w.to], port: w.port || undefined };
+    }).filter(function(w){ return w.from != null && (w.toBolt != null || w.toGadget != null || w.toLink != null || w.toTrack != null); });
     return {
       objects: objSnaps, bolts: boltSnaps, gadgets: gadgetSnaps, wires: wireSnaps, links: linkSnaps,
       checkpoints: checkpoints.map(function(c){ return { x:c.x, y:c.y }; }),
@@ -8674,15 +8681,15 @@
       var oa = newObjs[ls.a], ob = newObjs[ls.b];
       if (oa && ob) addLink(ls.kind, oa, { x:+ls.ax||0, y:+ls.ay||0 }, ob, { x:+ls.bx||0, y:+ls.by||0 }, ls);
     });
+    (Array.isArray(snap.tracks) ? snap.tracks : []).forEach(unpackTrack);
     (Array.isArray(snap.wires) ? snap.wires : []).forEach(function(ws){
-      var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : (ws.toLink != null ? links[ws.toLink] : gadgets[ws.toGadget]);
+      var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : (ws.toLink != null ? links[ws.toLink] : (ws.toTrack != null ? tracks[ws.toTrack] : gadgets[ws.toGadget]));
       if (src && tgt) addWire(src, tgt, ws.port);
     });
     checkpoints = snap.checkpoints.map(function(c){ return { x:c.x, y:c.y, reached:false }; });
     goalPoint = snap.goal ? { x:snap.goal.x, y:snap.goal.y } : null;
     bubbles = (snap.bubbles||[]).map(function(b){ return { x:b.x, y:b.y, collected:false }; });
     activeCheckpoint = snap.activeCheckpoint || 0;
-    (Array.isArray(snap.tracks) ? snap.tracks : []).forEach(unpackTrack);
     if (snap.world){
       worldSettings.gravity = snap.world.gravity; worldSettings.waterLevel = snap.world.waterLevel; worldSettings.ropeLength = snap.world.ropeLength;
       if (snap.world.motorSpeed != null) worldSettings.motorSpeed = snap.world.motorSpeed;
@@ -10693,6 +10700,7 @@
       if (!src || !tgt) return;
       var a = gadgetWorld(src), b;
       if (LINK_LABEL[tgt.kind]){ var le = linkEnds(tgt); b = { x:(le.a.x+le.b.x)/2, y:(le.a.y+le.b.y)/2 }; }
+      else if (tgt.pts) b = seatPos(tgt, 0);
       else b = tgt.constraint ? boltWorldPoint(tgt) : (tgt.pos || gadgetWorld(tgt));
       ctx.beginPath(); ctx.moveTo(a.x, a.y);
       var mx = (a.x + b.x)/2, my = (a.y + b.y)/2 - 30;
@@ -15755,7 +15763,7 @@
       return true;
     }
     var from = wiring.from;
-    var tgt = boltAt(pt.x, pt.y, 22) || gadgetAt(pt.x, pt.y, 22) || linkAt(pt.x, pt.y, 14);
+    var tgt = boltAt(pt.x, pt.y, 22) || gadgetAt(pt.x, pt.y, 22) || linkAt(pt.x, pt.y, 14) || trackAt(pt.x, pt.y, 14);
     wiring = null;
     if (!tgt || !canReceive(tgt)){ showToast("That cannot be driven — wire to a motor bolt, wobble bolt or piston."); sfx("deny"); return true; }
     pushUndo("wiring a " + GADGET_LABEL[from.kind].toLowerCase());
@@ -18324,9 +18332,10 @@
     var lIdx = {}; links.forEach(function(l, i){ lIdx[l.id] = i; });
     var gIdx = {}; liveGadgets.forEach(function(g, i){ gIdx[g.id] = i; });
     var bIdx = {}; bolts.forEach(function(b, i){ bIdx[b.id] = i; });
+    var tIdx = {}; tracks.forEach(function(t, i){ tIdx[t.id] = i; });
     var wireSnaps = wires.map(function(w){
-      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to], toLink: lIdx[w.to], port: w.port || undefined };
-    }).filter(function(w){ return w.from != null && (w.toBolt != null || w.toGadget != null || w.toLink != null); });
+      return { from: gIdx[w.from], toBolt: bIdx[w.to], toGadget: gIdx[w.to], toLink: lIdx[w.to], toTrack: tIdx[w.to], port: w.port || undefined };
+    }).filter(function(w){ return w.from != null && (w.toBolt != null || w.toGadget != null || w.toLink != null || w.toTrack != null); });
     var boltSnaps = bolts.map(function(b){ var wp = boltWorldPoint(b);
       return { a:objIndex[b.objA.id], b:objIndex[b.objB.id], x:wp.x, y:wp.y, tight:b.tight, mode:b.mode,
                layer:b.layer, tightness:b.tightness, speed:b.speed, kind:b.kind, dir:b.dir,
@@ -18411,11 +18420,11 @@
         var oa = newObjs[ls.a], ob = newObjs[ls.b];
         if (oa && ob) addLink(ls.kind, oa, { x:+ls.ax||0, y:+ls.ay||0 }, ob, { x:+ls.bx||0, y:+ls.by||0 }, ls);
       });
+      (Array.isArray(data.tracks) ? data.tracks : []).forEach(unpackTrack);
       (Array.isArray(data.wires) ? data.wires : []).forEach(function(ws){
-        var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : (ws.toLink != null ? links[ws.toLink] : gadgets[ws.toGadget]);
+        var src = gadgets[ws.from], tgt = ws.toBolt != null ? bolts[ws.toBolt] : (ws.toLink != null ? links[ws.toLink] : (ws.toTrack != null ? tracks[ws.toTrack] : gadgets[ws.toGadget]));
         if (src && tgt) addWire(src, tgt, ws.port);
       });
-      (Array.isArray(data.tracks) ? data.tracks : []).forEach(unpackTrack);
       if (data.hub && !(data.world && data.world.levelType)){ data.world = data.world || {}; data.world.levelType = "hub"; }   // a file from before level types
       if (data.world){
         worldSettings.gravity = data.world.gravity != null ? data.world.gravity : 1;

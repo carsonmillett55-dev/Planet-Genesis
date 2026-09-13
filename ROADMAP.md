@@ -322,9 +322,10 @@ runs the line (faster downhill, never slower than its pace) and stops at
 the end; Space hops off and it glides back for the next run. One to
 twelve seats, coupled by their place along the rail rather than
 simulated, so they never stretch or pile up; a seat of your own drawing
-on every car; each player their own seat. Still to do: moving a drawn
-track, loops that keep the seats upright, a wire that sends it, a
-customised look for the track itself.
+on every car; each player their own seat; a wire sends it (riders or
+none) and it waits at the end while the signal is on. Still to do: moving a
+drawn track, loops that keep the seats upright, a customised look for the
+track itself.
 
 A track **material**, not a gadget:
 
