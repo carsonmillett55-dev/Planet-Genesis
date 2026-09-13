@@ -143,7 +143,7 @@ resizable, remembered. Carson: "just one object settings box that pops up on
 the right, like LBP; similarly bolts and other things will have a menu like
 this." Covered by `tctx.js`.
 
-**Still to do:** sub-categories inside Materials. Transforms as keybinds DONE 2026-09-11 — Z / X turn, H flips, Shift+[ / Shift+] move the selection a layer; all rebindable.
+**Still to do:** nothing here — sub-categories inside Materials DONE 2026-09-12 (All / Basic / Special / Deadly & fixed / Light & water). Transforms as keybinds DONE 2026-09-11 — Z / X turn, H flips, Shift+[ / Shift+] move the selection a layer; all rebindable.
 The bolt rework and every gadget put their settings in the same box.
 
 ### The build UI rework — original note
@@ -234,6 +234,7 @@ implement it, including connected systems, rather than approximating.
 | **Impact sensors** | DONE 2026-09-12: a pulse on a hit or on while touching; the player only; a tag required. |
 | **Projectiles** | DONE 2026-09-12: the Launcher powerup (bullets, a drawn projectile, a saved object, a ray), drawn projectiles with hitboxes in My Projectiles, emitters firing them, the projectile sensor. |
 | **Save tabs** | DONE 2026-09-12: My Creatures, My Projectiles, My Particles, drawn objects on My Objects — placed ready-made. |
+| **Grab sensor, score giver, randomiser** | DONE 2026-09-12, LBP2's: on while a player holds the thing; points on a signal (once or every time); on and off at random. |
 | **Timers, counters** | DONE 2026-09-12, LBP2's: up / up-and-down / down, a target, a reset wire; a counter of rising edges with a reset. |
 | **Creature eye** | DONE 2026-09-11, to the spec below. |
 | **Camera** | DONE 2026-09-11. LBP2's Game Camera: zone, zoom, tracking, speed; wired, the switch decides. Plus the Movie Camera's hold time (or hold for good), shake, controls off, and a glide to a second spot and zoom — Carson's "easier than keyframing". Play has its own fixed zoom, set in World. **Still to do: tilt** (a camera roll; a rendering change — the frame transform, its inverse for the mouse, the light buffer and overlays all have to agree). |
@@ -345,8 +346,9 @@ A simple music tab where you **draw the music the way you draw materials.**
 Piano, drums, guitar, bass. Built as World → Music: a grid a track at a time
 (lead, keys, bass, drums), painted with the mouse, every note in tune with
 every other; tempo, one to four bars, plays while the level is played, saved
-with it. Still to come: a music gadget on the level (a tune that starts when
-you reach it), tunes kept on the device, more instruments.
+with it. Tunes kept on the device DONE 2026-09-12 (My Tunes on the Music
+page). Still to come: a music gadget on the level (a tune that starts when
+you reach it), more instruments.
 
 ### Backgrounds — DONE 2026-09-12
 
@@ -447,8 +449,8 @@ Minigame keep their rules so they play right when players can join.
    pad joins with Start as its own character (up to four), each with
    their own grab, gun and footing; sensors, buttons, creatures, the fan,
    the goal and the crush see all of them; a second player on the same
-   keyboard (U joins, I J K L walk, O grabs, Y uses). Not yet: emotes and
-   the launcher's ammo readout for pad players.
+   keyboard (U joins, I J K L walk, O grabs, Y uses); emotes on the right
+   stick and the launcher readout over a joined player's head.
 2. **The camera for a group**: DONE 2026-09-12 for the platformer — the
    camera follows player one, and a player left off the screen (or who
    dies) goes into a bubble that floats back to them and pops (Carson's
@@ -465,9 +467,9 @@ Minigame keep their rules so they play right when players can join.
 5. **Top-down (2.5D)**: DONE 2026-09-12 as a level type — gravity off,
    the arrows walk every way, no jump, the character looks at the cursor
    (a pad's right stick), loose things slide and stop, water a still
-   pool, creatures chase every way, a ground seen from above. Not yet: a
-   character rig drawn for the top-down view (the side-on drawing is
-   turned), a dash.
+   pool, creatures chase every way and turn to face you, a ground seen
+   from above, a dash on Space. Not yet: a character rig drawn for the
+   top-down view (the side-on drawing is turned).
 
 ### Level doors — first cut DONE 2026-09-12
 
@@ -476,8 +478,8 @@ tool on the Gameplay page; its box picks a level on the device or makes a
 new one for it; in Play, F at the door goes in, finishing the level or the
 pause menu's Leave (or the 🚪 pill) comes back to the door; the level's
 picture shows through the arch; a level can set the character's size
-(World → Player). Still to do: the door's own look, cloud levels in the
-picker.
+(World → Player). The door's own look DONE 2026-09-12 (Draw the door, in
+its box). Still to do: cloud levels in the picker.
 
 - Place it in My World, then right-click for options including **"create
   level"**.

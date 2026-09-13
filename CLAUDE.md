@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` `tversus.js` `ttopdown.js` `tcoaster.js` `tchars.js` | Playwright suites, 1388 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` `tversus.js` `ttopdown.js` `tcoaster.js` `tchars.js` `tsmall.js` | Playwright suites, 1427 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1388 checks + checkgeom, in order
+npm test                   # all 1427 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -79,6 +79,7 @@ node tversus.js            # 34 — Versus: players collide (one on the other's 
 node ttopdown.js           # 27 — Top-down: no gravity, a disc of a body, the arrows every way and no jump, looking at the cursor, a shove that slides and stops, water a still pool, a creature chasing down the screen, gravity back in an adventure, saved
 node tcoaster.js           # 34 — the rollercoaster: the track tool draws a line (no object), the coaster waits at the start, F rides, it runs to the end and stops, Space hops off, it glides back; four seats coupled along the rail and the pace; a drawn seat, the box, the level file, Del and undo; two riders in two seats
 node tchars.js             # 38 — characters: the Swim and In-water poses; a hitbox drawn for the crouch; a character that comes armed (fires, and is re-armed on a respawn); a level's own characters — everyone must use one (a joiner too, Build gives your own back, the file carries them), pick from mine one player each (the picker, arrows/Enter, the stick/A, a taken one out), the same one allowed, their own
+node tsmall.js             # 39 — the small things: the Materials page in groups; emotes on a pad's right stick; the top-down dash; tunes kept on the device; a door of your own drawing; the grab sensor, the score giver (every time, once), the randomiser (unwired it flickers, wired it waits)
 node tgame.js              # 87 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -544,6 +545,9 @@ Each gadget has an **output**, 0 or 1:
 | **destroyer** | wired: the moment the signal comes on, its host is gone (Play only) | explode, blast |
 | **sound** | wired: plays a level sound when the signal comes on, again every `every` seconds while on | sound, pitch, volume, every |
 | **gate** | AND / OR / XOR / NOT of the wires into it, or a toggle — see The gameplay gadgets | mode |
+| **grabsensor** | a player is holding its host — hanging from it or carrying it (`grabConstraint.bodyB` or `carried`, every player) | — |
+| **score** | wired: on the signal's rising edge gives `points` to the level's score (`givePoints`; in a Versus or Minigame level the nearest player's own too), every time or `once` per Play (`given`) | points, once |
+| **random** | LBP2's randomiser: on and off in stretches of random length between `min` and `max` seconds (`flipAt`); wired, only while the signal is on | min, max |
 | **button** | the player stands on it — feet at the pad's height in the host's frame, within its width | sticky (stays on once pressed), width |
 | **lever** | flipped with the interact key (`F`, rebindable) while within 80px | springs back (on only while held), starts on/off |
 
@@ -2580,6 +2584,32 @@ from either. A pad unplugged clears what it held. A toast the first time
 one is seen. `mkprev.py` rewrites the `getGamepads` line so a suite can
 plant `window.__pgFakePad` — an object shaped like a Gamepad — and the
 shipping file never reads it.
+
+## The small things of 2026-09-12
+
+- **The Materials page in groups** — the roadmap's "sub-categories
+  inside Materials": `MATERIAL_GROUPS` (All, Basic, Special, Deadly &
+  fixed, Light & water, each with a blurb) as a row of tabs above the
+  grid, remembered in `pg_mat_group` (`pmMatGroup`); the material in
+  hand always shows whatever group is open.
+- **Emotes on a pad**: with no launcher in hand, a flick of the right
+  stick past 0.7 is an emote — up happy, down sad, left angry, right
+  bored (`padPrev.flick` so one flick is one emote; an animated
+  character only, as the keys).
+- **The top-down dash**: Space in a top-down level is a burst
+  `DASH_SPEED` (3.4×) of walking pace for `DASH_MS` (170) the way you
+  walk (or look), then `DASH_COOLDOWN_MS` (650) before the next
+  (`me.dashUntil`, `me.dashAng`).
+- **My Tunes** (`myTunes`, `pg_my_tunes`, thirty at most): World →
+  Music's "Keep this tune" names and keeps a copy of the level's tune;
+  each kept tune is a button that gives the level a copy of it
+  (`renderMyTunesRows`, on the page with or without a tune).
+- **A door of your own drawing**: `SKIN_STATES.door`, aspect 0.66;
+  the door's box "Draw the door" opens the studio (`openDoorStudio`,
+  `finishDoorDraft` keeps it as `g.skin` — packed by the one packer
+  like any gadget's skin, `addGadget` reads it for a door); drawn 72×110
+  over where the arch would be with the level's picture faint behind,
+  "Plain arch" takes it off.
 
 ## Characters: poses, the crouch hitbox, a launcher of their own
 

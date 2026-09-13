@@ -1579,6 +1579,15 @@
     maskdanger:{ label:"Danger",       color:"#E4574B", dark:"#B3261E", friction:0, restitution:0, density:0.001, grabbable:false, hazard:false, floatForce:0, isMask:true }
   };
   var MATERIAL_ORDER = ["wood","sponge","rubber","metal","ice","dissolve","floaty","hazard","darkmatter","glass","light","water"];
+  // the Materials page in groups, LBP2's way (the roadmap's "sub-categories inside Materials")
+  var MATERIAL_GROUPS = [
+    { id:"all",     label:"All" },
+    { id:"basic",   label:"Basic",          ids:["wood","metal","sponge","rubber"],       blurb:"The everyday four: wood and metal to build with, sponge to grab, rubber that bounces." },
+    { id:"special", label:"Special",        ids:["ice","glass","dissolve","floaty"],      blurb:"Ice you skate on, glass you see through, dissolve that crumbles when touched, floaty that rises in water." },
+    { id:"hazard",  label:"Deadly & fixed", ids:["hazard","darkmatter"],                  blurb:"The zap hazard kills on touch; dark matter holds still and holds anything welded to it." },
+    { id:"glow",    label:"Light & water",  ids:["light","water"],                        blurb:"Light glows and casts light; water is poured on the Mid layer and fills what holds it." }
+  ];
+  var pmMatGroup = localStorage.getItem("pg_mat_group") || "all";
 
   /* ---- Colour ---------------------------------------------------------
      Every material can be painted in any of these. It keeps all of its
@@ -1774,6 +1783,9 @@
     "tool:button":     ["Button", "On while the player stands on it. Sticky keeps it on once pressed."],
     "tool:lever":      ["Lever", "Stand next to it and press F to flip it. It can spring back when you let go, or stay."],
     "tool:timer":      ["Timer", "Fills while its input is on and switches on when full — a delay, a fuse, a time limit. The time, and what its reset port does, are in its box."],
+    "tool:grabsensor": ["Grab sensor", "On while a player is holding the thing it sits on — hanging from it or carrying it. A door that opens when the handle is grabbed, a bell that rings when the rope is pulled."],
+    "tool:score":      ["Score giver", "Wire a switch, a sensor or a sensor's timer to it and it gives points when the signal comes on — as many as you set, once or every time. In a Minigame the nearest player gets them."],
+    "tool:random":     ["Randomiser", "Its output flickers on and off at random — each stretch somewhere between the shortest and longest you set. Wired, it only runs while the signal is on. Lights, a wobbly platform, a creature that twitches."],
     "tool:counter":    ["Counter", "Counts each time its input turns on and switches on at the target — three buttons for one door. Reset clears it."],
     "tool:changer":    ["World changer", "Changes the whole world's light or water level while it is on — a flood, nightfall — over as many seconds as you like."],
     "tool:camera":     ["Camera", "Takes over the view while the player is in its blue zone. Drag the zone and the gold frame to where you want them; zoom, tracking, speed and a glide are in its box."],
@@ -3220,7 +3232,7 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter","gun","projsensor","speech","destroyer","sound","gate","spot","rocket","door"];
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter","gun","projsensor","speech","destroyer","sound","gate","spot","rocket","door","grabsensor","score","random"];
   // LBP's tag colours, and the names the box shows for them
   var TAG_COLORS = ["#E4574B","#E8891D","#F2B705","#5F9E5A","#2A7B8C","#8E5BB5","#E85A9E","#F6ECD9"];
   var TAG_NAMES = ["red","orange","yellow","green","blue","purple","pink","white"];
@@ -3298,6 +3310,7 @@
     emitter:  [{ id:"particle", label:"Particle", emoji:"✨" }],
     sticker:  [{ id:"sticker", label:"Sticker", emoji:"🏷️" }],
     seat:     [{ id:"seat", label:"Seat", emoji:"🎢" }],
+    door:     [{ id:"door", label:"Door", emoji:"🚪" }],
     material: [{ id:"tile", label:"Tile", emoji:"🧱" }],
     projectile: [{ id:"idle", label:"Look", emoji:"🚀" }, { id:"impact", label:"Impact", emoji:"💥" }],
     background: [{ id:"scene", label:"Scene", emoji:"🏞️" }]
@@ -3313,7 +3326,7 @@
     eye: [], emitter: [], sticker: [], material: [],
     projectile: [{ id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" }]
   };
-  var SKIN_TITLE = { eye:"🐾 Creature", creature:"🐉 Custom creature", anim:"🎨 Custom object", emitter:"✨ Particle", sticker:"🏷️ Sticker", seat:"🎢 Coaster seat", material:"🧱 Material", projectile:"🚀 Projectile", background:"🏞️ Background" };
+  var SKIN_TITLE = { eye:"🐾 Creature", creature:"🐉 Custom creature", anim:"🎨 Custom object", emitter:"✨ Particle", sticker:"🏷️ Sticker", seat:"🎢 Coaster seat", door:"🚪 Level door", material:"🧱 Material", projectile:"🚀 Projectile", background:"🏞️ Background" };
   var DRAWN_DEFAULT_SIZE = 120;   // the box a fresh drawn thing starts in, world px
   function newSkin(kind){
     var st = {}, fps = {};
@@ -3435,8 +3448,8 @@
     if (matOf(currentTool) && matOf(currentTool).isMask){ currentTool = "move"; canvas.dataset.tool = "move"; }
     renderSelBar();
   }
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter", gun:"Launcher", projsensor:"Projectile sensor", speech:"Speech bubble", destroyer:"Destroyer", sound:"Sound", gate:"Gate", spot:"Spotlight", rocket:"Rocket", door:"Level door" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter", gun:"gun", projsensor:"projsensor", speech:"speech", destroyer:"destroyer", sound:"sound", gate:"gate", spot:"spot", rocket:"rocket", door:"door" };
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter", gun:"Launcher", projsensor:"Projectile sensor", speech:"Speech bubble", destroyer:"Destroyer", sound:"Sound", gate:"Gate", spot:"Spotlight", rocket:"Rocket", door:"Level door", grabsensor:"Grab sensor", score:"Score giver", random:"Randomiser" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter", gun:"gun", projsensor:"projsensor", speech:"speech", destroyer:"destroyer", sound:"sound", gate:"gate", spot:"spot", rocket:"rocket", door:"door", grabsensor:"grabsensor", score:"score", random:"random" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   // the sticker in hand: a saved drawing to place copies of; the size and turn it goes on at
   var stickerPick = null, stickerSize = parseFloat(localStorage.getItem("pg_sticker_size") || "120") || 120, stickerRot = 0;
@@ -3629,6 +3642,20 @@
       g.time = 0; g.inputReset = null; g.wasReset = false;
       g.visible = extra.visible != null ? !!extra.visible : false;
     }
+    if (kind === "score"){
+      /* LBP2's score giver: points on the signal's rising edge, once
+         per Play or every time. */
+      g.points = extra.points != null && isFinite(+extra.points) ? Math.max(-1000, Math.min(1000, +extra.points | 0)) : 50;
+      g.once = extra.once != null ? !!extra.once : false;
+      g.given = false; g.wasOn = false; g.out = 0;
+    }
+    if (kind === "random"){
+      /* LBP2's randomiser: on and off in stretches of random length,
+         each between `min` and `max` seconds; wired, while the signal is on. */
+      g.min = extra.min != null && isFinite(+extra.min) ? Math.max(0.1, Math.min(30, +extra.min)) : 0.5;
+      g.max = extra.max != null && isFinite(+extra.max) ? Math.max(g.min, Math.min(60, +extra.max)) : 2;
+      g.flipAt = 0; g.out = 0;
+    }
     if (kind === "counter"){
       /* LBP2's counter: counts the signal's rising edges up to a target
          and is on from then until reset. */
@@ -3646,6 +3673,7 @@
       g.leadsTo = lt && typeof lt === "object" && (typeof lt.local === "string" || typeof lt.cloud === "string") ? { local: lt.local, cloud: lt.cloud } : null;
       g.targetName = typeof extra.targetName === "string" ? extra.targetName.slice(0, 40) : "";
       g.label = typeof extra.label === "string" ? extra.label.slice(0, 40) : "";
+      g.skin = extra.skin ? normalizeSkin(extra.skin, "door") : null;   // a door of your own drawing, over the arch
       g.visible = true;
     }
     if (kind === "rocket"){
@@ -3874,9 +3902,9 @@
     });
   }
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter" || t.kind === "speech" || t.kind === "destroyer" || t.kind === "sound" || t.kind === "gate" || t.kind === "spot" || t.kind === "rocket"); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter" || t.kind === "speech" || t.kind === "destroyer" || t.kind === "sound" || t.kind === "gate" || t.kind === "spot" || t.kind === "rocket" || t.kind === "score" || t.kind === "random"); }
   function hasResetPort(t){ return !!t && (t.kind === "timer" || t.kind === "counter"); }
-  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun" && g.kind !== "speech" && g.kind !== "destroyer" && g.kind !== "sound" && g.kind !== "spot" && g.kind !== "rocket" && g.kind !== "door"; }
+  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun" && g.kind !== "speech" && g.kind !== "destroyer" && g.kind !== "sound" && g.kind !== "spot" && g.kind !== "rocket" && g.kind !== "door" && g.kind !== "score"; }
   function addWire(from, to, port){
     if (!from || !to || from === to) return false;
     port = port === "reset" && hasResetPort(to) ? "reset" : "in";
@@ -4062,6 +4090,34 @@
         }
         g.level = g.target > 0 ? g.time / g.target : 0;
         g.out = (g.mode === "down" ? g.time <= 0.0001 : g.time >= g.target - 0.0001) ? 1 : 0;
+      }
+      if (g.kind === "grabsensor"){
+        // on while any player is holding its host — hanging from it or carrying it
+        var held = false;
+        if (g.obj && g.obj.body){
+          for (var gi = 0; gi < players.length && !held; gi++){
+            var GP = players[gi], gc = GP === me ? grabConstraint : GP.grabConstraint, gcar = GP === me ? carried : GP.carried;
+            if (gcar === g.obj) held = true;
+            else if (gc && gc.bodyB && (gc.bodyB === g.obj.body || gc.bodyB.parent === g.obj.body)) held = true;
+          }
+        }
+        g.out = held ? 1 : 0;
+      }
+      if (g.kind === "score"){
+        var sOn = g.input != null && g.input > 0;
+        if (sOn && !g.wasOn && mode === "play" && !(g.once && g.given)){
+          g.given = true;
+          givePoints(g.points, g.pos);
+        }
+        g.wasOn = sOn;
+      }
+      if (g.kind === "random"){
+        var rOn2 = g.input != null ? g.input > 0 : true, nowR = performance.now();
+        if (!rOn2){ g.out = 0; g.flipAt = 0; }
+        else if (nowR >= g.flipAt){
+          g.out = g.out ? 0 : 1;
+          g.flipAt = nowR + (g.min + Math.random() * Math.max(0, g.max - g.min)) * 1000;
+        }
       }
       if (g.kind === "counter"){
         var cOn = g.input != null && g.input > 0, cRst = g.inputReset != null && g.inputReset > 0;
@@ -4769,6 +4825,8 @@
       if (g.kind === "button") g.on = false; g.held = false; if (g.kind === "changer") g.latched = false;
       if (g.kind === "timer"){ g.time = g.mode === "down" ? g.target : 0; g.wasReset = false; }
       if (g.kind === "counter"){ g.count = 0; g.wasOn = false; g.wasReset = false; }
+      if (g.kind === "score"){ g.given = false; g.wasOn = false; }
+      if (g.kind === "random"){ g.flipAt = 0; g.out = 0; }
       if (g.kind === "impact"){ g.hitUntil = 0; g.touchStep = -1; }
       if (g.kind === "projsensor"){ g.hitUntil = 0; g.count = 0; g.fires = 0; }
       if (g.kind === "objemitter"){ g.total = 0; g.nextAt = 0; g.wasOn = false; }
@@ -5291,6 +5349,17 @@
     return t;
   }
   function resetTracks(){ tracks.forEach(function(t){ t.s = trainStart(t); t.v = 0; t.state = "wait"; t.riders = []; }); }
+  function openDoorStudio(g){
+    var d = { id: "door", kind: "door", obj: null, art: null, skin: g.skin ? g.skin : newSkin("door"), doorG: g, layer: g.layer, pos: { x: 0, y: 0 } };
+    pmEditState = "door"; pmEditFrame = 0;
+    ceOpenWith(ceSkinSubject(d));
+  }
+  function finishDoorDraft(d){
+    var g = d.doorG; if (!g) return;
+    g.skin = skinHasArt(d.skin) ? d.skin : null;
+    showToast(g.skin ? "The door wears your drawing." : "Nothing drawn — the plain arch it is.");
+    renderSelBar();
+  }
   function openSeatStudio(t){
     var g = { id: "seat", kind: "seat", obj: null, art: null, skin: t.look ? t.look : newSkin("seat"), track: t, layer: t.layer, pos: { x: 0, y: 0 } };
     pmEditState = "seat"; pmEditFrame = 0;
@@ -7501,6 +7570,7 @@
      the grace after a respawn. */
   var CRUSH_FRAC = 0.42, CRUSH_STEPS = 10, crushSteps = 0, crushesSeen = 0;
   var TOPDOWN_DRAG = 0.94;   // a loose thing seen from above loses this much of its speed a step
+  var DASH_MS = 170, DASH_COOLDOWN_MS = 650, DASH_SPEED = 3.4;   // the top-down dash: a burst on Space, this much of walking pace, then a breather
   function crushCheck(){
     if (!player || flying || (me && (me.bubble || me.riding)) || !runner.enabled || grabConstraint || performance.now() < hazardSafeUntil){ crushSteps = 0; return; }
     var solids = [], pb = player.bounds;
@@ -7914,6 +7984,13 @@
     padHeld.fire = padButton(gp, 7);
     var rx = gp.axes[2] || 0, ry = gp.axes[3] || 0;
     padAim = Math.hypot(rx, ry) > 0.35 ? { x: rx, y: ry } : null;
+    // with no launcher in hand, a flick of the right stick is an emote:
+    // up happy, down sad, left angry, right bored (the keys' 1–4)
+    if (!playerGun && mode === "play"){
+      var flick = Math.hypot(rx, ry) > 0.7 ? (Math.abs(rx) > Math.abs(ry) ? (rx > 0 ? "bored" : "angry") : (ry > 0 ? "sad" : "happy")) : null;
+      if (flick && !padPrev.flick && charMode === "animated") triggerEmote(flick);
+      padPrev.flick = flick;
+    } else padPrev.flick = null;
     // presses: what went down this frame
     var jump = padButton(gp, 0), interact = padButton(gp, 3), start = padButton(gp, 9);
     if (jump && !padPrev.jump) handleJumpOrFlyToggle();
@@ -8211,8 +8288,15 @@
       if (input.down && !frozen) tvy += tsp;
       var tvx = vx * (playerWetness() > 0.35 ? 0.6 : 1);
       if (tvx && tvy){ tvx *= 0.7071; tvy *= 0.7071; }
-      Body.setVelocity(player, { x: tvx, y: tvy });
       if (tvx || tvy) me.moveAng = Math.atan2(tvy, tvx);
+      // Space is a dash: a short burst the way you are walking (or looking), then a breather
+      var nowD = performance.now();
+      if (input.jumpQueued && nowD > (me.dashUntil || 0) + DASH_COOLDOWN_MS && !frozen){
+        me.dashUntil = nowD + DASH_MS; me.dashAng = (tvx || tvy) ? Math.atan2(tvy, tvx) : (me.lookAng != null ? me.lookAng : (me.moveAng != null ? me.moveAng : -Math.PI/2));
+        sfx("jump"); puff(player.position.x, player.position.y, 6, { color:"#F6ECD9", speed:1.6, g:0, spread:Math.PI*2, life:14, r:2.2 });
+      }
+      if (nowD < (me.dashUntil || 0)){ var ds = walkSpeedNow() * DASH_SPEED; tvx = Math.cos(me.dashAng) * ds; tvy = Math.sin(me.dashAng) * ds; }
+      Body.setVelocity(player, { x: tvx, y: tvy });
       input.jumpQueued = false; input.jumpBufferUntil = 0;
       return;
     }
@@ -8500,7 +8584,8 @@
                text: g.text, once: g.once, explode: g.explode, blast: g.blast, sound: g.sound, pitch: g.pitch, volume: g.volume, every: g.every,
                cone: g.cone, bright: g.bright, leadsTo: g.leadsTo ? { local: g.leadsTo.local, cloud: g.leadsTo.cloud } : undefined, targetName: g.targetName,
                fireKind: g.fireKind, pgrav: g.pgrav, plife: g.plife, pbreaks: g.pbreaks, phurts: g.phurts,
-               hits: g.hits, only: g.only, useZone: g.useZone, useSpots: g.useSpots, destroy: g.destroy };
+               hits: g.hits, only: g.only, useZone: g.useZone, useSpots: g.useSpots, destroy: g.destroy,
+               points: g.points, min: g.min, max: g.max };
   }
   function packEmit(e){ return { name: e.name, pieces: e.pieces, gadgets: e.gadgets && e.gadgets.length ? e.gadgets : undefined, wires: e.wires && e.wires.length ? e.wires : undefined }; }
   function normalizeEmit(e){
@@ -9941,6 +10026,20 @@
       ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2); ctx.fillStyle = on ? sc : "#5C6B7A"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, 5, Math.PI * 0.75, Math.PI * 2.25); ctx.strokeStyle = "#F6ECD9"; ctx.lineWidth = 2; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI*2); ctx.fillStyle = sc; ctx.fill();
+    } else if (g.kind === "door" && g.skin && skinHasArt(g.skin)){
+      // a door of the author's own drawing, over where the arch would be; the level's picture peeps through it faintly
+      var dfr = skinFrame(g.skin, "door", 0, false);
+      ctx.save();
+      var dpic2 = doorPicture(g);
+      if (dpic2){ ctx.globalAlpha = (alpha == null ? 1 : alpha) * 0.5; ctx.drawImage(dpic2, -26, -66, 52, 60); ctx.globalAlpha = alpha == null ? 1 : alpha; }
+      if (dfr) ctx.drawImage(drawingCanvas(dfr, 144, 220), -36, -86, 72, 110);
+      ctx.restore();
+      var dl2 = g.label || g.targetName;
+      if (dl2){
+        ctx.font = "bold 14px 'Patrick Hand', cursive"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+        ctx.lineWidth = 3; ctx.strokeStyle = "rgba(246,236,217,0.9)"; ctx.strokeText(dl2, 0, -90); ctx.fillStyle = "#2B1B12"; ctx.fillText(dl2, 0, -90);
+        ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      }
     } else if (g.kind === "door"){
       // a door with an arch, big enough to walk into, its knob lit when it leads somewhere
       ctx.save(); ctx.translate(0, -30); ctx.scale(2.4, 2.4);
@@ -10013,6 +10112,25 @@
       var ha = -Math.PI/2 + (g.level || 0) * Math.PI * 2;
       ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(ha) * 8, Math.sin(ha) * 8); ctx.lineWidth = 2.2; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, 1.8, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
+    } else if (g.kind === "grabsensor"){
+      // a hand, closed while held
+      ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI*2);
+      ctx.fillStyle = on ? "#F2B705" : "#E8C9A0"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.fillStyle = "#2B1B12"; ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(on ? "✊" : "✋", 0, 1);
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    } else if (g.kind === "score"){
+      // a star with the points on it
+      ctx.beginPath(); for (var sp = 0; sp < 10; sp++){ var sr = sp % 2 ? 6 : 13, sa = -Math.PI/2 + sp * Math.PI / 5; ctx.lineTo(Math.cos(sa) * sr, Math.sin(sa) * sr); } ctx.closePath();
+      ctx.fillStyle = g.given ? "#E8C9A0" : "#F2B705"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.fillStyle = "#2B1B12"; ctx.font = "bold 8px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText((g.points > 0 ? "+" : "") + g.points, 0, 1.5);
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    } else if (g.kind === "random"){
+      // a die, lit while on
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-10, -10, 20, 20, 4) : ctx.rect(-10, -10, 20, 20);
+      ctx.fillStyle = on ? "#7FD4D9" : "#F6ECD9"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.fillStyle = "#2B1B12"; [[-5, -5], [5, -5], [0, 0], [-5, 5], [5, 5]].forEach(function(d){ ctx.beginPath(); ctx.arc(d[0], d[1], 1.8, 0, Math.PI*2); ctx.fill(); });
     } else if (g.kind === "counter"){
       // a little box with the count in it
       ctx.beginPath(); ctx.rect(-11, -9, 22, 18); ctx.fillStyle = on ? "#7FD4D9" : "#F6ECD9"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
@@ -11697,6 +11815,15 @@
   var score = 0, comboMult = 1, lastBubbleTime = -99999;
   var COMBO_WINDOW = 1100;
   function updateScoreHud(){ scoreHudEl.textContent = "⭐ " + score; }
+  /* Points from a score giver: the level's score, and in a Versus or
+     Minigame level the nearest player's own as well. */
+  function givePoints(n, at){
+    score = Math.max(0, score + n); updateScoreHud();
+    var P = pvpNow() ? nearestPlayer(at) : null;
+    if (P) P.score = Math.max(0, (P.score || 0) + n);
+    if (n > 0){ sfx("collect", 1); puff(at.x, at.y, 10, { color:"#FFE9A6", speed:2.2, g:-0.02, r:2.4, shape:"spark", life:24 }); showToast("+" + n); }
+    else if (n < 0){ sfx("deny"); showToast("" + n); }
+  }
   function collectBubble(b, P){
     b.collected = true;
     var now = performance.now(), mult;
@@ -12120,8 +12247,19 @@
   function renderMaterialsTab(el){
     var h = document.createElement("h3"); h.textContent = "Materials — painting on " + LAYER_NAMES[buildLayer];
     el.appendChild(h);
+    // the groups, as a row of tabs; the one in hand's group is always shown
+    var gRow = document.createElement("div"); gRow.className = "segRow"; gRow.style.flexWrap = "wrap";
+    var grp = null; MATERIAL_GROUPS.forEach(function(gd){ if (gd.id === pmMatGroup) grp = gd; }); if (!grp) grp = MATERIAL_GROUPS[0];
+    MATERIAL_GROUPS.forEach(function(gd){
+      var b = document.createElement("button"); b.textContent = gd.label; b.className = gd.id === grp.id ? "active" : "";
+      b.addEventListener("click", function(){ pmMatGroup = gd.id; localStorage.setItem("pg_mat_group", gd.id); renderPersonalMenu(); sfx("tick"); });
+      gRow.appendChild(b);
+    });
+    el.appendChild(gRow);
+    if (grp.blurb){ var gb = document.createElement("div"); gb.className = "noteText"; gb.textContent = grp.blurb; el.appendChild(gb); }
+    var shownIds = grp.ids ? MATERIAL_ORDER.filter(function(id){ return grp.ids.indexOf(id) >= 0 || (matOf(currentTool) && matBase(currentTool) === id); }) : MATERIAL_ORDER;
     var grid = document.createElement("div"); grid.className = "catalogGrid";
-    MATERIAL_ORDER.forEach(function(id){
+    shownIds.forEach(function(id){
       var mat = matOf(id);
       var active = matBase(currentTool) === id && matOf(currentTool);
       var chip = document.createElement("div");
@@ -12318,7 +12456,7 @@
                   note:"Move & Select drags, resizes and picks things to set up. Erase takes material off the layer you are on. Vacuum takes water and nothing else. Glue: click one thing, then another — on the same layer they become one; on different layers they keep their layers and move as one. Tab does the same anywhere." },
     connectors: { title:"Connectors", defs:[["bolt","🔩","Bolt"],["sprungbolt","🌀","Sprung bolt"],["motorbolt","⚙","Motor bolt"],["wobblebolt","↔","Wobble bolt"],["piston","🔩","Piston"],["rope","➰","Rope"]],
                   note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
-    logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["impact","💥","Impact sensor"],["projsensor","🎯","Projectile sensor"],["tag","🏷","Tag"],["tagsensor","📡","Tag sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["timer","⏱","Timer"],["counter","🔢","Counter"],["gate","🔀","Gate"],["changer","🌗","World changer"]],
+    logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["impact","💥","Impact sensor"],["projsensor","🎯","Projectile sensor"],["tag","🏷","Tag"],["tagsensor","📡","Tag sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["timer","⏱","Timer"],["counter","🔢","Counter"],["gate","🔀","Gate"],["random","🎲","Randomiser"],["grabsensor","✊","Grab sensor"],["score","⭐","Score giver"],["changer","🌗","World changer"]],
                   note:"Put them on something. Right-click one and Connect it to a motor, a piston, a camera, a mover or a world changer — it drives that while it is on." },
     gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["rocket","🚀","Rocket"],["track","🎢","Coaster track"],["spot","🔦","Spotlight"],["door","🚪","Level door"],["speech","💬","Speech bubble"],["destroyer","💣","Destroyer"],["sound","🔊","Sound"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
                   note:"A camera shows its shot while the player is in its zone. A mover carries an object along a line. A creature eye makes an object chase the player." }
@@ -12589,6 +12727,36 @@
      left button and rubbed out with the right, the playhead running
      along it while the preview plays. ---- */
   var musicTrack = "lead", musicGridEl = null;
+  /* My Tunes: tunes kept on this device (`pg_my_tunes`), apart from any
+     level, so a tune written for one level goes into the next. */
+  var myTunes = [];
+  try { myTunes = JSON.parse(localStorage.getItem("pg_my_tunes") || "[]"); if (!Array.isArray(myTunes)) myTunes = []; } catch(e){ myTunes = []; }
+  function persistMyTunes(){ if (!storeSet("pg_my_tunes", JSON.stringify(myTunes))) showToast("Couldn't keep the tune — this device is out of room."); }
+  function renderMyTunesRows(el){
+    var m = worldSettings.music;
+    var th = document.createElement("h3"); th.textContent = "My Tunes"; el.appendChild(th);
+    var row = document.createElement("div"); row.className = "segRow"; row.style.flexWrap = "wrap";
+    if (m){
+      var keep = document.createElement("button"); keep.textContent = "💾 Keep this tune";
+      keep.addEventListener("click", function(){
+        askName("Name this tune", "Tune " + (myTunes.length + 1), function(name){
+          myTunes.unshift({ id: "tn" + Date.now(), name: name || "Tune", data: JSON.parse(JSON.stringify(normalizeMusic(m))) });
+          myTunes = myTunes.slice(0, 30); persistMyTunes(); renderPersonalMenu(); showToast("'" + (name || "Tune") + "' is in My Tunes.");
+        });
+      });
+      row.appendChild(keep);
+    }
+    myTunes.forEach(function(t){
+      var b = document.createElement("button"); b.textContent = "🎵 " + t.name; b.title = "Use this tune in the level";
+      b.addEventListener("click", function(){ musicStop(); worldSettings.music = normalizeMusic(t.data); renderPersonalMenu(); showToast("The level's tune is '" + t.name + "' now."); sfx("tick"); });
+      row.appendChild(b);
+      var x = document.createElement("button"); x.textContent = "✕"; x.title = "Forget it"; x.className = "red";
+      x.addEventListener("click", function(){ myTunes = myTunes.filter(function(q){ return q.id !== t.id; }); persistMyTunes(); renderPersonalMenu(); sfx("delete"); });
+      row.appendChild(x);
+    });
+    if (!myTunes.length && !m){ var nn = document.createElement("div"); nn.className = "noteText"; nn.textContent = "Write a tune and keep it here to use it in other levels."; el.appendChild(nn); }
+    el.appendChild(row);
+  }
   function renderMusicTab(el){
     var m = worldSettings.music;
     var h = document.createElement("h3"); h.textContent = "Music"; el.appendChild(h);
@@ -12599,6 +12767,7 @@
       var nb = document.createElement("button"); nb.className = "btn small"; nb.textContent = "🎵 Write a tune";
       nb.addEventListener("click", function(){ worldSettings.music = newMusic(); sfx("click"); renderPersonalMenu(); });
       el.appendChild(nb);
+      renderMyTunesRows(el);
       return;
     }
     var tr = document.createElement("div"); tr.className = "segRow";
@@ -12663,6 +12832,7 @@
     var n2 = document.createElement("div"); n2.className = "noteText";
     n2.textContent = "It loops for as long as the level is played, and is saved with the level.";
     el.appendChild(n2);
+    renderMyTunesRows(el);
     drawMusicGrid();
   }
   function drawMusicGrid(){
@@ -13188,6 +13358,7 @@
       aspect: function(){
         if (kind === "background") return 2;
         if (kind === "seat") return 1.4;
+        if (kind === "door") return 0.66;
         if (kind === "emitter" || !host || !host.body) return 1;
         var box = skinBox(host, g); if (!box) return 1;
         return Math.max(0.2, Math.min(5, (box.x2 - box.x) / Math.max(1, box.y2 - box.y)));
@@ -13259,7 +13430,7 @@
       },
       useDrawingAsHitbox: function(){ var idle = skinFrame(g.skin, "idle", 0, false); if (!idle || !drawingHasArt(idle)) return false; g.hitbox = idle.map(function(st){ var c = JSON.parse(JSON.stringify(st)); c.c = "#4FA9D6"; return c; }); touchDrawing(g.hitbox); return true; },
       extraRight: function(el){ ceSkinExtras(el, g); },
-      onClose: function(){ if (kind === "material"){ finishMaterialDraft(g); return; } if (kind === "background"){ finishBackgroundDraft(g); return; } if (kind === "seat"){ finishSeatDraft(g); return; } if (kind === "projectile"){ finishProjectileDraft(g); return; } if (g.draft){ finishStickerDraft(g); return; } if (host){ host.studioHold = false; } applyDrawnSteps(g); if (host && host.body && objects.indexOf(host) >= 0) refreshObjectPhysics(host); renderSelBar(); }
+      onClose: function(){ if (kind === "material"){ finishMaterialDraft(g); return; } if (kind === "background"){ finishBackgroundDraft(g); return; } if (kind === "seat"){ finishSeatDraft(g); return; } if (kind === "door"){ finishDoorDraft(g); return; } if (kind === "projectile"){ finishProjectileDraft(g); return; } if (g.draft){ finishStickerDraft(g); return; } if (host){ host.studioHold = false; } applyDrawnSteps(g); if (host && host.body && objects.indexOf(host) >= 0) refreshObjectPhysics(host); renderSelBar(); }
     };
     return sub;
   }
@@ -16008,6 +16179,27 @@
       tnote.textContent = "Its own output comes on when it reaches the target" + (g.mode === "down" ? " — zero, counting down" : "") + ". Wire something to it to run it; Reset from… puts it back to the start. Now at " + (g.time || 0).toFixed(1) + "s.";
       tnote.style.flexBasis = "100%"; opSection(null).appendChild(tnote);
     }
+    if (g.kind === "grabsensor"){
+      var gsn = document.createElement("div"); gsn.className = "noteText";
+      gsn.textContent = "On while a player is holding the thing it sits on — hanging from it, or carrying it. Wire it to what should happen then.";
+      gsn.style.flexBasis = "100%"; opSection(null).appendChild(gsn);
+    }
+    if (g.kind === "score"){
+      slider(opSection("Points"), "Points", g.points, -500, 500, 10, function(v){ g.points = Math.round(v); }, function(v){ return (v > 0 ? "+" : "") + Math.round(v); }, "changing a score giver");
+      var sco = opSection("How often");
+      opBtn(sco, g.once ? "Once per Play" : "Every time the signal comes on", "", function(){ pushUndo("changing a score giver"); g.once = !g.once; renderSelBar(); sfx("tick"); }, "wide" + (g.once ? " on" : ""));
+      var scn = document.createElement("div"); scn.className = "noteText";
+      scn.textContent = "Wire a switch, a sensor or a timer to it. In a Versus or Minigame level the nearest player gets the points too.";
+      scn.style.flexBasis = "100%"; opSection(null).appendChild(scn);
+    }
+    if (g.kind === "random"){
+      var rsec = opSection("Each stretch, on or off");
+      slider(rsec, "Shortest", g.min, 0.1, 30, 0.1, function(v){ g.min = v; if (g.max < g.min) g.max = g.min; }, function(v){ return (+v).toFixed(1) + "s"; }, "changing a randomiser");
+      slider(rsec, "Longest", g.max, 0.1, 60, 0.1, function(v){ g.max = Math.max(v, g.min); }, function(v){ return (+v).toFixed(1) + "s"; }, "changing a randomiser");
+      var rnn = document.createElement("div"); rnn.className = "noteText";
+      rnn.textContent = "Its output goes on and off at random, each stretch somewhere between the two. Wired, it runs only while the signal is on.";
+      rnn.style.flexBasis = "100%"; opSection(null).appendChild(rnn);
+    }
     if (g.kind === "counter"){
       slider(opSection("Count to"), "Target", g.target, 1, 100, 1, function(v){ g.target = Math.round(v); }, function(v){ return Math.round(v) + ""; }, "changing a counter");
       var cnote = document.createElement("div"); cnote.className = "noteText";
@@ -16050,6 +16242,9 @@
       dInp.addEventListener("input", function(){ if (!dPushed){ pushUndo("naming a door"); dPushed = true; } g.label = dInp.value.slice(0, 40); });
       dInp.addEventListener("keydown", function(e){ e.stopPropagation(); });
       dl.appendChild(dInp);
+      var dlook = opSection("The door's look");
+      opBtn(dlook, g.skin ? "🎨 Redraw the door" : "🎨 Draw the door", "A door of your own drawing, in place of the arch", function(){ openDoorStudio(g); }, "wide" + (g.skin ? " on" : ""));
+      if (g.skin) opBtn(dlook, "Plain arch", "Back to the arch", function(){ pushUndo("changing a door"); g.skin = null; renderSelBar(); sfx("tick"); }, "wide");
     }
     if (g.kind === "rocket"){
       var rk = opSection("Push");
