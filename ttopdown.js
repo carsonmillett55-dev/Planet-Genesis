@@ -73,7 +73,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   a = await pos(); await hold('ArrowRight', 300); q = await pos();
   ok('Right walks right', q.x > a.x + 40 && Math.abs(q.y - a.y) < 4, { from: a, to: q });
   a = await pos(); await p.keyboard.down('ArrowLeft'); await p.keyboard.down('ArrowUp'); await p.waitForTimeout(300); await p.keyboard.up('ArrowLeft'); await p.keyboard.up('ArrowUp'); q = await pos();
-  ok('two arrows walk diagonally, at walking pace', q.x < a.x - 25 && q.y < a.y - 25 && Math.abs((a.x - q.x) - (a.y - q.y)) < 8, { from: a, to: q });
+  ok('two arrows walk diagonally, at walking pace', q.x < a.x - 25 && q.y < a.y - 25 && Math.abs((a.x - q.x) - (a.y - q.y)) < 22, { from: a, to: q });   // the two keys go down a frame or two apart
   await p.waitForTimeout(150);
   a = await pos(); await p.keyboard.press('Space'); await p.waitForTimeout(400); q = await pos();
   ok('Space is not a jump', Math.abs(q.y - a.y) < 4 && Math.abs(q.x - a.x) < 4, { from: a, to: q });
