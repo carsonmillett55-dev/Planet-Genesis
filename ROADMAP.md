@@ -347,8 +347,8 @@ Piano, drums, guitar, bass. Built as World → Music: a grid a track at a time
 (lead, keys, bass, drums), painted with the mouse, every note in tune with
 every other; tempo, one to four bars, plays while the level is played, saved
 with it. Tunes kept on the device DONE 2026-09-12 (My Tunes on the Music
-page). Still to come: a music gadget on the level (a tune that starts when
-you reach it), more instruments.
+page), and the music gadget DONE the same day (the Music box: a tune that
+plays where you reach it, or a hush). Still to come: more instruments.
 
 ### Backgrounds — DONE 2026-09-12
 
@@ -479,7 +479,7 @@ new one for it; in Play, F at the door goes in, finishing the level or the
 pause menu's Leave (or the 🚪 pill) comes back to the door; the level's
 picture shows through the arch; a level can set the character's size
 (World → Player). The door's own look DONE 2026-09-12 (Draw the door, in
-its box). Still to do: cloud levels in the picker.
+its box); cloud levels in the picker DONE the same day.
 
 - Place it in My World, then right-click for options including **"create
   level"**.

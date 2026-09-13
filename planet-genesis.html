@@ -1783,6 +1783,7 @@
     "tool:button":     ["Button", "On while the player stands on it. Sticky keeps it on once pressed."],
     "tool:lever":      ["Lever", "Stand next to it and press F to flip it. It can spring back when you let go, or stay."],
     "tool:timer":      ["Timer", "Fills while its input is on and switches on when full — a delay, a fuse, a time limit. The time, and what its reset port does, are in its box."],
+    "tool:music":      ["Music box", "A tune that plays when you reach it — while a player is near, or while it is wired on — and the level's own tune comes back after. Give it one of My Tunes, or the level's, in its box; or make it a hush that stops the music."],
     "tool:grabsensor": ["Grab sensor", "On while a player is holding the thing it sits on — hanging from it or carrying it. A door that opens when the handle is grabbed, a bell that rings when the rope is pulled."],
     "tool:score":      ["Score giver", "Wire a switch, a sensor or a sensor's timer to it and it gives points when the signal comes on — as many as you set, once or every time. In a Minigame the nearest player gets them."],
     "tool:random":     ["Randomiser", "Its output flickers on and off at random — each stretch somewhere between the shortest and longest you set. Wired, it only runs while the signal is on. Lights, a wobbly platform, a creature that twitches."],
@@ -2287,18 +2288,18 @@
      last notes it sent, for the suites. */
   var musicPlayer = { playing: false, t0: 0, next: 0, timer: 0, step: 0, source: null }, musicLog = [], MUSIC_AHEAD = 180;
   function musicStepMs(m){ return 60000 / m.bpm / 4; }
-  function musicStart(source){
-    var m = worldSettings.music; if (!m) return false;
+  function musicStart(source, tune){
+    var m = tune || worldSettings.music; if (!m) return false;
     musicStop();
     audioInit();
-    musicPlayer = { playing: true, t0: performance.now() + 60, next: 0, timer: 0, step: 0, source: source || "level" };
+    musicPlayer = { playing: true, t0: performance.now() + 60, next: 0, timer: 0, step: 0, source: source || "level", tune: tune || null };
     musicTick();
     musicPlayer.timer = setInterval(musicTick, 50);
     return true;
   }
   function musicStop(){ if (musicPlayer.timer) clearInterval(musicPlayer.timer); musicPlayer.playing = false; musicPlayer.timer = 0; }
   function musicTick(){
-    var m = worldSettings.music, pl = musicPlayer;
+    var pl = musicPlayer, m = pl.tune || worldSettings.music;
     if (!pl.playing || !m){ musicStop(); return; }
     var stepMs = musicStepMs(m), steps = musicSteps(m), now = performance.now();
     pl.step = Math.max(0, Math.floor((now - pl.t0) / stepMs)) % steps;
@@ -3232,7 +3233,7 @@
      is the world point, refreshed every step. A rebuild replaces the host
      body with its angle reset to 0, so `local` is re-derived from `pos`
      then — see reanchorGadgets. */
-  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter","gun","projsensor","speech","destroyer","sound","gate","spot","rocket","door","grabsensor","score","random"];
+  var GADGET_KINDS = ["sensor","button","lever","camera","mover","watersensor","changer","eye","anim","emitter","creature","fan","sticker","tag","tagsensor","impact","timer","counter","objemitter","gun","projsensor","speech","destroyer","sound","gate","spot","rocket","door","grabsensor","score","random","music"];
   // LBP's tag colours, and the names the box shows for them
   var TAG_COLORS = ["#E4574B","#E8891D","#F2B705","#5F9E5A","#2A7B8C","#8E5BB5","#E85A9E","#F6ECD9"];
   var TAG_NAMES = ["red","orange","yellow","green","blue","purple","pink","white"];
@@ -3448,8 +3449,8 @@
     if (matOf(currentTool) && matOf(currentTool).isMask){ currentTool = "move"; canvas.dataset.tool = "move"; }
     renderSelBar();
   }
-  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter", gun:"Launcher", projsensor:"Projectile sensor", speech:"Speech bubble", destroyer:"Destroyer", sound:"Sound", gate:"Gate", spot:"Spotlight", rocket:"Rocket", door:"Level door", grabsensor:"Grab sensor", score:"Score giver", random:"Randomiser" };
-  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter", gun:"gun", projsensor:"projsensor", speech:"speech", destroyer:"destroyer", sound:"sound", gate:"gate", spot:"spot", rocket:"rocket", door:"door", grabsensor:"grabsensor", score:"score", random:"random" };
+  var GADGET_LABEL = { sensor:"Player sensor", button:"Button", lever:"Lever", camera:"Camera", mover:"Mover", watersensor:"Water sensor", changer:"World changer", eye:"Creature eye", anim:"Custom object", emitter:"Particles", creature:"Custom creature", fan:"Fan", sticker:"Sticker", tag:"Tag", tagsensor:"Tag sensor", impact:"Impact sensor", timer:"Timer", counter:"Counter", objemitter:"Object emitter", gun:"Launcher", projsensor:"Projectile sensor", speech:"Speech bubble", destroyer:"Destroyer", sound:"Sound", gate:"Gate", spot:"Spotlight", rocket:"Rocket", door:"Level door", grabsensor:"Grab sensor", score:"Score giver", random:"Randomiser", music:"Music box" };
+  var GADGET_TOOL_KIND = { sensor:"sensor", button:"button", lever:"lever", camera:"camera", mover:"mover", watersensor:"watersensor", changer:"changer", eye:"eye", anim:"anim", emitter:"emitter", creature:"creature", fan:"fan", sticker:"sticker", tag:"tag", tagsensor:"tagsensor", impact:"impact", timer:"timer", counter:"counter", objemitter:"objemitter", gun:"gun", projsensor:"projsensor", speech:"speech", destroyer:"destroyer", sound:"sound", gate:"gate", spot:"spot", rocket:"rocket", door:"door", grabsensor:"grabsensor", score:"score", random:"random", music:"music" };
   var moverDraft = null;   // a mover just placed, waiting for the click that sets where it travels to
   // the sticker in hand: a saved drawing to place copies of; the size and turn it goes on at
   var stickerPick = null, stickerSize = parseFloat(localStorage.getItem("pg_sticker_size") || "120") || 120, stickerRot = 0;
@@ -3466,7 +3467,7 @@
   /* A camera is the one gadget that does not need a host: put it in empty
      air and it stays there, on the layer it was placed. Everything else
      sits on an object. */
-  function gadgetNeedsHost(kind){ return kind !== "camera" && kind !== "anim" && kind !== "creature" && kind !== "gun" && kind !== "door"; }   // a sticker sticks to material; a launcher floats where it is put
+  function gadgetNeedsHost(kind){ return kind !== "camera" && kind !== "anim" && kind !== "creature" && kind !== "gun" && kind !== "door" && kind !== "music"; }   // a sticker sticks to material; a launcher floats where it is put
   function addGadget(kind, obj, pt, extra){
     if (GADGET_KINDS.indexOf(kind) < 0) return null;
     if (!obj || !obj.body){ if (gadgetNeedsHost(kind)) return null; obj = null; }
@@ -3641,6 +3642,16 @@
       g.mode = extra.mode === "updown" || extra.mode === "down" ? extra.mode : "up";
       g.time = 0; g.inputReset = null; g.wasReset = false;
       g.visible = extra.visible != null ? !!extra.visible : false;
+    }
+    if (kind === "music"){
+      /* A music box: its own tune (a copy — the level carries it), played
+         while a player is within `radius` or, wired, while the signal is
+         on; the level's own tune comes back after. `hush` silences the
+         level's tune instead. */
+      g.tune = extra.tune ? normalizeMusic(extra.tune) : null;
+      g.radius = extra.radius != null && isFinite(+extra.radius) ? Math.max(40, Math.min(3000, +extra.radius)) : 260;
+      g.hush = !!extra.hush;
+      g.wasOn = false; g.out = 0;
     }
     if (kind === "score"){
       /* LBP2's score giver: points on the signal's rising edge, once
@@ -3902,9 +3913,9 @@
     });
   }
   function receiverById(id){ return boltById(id) || gadgetById(id) || linkById(id); }
-  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter" || t.kind === "speech" || t.kind === "destroyer" || t.kind === "sound" || t.kind === "gate" || t.kind === "spot" || t.kind === "rocket" || t.kind === "score" || t.kind === "random"); }
+  function canReceive(t){ return !!t && (t.kind === "motor" || t.kind === "wobble" || t.kind === "piston" || t.kind === "camera" || t.kind === "mover" || t.kind === "changer" || t.kind === "eye" || t.kind === "anim" || t.kind === "emitter" || t.kind === "creature" || t.kind === "fan" || t.kind === "tag" || t.kind === "timer" || t.kind === "counter" || t.kind === "objemitter" || t.kind === "speech" || t.kind === "destroyer" || t.kind === "sound" || t.kind === "gate" || t.kind === "spot" || t.kind === "rocket" || t.kind === "score" || t.kind === "random" || t.kind === "music"); }
   function hasResetPort(t){ return !!t && (t.kind === "timer" || t.kind === "counter"); }
-  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun" && g.kind !== "speech" && g.kind !== "destroyer" && g.kind !== "sound" && g.kind !== "spot" && g.kind !== "rocket" && g.kind !== "door" && g.kind !== "score"; }
+  function gadgetHasOutput(g){ return !!g && g.kind !== "camera" && g.kind !== "mover" && g.kind !== "changer" && g.kind !== "eye" && g.kind !== "anim" && g.kind !== "emitter" && g.kind !== "creature" && g.kind !== "sticker" && g.kind !== "objemitter" && g.kind !== "gun" && g.kind !== "speech" && g.kind !== "destroyer" && g.kind !== "sound" && g.kind !== "spot" && g.kind !== "rocket" && g.kind !== "door" && g.kind !== "score" && g.kind !== "music"; }
   function addWire(from, to, port){
     if (!from || !to || from === to) return false;
     port = port === "reset" && hasResetPort(to) ? "reset" : "in";
@@ -4102,6 +4113,12 @@
           }
         }
         g.out = held ? 1 : 0;
+      }
+      if (g.kind === "music"){
+        var mWant = g.input != null ? g.input > 0 : anyPlayerWithin(g.pos, g.radius);
+        if (mWant && !g.wasOn && mode === "play") musicBoxOn(g);
+        else if (!mWant && g.wasOn) musicBoxOff(g);
+        g.wasOn = mWant; g.out = mWant ? 1 : 0;
       }
       if (g.kind === "score"){
         var sOn = g.input != null && g.input > 0;
@@ -4826,6 +4843,7 @@
       if (g.kind === "timer"){ g.time = g.mode === "down" ? g.target : 0; g.wasReset = false; }
       if (g.kind === "counter"){ g.count = 0; g.wasOn = false; g.wasReset = false; }
       if (g.kind === "score"){ g.given = false; g.wasOn = false; }
+      if (g.kind === "music"){ g.wasOn = false; g.out = 0; }
       if (g.kind === "random"){ g.flipAt = 0; g.out = 0; }
       if (g.kind === "impact"){ g.hitUntil = 0; g.touchStep = -1; }
       if (g.kind === "projsensor"){ g.hitUntil = 0; g.count = 0; g.fires = 0; }
@@ -5712,7 +5730,7 @@
         if (spin > MAX_SPIN) Body.setAngularVelocity(cb, Math.sign(cb.angularVelocity) * MAX_SPIN);
       }
       if (toBreak) toBreak.forEach(breakApart);
-      if (topdownNow()) for (var di = 0; di < objects.length; di++){ var db = objects[di].body; if (!db || db.isStatic || objects[di].projectile) continue; Body.setVelocity(db, { x: db.velocity.x * TOPDOWN_DRAG, y: db.velocity.y * TOPDOWN_DRAG }); Body.setAngularVelocity(db, db.angularVelocity * TOPDOWN_DRAG); }   // the floor's drag: a shove slides and stops
+      if (topdownNow()) for (var di = 0; di < objects.length; di++){ var tdb = objects[di].body; if (!tdb || tdb.isStatic || objects[di].projectile) continue; Body.setVelocity(tdb, { x: tdb.velocity.x * TOPDOWN_DRAG, y: tdb.velocity.y * TOPDOWN_DRAG }); Body.setAngularVelocity(tdb, tdb.angularVelocity * TOPDOWN_DRAG); }   // the floor's drag: a shove slides and stops
       eachPlayerBody(function(pb){
         var psp = Math.hypot(pb.velocity.x, pb.velocity.y);
         if (psp > MAX_SPEED) Body.setVelocity(pb, { x: pb.velocity.x / psp * MAX_SPEED, y: pb.velocity.y / psp * MAX_SPEED });
@@ -8585,7 +8603,7 @@
                cone: g.cone, bright: g.bright, leadsTo: g.leadsTo ? { local: g.leadsTo.local, cloud: g.leadsTo.cloud } : undefined, targetName: g.targetName,
                fireKind: g.fireKind, pgrav: g.pgrav, plife: g.plife, pbreaks: g.pbreaks, phurts: g.phurts,
                hits: g.hits, only: g.only, useZone: g.useZone, useSpots: g.useSpots, destroy: g.destroy,
-               points: g.points, min: g.min, max: g.max };
+               points: g.points, min: g.min, max: g.max, tune: g.tune ? normalizeMusic(g.tune) : undefined, hush: g.hush };
   }
   function packEmit(e){ return { name: e.name, pieces: e.pieces, gadgets: e.gadgets && e.gadgets.length ? e.gadgets : undefined, wires: e.wires && e.wires.length ? e.wires : undefined }; }
   function normalizeEmit(e){
@@ -10112,6 +10130,13 @@
       var ha = -Math.PI/2 + (g.level || 0) * Math.PI * 2;
       ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(ha) * 8, Math.sin(ha) * 8); ctx.lineWidth = 2.2; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, 1.8, 0, Math.PI*2); ctx.fillStyle = "#2B1B12"; ctx.fill();
+    } else if (g.kind === "music"){
+      // a note on a disc, lit while it plays
+      ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI*2);
+      ctx.fillStyle = on ? "#F2B705" : (g.hush ? "#8B8374" : "#C89BD9"); ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#2B1B12"; ctx.stroke();
+      ctx.fillStyle = "#2B1B12"; ctx.font = "bold 13px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(g.hush ? "🔇" : "♪", 0, 1);
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
     } else if (g.kind === "grabsensor"){
       // a hand, closed while held
       ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI*2);
@@ -11703,6 +11728,8 @@
     c.globalAlpha = 1;
     if (waterCount > 0 && wMaxRow >= wMinRow){ c.fillStyle = "rgba(111,195,224,0.8)"; c.fillRect((wMinCol * WATER_CELL - f.x) * kx, (wMinRow * WATER_CELL - f.y) * ky, Math.max(1.5, (wMaxCol - wMinCol + 1) * WATER_CELL * kx), Math.max(1.5, (wMaxRow - wMinRow + 1) * WATER_CELL * ky)); }
     eachPlayerBody(function(pb, P){ c.fillStyle = (P === me ? charColor : P.charColor) || "#E8567A"; c.beginPath(); c.arc((pb.position.x - f.x) * kx, (pb.position.y - f.y) * ky, 3, 0, Math.PI*2); c.fill(); c.strokeStyle = "#2B1B12"; c.lineWidth = 1; c.stroke(); });
+    // the coaster tracks, as lines
+    if (tracks.length){ c.strokeStyle = "#5C6B7A"; c.lineWidth = 1.5; tracks.forEach(function(t){ c.beginPath(); t.pts.forEach(function(q, i){ var px = (q.x - f.x) * kx, py = (q.y - f.y) * ky; if (i) c.lineTo(px, py); else c.moveTo(px, py); }); c.stroke(); }); }
     var visW = viewRectW / camScale, visH = viewRectH / camScale;
     c.strokeStyle = "#F2B705"; c.lineWidth = 2; c.strokeRect((camX - f.x) * kx, (camY - f.y) * ky, Math.max(3, visW * kx), Math.max(3, visH * ky));
   }
@@ -11815,6 +11842,20 @@
   var score = 0, comboMult = 1, lastBubbleTime = -99999;
   var COMBO_WINDOW = 1100;
   function updateScoreHud(){ scoreHudEl.textContent = "⭐ " + score; }
+  /* The music box that has the floor: its tune plays instead of the
+     level's; when it lets go, the level's own comes back (in Play). */
+  var activeMusicBox = null;
+  function levelMusicResume(){ if (mode === "play" && worldSettings.music && worldSettings.music.on && musicHas(worldSettings.music)) musicStart("play"); else musicStop(); }
+  function musicBoxOn(g){
+    activeMusicBox = g;
+    if (g.hush){ musicStop(); return; }
+    if (g.tune && musicHas(g.tune)) musicStart("box", g.tune);
+  }
+  function musicBoxOff(g){
+    if (activeMusicBox !== g) return;
+    activeMusicBox = null;
+    levelMusicResume();
+  }
   /* Points from a score giver: the level's score, and in a Versus or
      Minigame level the nearest player's own as well. */
   function givePoints(n, at){
@@ -12458,7 +12499,7 @@
                   note:"Bolts go through: point at something on your layer that has something behind it (or in front), and click. Pistons and rope take two clicks, one on each thing. Right-click any of them to set it up." },
     logic:      { title:"Logic", defs:[["sensor","👁","Player sensor"],["watersensor","💧","Water sensor"],["impact","💥","Impact sensor"],["projsensor","🎯","Projectile sensor"],["tag","🏷","Tag"],["tagsensor","📡","Tag sensor"],["button","🔴","Button"],["lever","🎚","Lever"],["timer","⏱","Timer"],["counter","🔢","Counter"],["gate","🔀","Gate"],["random","🎲","Randomiser"],["grabsensor","✊","Grab sensor"],["score","⭐","Score giver"],["changer","🌗","World changer"]],
                   note:"Put them on something. Right-click one and Connect it to a motor, a piston, a camera, a mover or a world changer — it drives that while it is on." },
-    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["rocket","🚀","Rocket"],["track","🎢","Coaster track"],["spot","🔦","Spotlight"],["door","🚪","Level door"],["speech","💬","Speech bubble"],["destroyer","💣","Destroyer"],["sound","🔊","Sound"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
+    gameplay:   { title:"Gameplay", defs:[["camera","🎥","Camera"],["mover","➡","Mover"],["eye","🧿","Creature eye"],["creature","🐉","Custom creature"],["anim","🎨","Custom object"],["emitter","✨","Particles"],["objemitter","📤","Object emitter"],["gun","🔫","Launcher"],["fan","🌀","Fan"],["rocket","🚀","Rocket"],["track","🎢","Coaster track"],["spot","🔦","Spotlight"],["door","🚪","Level door"],["music","🎵","Music box"],["speech","💬","Speech bubble"],["destroyer","💣","Destroyer"],["sound","🔊","Sound"],["spawn","🏁","Start"],["checkpoint","🚩","Checkpoint"],["bubble","💠","Bubble"],["goal","🏆","Goal"]],
                   note:"A camera shows its shot while the player is in its zone. A mover carries an object along a line. A creature eye makes an object chase the player." }
   };
   function renderToolsTab(el, pageId){
@@ -16179,6 +16220,23 @@
       tnote.textContent = "Its own output comes on when it reaches the target" + (g.mode === "down" ? " — zero, counting down" : "") + ". Wire something to it to run it; Reset from… puts it back to the start. Now at " + (g.time || 0).toFixed(1) + "s.";
       tnote.style.flexBasis = "100%"; opSection(null).appendChild(tnote);
     }
+    if (g.kind === "music"){
+      var mtb = opSection("Plays");
+      opBtn(mtb, g.hush ? "🔇 A hush — stops the level's tune" : "🎵 A tune of its own", "", function(){ pushUndo("changing a music box"); g.hush = !g.hush; renderSelBar(); sfx("tick"); }, "wide" + (g.hush ? " on" : ""));
+      if (!g.hush){
+        var mnow = document.createElement("div"); mnow.className = "noteText"; mnow.style.flexBasis = "100%";
+        mnow.textContent = g.tune && musicHas(g.tune) ? "It has a tune (" + g.tune.bpm + " bpm, " + g.tune.bars + (g.tune.bars === 1 ? " bar" : " bars") + "). " : "No tune in it yet. ";
+        mnow.textContent += "Give it the level's tune, or one of My Tunes:";
+        mtb.appendChild(mnow);
+        if (worldSettings.music && musicHas(worldSettings.music)) opBtn(mtb, "🎼 The level's tune", "A copy of the tune under World → Music", function(){ pushUndo("changing a music box"); g.tune = normalizeMusic(JSON.parse(JSON.stringify(worldSettings.music))); renderSelBar(); sfx("tick"); }, "wide");
+        myTunes.forEach(function(t){ opBtn(mtb, "🎵 " + t.name, "One of My Tunes", function(){ pushUndo("changing a music box"); g.tune = normalizeMusic(JSON.parse(JSON.stringify(t.data))); renderSelBar(); sfx("tick"); }, "wide"); });
+        if (g.tune) opBtn(mtb, musicPlayer.playing && musicPlayer.tune === g.tune ? "⏹ Stop" : "▶ Try it", "", function(){ if (musicPlayer.playing && musicPlayer.tune === g.tune) musicStop(); else musicStart("page", g.tune); renderSelBar(); }, "wide");
+      }
+      slider(opSection("Reach"), "Reach", g.radius, 40, 3000, 10, function(v){ g.radius = v; }, function(v){ return Math.round(v) + "px"; }, "changing a music box");
+      var mbn = document.createElement("div"); mbn.className = "noteText";
+      mbn.textContent = "It plays while a player is within reach — or, wired, while the signal is on — and the level's own tune comes back after.";
+      mbn.style.flexBasis = "100%"; opSection(null).appendChild(mbn);
+    }
     if (g.kind === "grabsensor"){
       var gsn = document.createElement("div"); gsn.className = "noteText";
       gsn.textContent = "On while a player is holding the thing it sits on — hanging from it, or carrying it. Wire it to what should happen then.";
@@ -16235,6 +16293,12 @@
         opBtn(dsec, "💾 " + nm, "Lead to this level", function(){ pushUndo("pointing a door"); g.leadsTo = { local: l.id }; g.targetName = nm; renderSelBar(); sfx("tick"); }, "wide" + (g.leadsTo && g.leadsTo.local === l.id ? " on" : ""));
       });
       if (!locals.length){ var dn1 = document.createElement("div"); dn1.className = "noteText"; dn1.textContent = "No other levels on this device yet."; dn1.style.flexBasis = "100%"; dsec.appendChild(dn1); }
+      // and the cloud's, from the last list fetched (the Load list keeps it fresh); a button fetches it now
+      var clouds = (cloudLevelCache || []).filter(function(r){ return r.id !== cloudLevelId; });
+      clouds.forEach(function(r){
+        opBtn(dsec, "☁ " + (r.name || "Untitled"), "Lead to this level in the cloud", function(){ pushUndo("pointing a door"); g.leadsTo = { cloud: r.id }; g.targetName = r.name || "Untitled"; renderSelBar(); sfx("tick"); }, "wide" + (g.leadsTo && g.leadsTo.cloud === r.id ? " on" : ""));
+      });
+      if (dbNS) opBtn(dsec, clouds.length ? "↻ Cloud levels" : "☁ Look in the cloud", "Fetch the list of levels in the cloud", function(){ fetchCloudLevels(function(){ if (selectedGadget === g) renderSelBar(); }); }, "wide");
       if (g.leadsTo) opBtn(dsec, "✕ Leads nowhere", "", function(){ pushUndo("pointing a door"); g.leadsTo = null; g.targetName = ""; renderSelBar(); sfx("tick"); }, "wide");
       var dl = opSection("Sign");
       var dInp = document.createElement("input"); dInp.type = "text"; dInp.className = "opText"; dInp.maxLength = 40; dInp.value = g.label || ""; dInp.placeholder = g.targetName || "What the door says";
@@ -17809,7 +17873,7 @@
   }
   function updatePauseState(){
     var paused = !runner.enabled;
-    pausedBannerEl.hidden = !paused;
+    pausedBannerEl.hidden = !paused || !!charPick;   // the world holds still for a character to be chosen, and that is not a pause
     stateBtnEl.textContent = paused ? "❚❚" : "▶";
     stateBtnEl.classList.toggle("paused", paused);
     stateBtnEl.title = paused ? "Paused — click to resume" : "Running — click to pause";
@@ -18050,7 +18114,7 @@
     if (m === "play"){
       buildFrozen = snapshotFull();
     } else if (mode === "play"){
-      musicStop();
+      musicStop(); activeMusicBox = null;
       if (playScaleHold != null){ var backTo = playScaleHold; playScaleHold = null; setCharScale(backTo, true); forEachPlayer(function(P, i){ if (i) setCharScale(backTo, true); }); }
       restoreOwnCharacters();
       restoreFull(buildFrozen);
@@ -18588,6 +18652,7 @@
             var data = d.data();
             return { id:d.id, name:data.name, updatedAt:data.updatedAt, payload:data.payload, cloud:true, thumb:data.thumb };
           });
+          cloudLevelCache = cloudRows.map(function(r){ return { id: r.id, name: r.name, updatedAt: r.updatedAt }; });
           finish(cloudRows);
         }).catch(function(){ finish([]); });
       } else {
@@ -18596,6 +18661,18 @@
     });
   }
 
+  /* The cloud's level list, kept from the last fetch so the door picker
+     can offer them without a wait; the Load list refreshes it too. */
+  var cloudLevelCache = null;
+  function fetchCloudLevels(done){
+    dbPromise.then(function(db){
+      if (!db){ cloudLevelCache = []; if (done) done([]); return; }
+      db.collection("levels").orderBy("updatedAt","desc").limit(40).get().then(function(snap){
+        cloudLevelCache = snap.docs.map(function(d){ var data = d.data(); return { id: d.id, name: data.name, updatedAt: data.updatedAt }; });
+        if (done) done(cloudLevelCache);
+      }).catch(function(){ if (done) done(cloudLevelCache || []); });
+    });
+  }
   function levelRowEl(row){
     var el = document.createElement("div");
     el.className = "levelRow";

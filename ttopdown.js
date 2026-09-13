@@ -76,7 +76,7 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('two arrows walk diagonally, at walking pace', q.x < a.x - 25 && q.y < a.y - 25 && Math.abs((a.x - q.x) - (a.y - q.y)) < 22, { from: a, to: q });   // the two keys go down a frame or two apart
   await p.waitForTimeout(150);
   a = await pos(); await p.keyboard.press('Space'); await p.waitForTimeout(400); q = await pos();
-  ok('Space is not a jump', Math.abs(q.y - a.y) < 4 && Math.abs(q.x - a.x) < 4, { from: a, to: q });
+  ok('Space is a dash, not a jump — a burst along the ground, and it stops', (await p.evaluate(() => window.__pg.dash())).until > 0 && Math.abs((await pos()).y - q.y) < 2, { from: a, to: q, dash: await p.evaluate(() => window.__pg.dash()) });
   ok('letting go stops', Math.abs((await pos()).y - q.y) < 2);
 
   console.log('== the character looks at the cursor ==');

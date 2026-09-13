@@ -194,6 +194,36 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log('  ok  '+n);} else {fail++;console.
   ok('wired to a lever that is off, it stays off', seenOff.every(v => v === 0), seenOff.join(''));
   await build();
 
+  console.log('== the music box: a tune where you reach it ==');
+  await fresh();
+  await rect('wood', 1, X-380, Y+100, X+400, Y+140);
+  await lockAll();
+  await p.evaluate(() => { window.__pg.newTune(); window.__pg.musicSet('bpm', 120); window.__pg.musicSet('tracks', { lead: [[0, 3], [4, 5]], keys: [], bass: [], drums: [[0, 0]] }); });
+  const mb = await place('music', X+300, Y+40);
+  ok('a music box, host-less, with no tune yet', !!mb && mb.obj === null && mb.hasTune === false && mb.radius === 260, mb && { obj: mb.obj, hasTune: mb.hasTune, radius: mb.radius });
+  const boxTune = { bpm: 90, bars: 1, vol: 0.8, on: true, tracks: { lead: [[0, 7]], keys: [], bass: [], drums: [] } };
+  ok('given a tune of its own', await p.evaluate(([id, t]) => window.__pg.boxTune(id, t), [mb.id, boxTune]));
+  await play(); await standAt(X-300, Y+60); await p.waitForTimeout(300);
+  let mn = await p.evaluate(() => window.__pg.musicNow());
+  ok('far from it the level tune plays', mn.playing && mn.source === 'play' && mn.box === null, mn);
+  await standAt(X+250, Y+60); await p.waitForTimeout(300);
+  mn = await p.evaluate(() => window.__pg.musicNow());
+  ok('within reach, the box tune plays instead', mn.playing && mn.source === 'box' && mn.box === 90, mn);
+  ok('and the box reads on', (await kinds('music'))[0].out === 1);
+  await standAt(X-300, Y+60); await p.waitForTimeout(300);
+  mn = await p.evaluate(() => window.__pg.musicNow());
+  ok('leaving, the level tune comes back', mn.playing && mn.source === 'play' && mn.box === null, mn);
+  await build();
+  await p.evaluate(id => window.__pg.gadgetSet(id, { hush: true }), (await kinds('music'))[0].id);
+  await play(); await standAt(X+250, Y+60); await p.waitForTimeout(300);
+  ok('a hush: within reach the music stops', !(await p.evaluate(() => window.__pg.musicNow())).playing);
+  await standAt(X-300, Y+60); await p.waitForTimeout(300);
+  ok('and plays again after', (await p.evaluate(() => window.__pg.musicNow())).playing);
+  const file3 = await p.evaluate(() => window.__pg.serialize());
+  const mbSaved = file3.gadgets.filter(g => g.kind === 'music')[0];
+  ok('the level file keeps the box, its tune and its hush', mbSaved && mbSaved.tune && mbSaved.tune.bpm === 90 && mbSaved.hush === true && mbSaved.o == null, mbSaved && { bpm: mbSaved.tune && mbSaved.tune.bpm, hush: mbSaved.hush });
+  await build();
+
   console.log('== no page errors ==');
   ok('no errors', errs.length === 0, errs);
   await b.close();
