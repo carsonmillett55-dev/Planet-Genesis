@@ -1285,6 +1285,9 @@
   .typeCard .ti{ font-size:1.3rem; line-height:1; }
   .typeCard .tl{ font-family:'Patrick Hand',cursive; font-size:1.05rem; margin:.15rem 0; }
   .typeCard .tb{ font-size:.66rem; line-height:1.25; opacity:.85; }
+  #charPickCards .typeCard{ text-align:center; }
+  #charPickCards .typeCard canvas{ display:block; margin:0 auto .2rem; }
+  #charPickCards .typeCard:disabled{ cursor:default; }
   .musicGrid{ display:block; border:2px solid var(--ink); border-radius:8px; cursor:crosshair; touch-action:none; background:#F6ECD9; }
   #objPanel input.opText{ width:100%; box-sizing:border-box; font-family:'Patrick Hand',cursive; font-size:1rem; padding:.3rem .45rem; border:2px solid var(--ink); border-radius:8px; background:#FFFDF6; color:var(--ink); }
   #objPanel textarea.opText{ width:100%; box-sizing:border-box; font-family:'Patrick Hand',cursive; font-size:1rem; padding:.3rem .45rem; border:2px solid var(--ink); border-radius:8px; background:#FFFDF6; color:var(--ink); resize:vertical; }
@@ -1445,6 +1448,14 @@
         <button class="btn ghost" id="confirmNo">Cancel</button>
         <button class="btn red" id="confirmYes">Yes, do it</button>
       </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="charPickOverlay" hidden>
+    <div class="panel" style="max-width:38rem">
+      <h2 id="charPickTitle">Choose your character</h2>
+      <div class="sub" id="charPickSub"></div>
+      <div id="charPickCards" class="typeGrid"></div>
     </div>
   </div>
 
@@ -1827,6 +1838,8 @@
     { id:"swing", label:"Swing", frames:1, emoji:"🤾" },
     { id:"crouch",label:"Crouch",frames:1, emoji:"🧎" },
     { id:"slide", label:"Slide", frames:1, emoji:"🛝" },
+    { id:"swim",  label:"Swim",  frames:2, emoji:"🏊" },
+    { id:"float", label:"In water", frames:1, emoji:"🫧" },
     { id:"happy", label:"Happy", frames:1, emoji:"😄" },
     { id:"sad",   label:"Sad",   frames:1, emoji:"😢" },
     { id:"angry", label:"Angry", frames:1, emoji:"😠" },
@@ -2502,10 +2515,11 @@
                          grabReach: 16, walkSpeed: 1, sprintSpeed: 1.45, playZoom: 1, camHeight: -70, doubleJump: false,   // camHeight: px above (negative) the character the view centres
                          bg: null, bgPlain: null, bgSlide: 0.25,   // a drawn background, what is behind it (null: the usual scenery, else a colour), how much it slides with the level
                          music: null,   // the level's tune — see Music
-                         charSize: null,   // the character's size this level is played at (a scale), or null: whatever the player chose
+                         charSize: null,   // the character's size this level is played at (a scale), or null: whatever the player chose (older levels; no page for it now)
+                         chars: { mode: "any", list: [], unique: false },   // who players can be: their own, one fixed character, or a pick from the level's own — see Level characters
                          levelType: "adventure", lives: 0, timeLimit: 0, fallLine: null, knockouts: 3 };   // the kind of level and its rules — see Level types
   var worldSettings = {};
-  function resetWorldSettings(){ for (var k in WORLD_DEFAULTS) worldSettings[k] = WORLD_DEFAULTS[k]; }
+  function resetWorldSettings(){ for (var k in WORLD_DEFAULTS) worldSettings[k] = (WORLD_DEFAULTS[k] && typeof WORLD_DEFAULTS[k] === "object") ? JSON.parse(JSON.stringify(WORLD_DEFAULTS[k])) : WORLD_DEFAULTS[k]; }   // an object default (the characters list) is copied, never shared
   resetWorldSettings();
   /* Reads with the default filled in, so a level saved before a setting
      existed plays exactly as it did. */
@@ -6339,6 +6353,10 @@
   var charSize = "medium";   // kept for older readers of the character data
   var charHit = null;
   try { charHit = normalizeDrawing(JSON.parse(localStorage.getItem("pg_char_hit") || "null"), 10, 14); } catch(e){ charHit = blankDrawing(); }
+  // and a hitbox for crouching — drawn in the squatter box; with none drawn the standing one is squashed down
+  var charHitCrouch = blankDrawing();
+  try { charHitCrouch = normalizeDrawing(JSON.parse(localStorage.getItem("pg_char_hit_crouch") || "null"), 10, 14); } catch(e){ charHitCrouch = blankDrawing(); }
+  function persistCharHitCrouch(){ try { localStorage.setItem("pg_char_hit_crouch", JSON.stringify(charHitCrouch)); } catch(e){} }
   if (!charHit) charHit = blankDrawing();
   function persistCharHit(){ try { localStorage.setItem("pg_char_hit", JSON.stringify(charHit)); } catch(e){} }
   var PW, PH, charArt = null;
@@ -6370,7 +6388,7 @@
              padHeld: { left: false, right: false, up: false, down: false, sprint: false, grab: false, fire: false }, padPrev: {}, padAim: null, padSeen: false,
              keyHeld: { left: false, right: false, up: false, down: false, sprint: false, grab: false }, gunAim: null, playerGun: null, gunHeld: false, gunLastShot: 0, crushSteps: 0,
              crouchK: 1, crouching: false, sliding: false, slideUntil: 0, slideDir: 0, slideV: 0, standTry: 0, activeEmote: null, emoteUntil: 0,
-             charScale: 2, charColor: CHAR_COLORS[0], charMode: "preset", charSprites: null, charFrameCounts: null, charFps: null, charHit: null, PW: 0, PH: 0, charArt: null };
+             charScale: 2, charColor: CHAR_COLORS[0], charMode: "preset", charSprites: null, charFrameCounts: null, charFps: null, charHit: null, charHitCrouch: null, charGun: null, PW: 0, PH: 0, charArt: null };
   }
   function bindFrom(P){
     player = P.player;
@@ -6423,6 +6441,8 @@
     charFrameCounts = P.charFrameCounts;
     charFps = P.charFps;
     charHit = P.charHit;
+    charHitCrouch = P.charHitCrouch;
+    charGun = P.charGun;
     PW = P.PW;
     PH = P.PH;
     charArt = P.charArt;
@@ -6479,6 +6499,8 @@
     P.charFrameCounts = charFrameCounts;
     P.charFps = charFps;
     P.charHit = charHit;
+    P.charHitCrouch = charHitCrouch;
+    P.charGun = charGun;
     P.PW = PW;
     P.PH = PH;
     P.charArt = charArt;
@@ -6557,7 +6579,8 @@
     P.hazardSafeUntil = performance.now() + 900;
     players.push(P);
     var lb = playerBody(lead);
-    withPlayer(P, function(){ spawnPlayer(lb ? { x: lb.position.x, y: lb.position.y - 4 } : null); });
+    withPlayer(P, function(){ spawnPlayer(lb ? { x: lb.position.x, y: lb.position.y - 4 } : null); if (mode === "play" && charGun) armFromCharacter(); });
+    if (mode === "play") levelCharacterFor(P);
     showToast(keyboard2 ? "⌨ Player " + (slot + 1) + " joined on the keyboard — I J K L walk, U jumps, O grabs, Y uses." : "🎮 Player " + (slot + 1) + " joined!");
     sfx("place");
     return P;
@@ -6599,6 +6622,8 @@
   function removePlayer(P){
     var i = players.indexOf(P);
     if (i <= 0) return;
+    if (charPick && charPick.P === P){ charPick = null; nextCharPick(); }
+    charPickQueue = charPickQueue.filter(function(Q){ return Q !== P; });
     withPlayer(P, function(){ releaseRope(); if (me.bubble) unbubble(); if (player) World.remove(world, player); player = null; });
     players.splice(i, 1);
     showToast("Player " + (P.slot + 1) + " left.");
@@ -6671,6 +6696,108 @@
     });
   }
   function respawnAllPlayers(){ forEachPlayer(function(){ respawnPlayer(); }); }
+  /* ---- Wearing the level's characters in Play. `P.ownChar` holds a
+     player's own character while they wear the level's; `P.levelChar`
+     is which of the list they wear (an index), so a unique pick stays
+     theirs. `levelCharacterFor(P)` on entering Play and on joining:
+     fixed → the first; choose → the picker, one player at a time
+     (`charPickQueue`). Leaving Play puts everyone's own back. ---- */
+  function wearLevelCharacter(P, idx){
+    var c = levelChars(), e = c.list[idx]; if (!e) return;
+    withPlayer(P, function(){
+      if (!me.ownChar) me.ownChar = currentCharacterData();
+      me.levelChar = idx;
+      wearCharacterData(e.data, true);
+    });
+  }
+  function restoreOwnCharacters(){
+    forEachPlayer(function(P){ if (P.ownChar){ var own = P.ownChar; P.ownChar = null; P.levelChar = null; wearCharacterData(own, true); } P.levelChar = null; });
+    closeCharPicker(true);
+  }
+  function levelCharacterFor(P){
+    var m = levelCharsMode();
+    if (m === "fixed"){ wearLevelCharacter(P, 0); return; }
+    if (m === "choose"){ if (P.levelChar != null && levelChars().list[P.levelChar]) wearLevelCharacter(P, P.levelChar); else queueCharPick(P); return; }
+  }
+  function levelCharactersOnPlay(){
+    if (levelCharsMode() === "any"){ return; }
+    forEachPlayer(function(P){ levelCharacterFor(P); });
+  }
+  // the picker: a card per character, one player choosing at a time
+  var charPick = null, charPickQueue = [], charPickPausedIt = false;
+  var charPickOverlay = document.getElementById("charPickOverlay");
+  function queueCharPick(P){
+    if (charPickQueue.indexOf(P) < 0 && !(charPick && charPick.P === P)) charPickQueue.push(P);
+    if (!charPick) nextCharPick();
+  }
+  function nextCharPick(){
+    var P = charPickQueue.shift();
+    if (!P || players.indexOf(P) < 0){ if (P) nextCharPick(); else closeCharPicker(false); return; }
+    var c = levelChars(), taken = charsTaken(P);
+    var first = 0; while (first < c.list.length && taken[first]) first++;
+    if (first >= c.list.length){ nextCharPick(); return; }   // nothing left to pick: they keep what they have
+    charPick = { P: P, idx: first };
+    if (mode === "play" && runner.enabled){ runner.enabled = false; charPickPausedIt = true; updatePauseState(); }
+    renderCharPicker();
+    charPickOverlay.hidden = false;
+  }
+  function charsTaken(forP){
+    var taken = {}; if (!levelChars().unique) return taken;
+    players.forEach(function(Q){ if (Q !== forP && Q.levelChar != null) taken[Q.levelChar] = true; });
+    return taken;
+  }
+  function renderCharPicker(){
+    if (!charPick) return;
+    var c = levelChars(), P = charPick.P, taken = charsTaken(P);
+    document.getElementById("charPickTitle").textContent = playerName(P) + ", choose your character";
+    document.getElementById("charPickSub").textContent = P.keyboard ? "Click one, or the arrows and Enter." : (P.keyboard2 ? "J and L to look, U to choose." : "The stick to look, A to choose.");
+    var host = document.getElementById("charPickCards"); host.innerHTML = "";
+    c.list.forEach(function(e, i){
+      var card = document.createElement("button"); card.className = "typeCard" + (i === charPick.idx ? " active" : "") + (taken[i] ? " soon" : "");
+      card.disabled = !!taken[i];
+      var th = charThumbCanvas(e.data, 40, 52); card.appendChild(th);
+      var tl = document.createElement("div"); tl.className = "tl"; tl.textContent = e.name; card.appendChild(tl);
+      var tb = document.createElement("div"); tb.className = "tb"; tb.textContent = taken[i] ? "taken" : (e.data.gun ? "comes armed" : "");
+      card.appendChild(tb);
+      card.addEventListener("click", function(){ if (taken[i]) return; charPick.idx = i; confirmCharPick(); });
+      host.appendChild(card);
+    });
+  }
+  function moveCharPick(d){
+    if (!charPick) return;
+    var c = levelChars(), taken = charsTaken(charPick.P), n = c.list.length, i = charPick.idx;
+    for (var k = 0; k < n; k++){ i = (i + d + n) % n; if (!taken[i]) break; }
+    charPick.idx = i; renderCharPicker(); sfx("tick");
+  }
+  function confirmCharPick(){
+    if (!charPick) return;
+    var P = charPick.P, idx = charPick.idx;
+    if (charsTaken(P)[idx]) return;
+    charPick = null;
+    wearLevelCharacter(P, idx);
+    sfx("place");
+    nextCharPick();
+  }
+  function closeCharPicker(clearQueue){
+    charPick = null; if (clearQueue) charPickQueue = [];
+    charPickOverlay.hidden = true;
+    if (charPickPausedIt){ charPickPausedIt = false; if (mode === "play"){ runner.enabled = true; updatePauseState(); } }
+  }
+  // the keys and the pad reach the picker while it is up
+  function charPickKey(code){
+    if (!charPick) return false;
+    var P = charPick.P;
+    if (P.keyboard){
+      if (code === "ArrowLeft" || code === "ArrowUp"){ moveCharPick(-1); return true; }
+      if (code === "ArrowRight" || code === "ArrowDown"){ moveCharPick(1); return true; }
+      if (code === "Enter" || code === "Space"){ confirmCharPick(); return true; }
+    } else if (P.keyboard2){
+      if (code === KEYS2.left || code === KEYS2.up){ moveCharPick(-1); return true; }
+      if (code === KEYS2.right || code === KEYS2.down){ moveCharPick(1); return true; }
+      if (code === KEYS2.jump){ confirmCharPick(); return true; }
+    }
+    return true;   // the picker owns the keyboard while it is up
+  }
   /* Leaving Play: everyone back beside the first player, bubbles popped. */
   function gatherPlayers(){
     if (players.length < 2) return;
@@ -6684,6 +6811,36 @@
     });
   }
   var charColor = localStorage.getItem("pg_char_color") || CHAR_COLORS[0];
+  /* ---- A character can come armed: `charGun` is a launcher of its own —
+     nothing, bullets, the missile, a ray, or one of My Projectiles
+     (`ammo`, the packed definition, so a character carries its shot) —
+     with the launcher's own speed, rate and shots, and how it flies.
+     Every spawn arms them with it (`armFromCharacter`). Carson: "the
+     option, while creating a custom character, to have them shoot a
+     custom projectile — do they spawn with the ability to shoot?" ---- */
+  var charGun = null;
+  try { charGun = normalizeCharGun(JSON.parse(localStorage.getItem("pg_char_gun") || "null")); } catch(e){ charGun = null; }
+  function persistCharGun(){ try { localStorage.setItem("pg_char_gun", JSON.stringify(charGun)); } catch(e){} }
+  function normalizeCharGun(g){
+    if (!g || typeof g !== "object" || !g.mode) return null;
+    var mode = ["bullet", "missile", "custom", "ray"].indexOf(g.mode) >= 0 ? g.mode : "bullet";
+    var out = { mode: mode, speed: g.speed != null && isFinite(+g.speed) ? Math.max(100, Math.min(2500, +g.speed)) : 900,
+                rate: g.rate != null && isFinite(+g.rate) ? Math.max(0.5, Math.min(20, +g.rate)) : 4,
+                shots: g.shots != null && isFinite(+g.shots) ? Math.max(0, Math.min(999, +g.shots | 0)) : 0,
+                pgrav: g.pgrav != null && isFinite(+g.pgrav) ? Math.max(0, Math.min(1, +g.pgrav)) : PROJ_DEFAULTS.grav,
+                plife: g.plife != null && isFinite(+g.plife) ? Math.max(0.2, Math.min(30, +g.plife)) : PROJ_DEFAULTS.life,
+                pbreaks: g.pbreaks != null ? !!g.pbreaks : PROJ_DEFAULTS.breaks, phurts: g.phurts != null ? !!g.phurts : PROJ_DEFAULTS.hurts,
+                ammo: null, ammoName: g.ammoName || null };
+    if (mode === "custom"){ if (g.ammo && typeof g.ammo === "object") out.ammo = packProjDef(normalizeProjDef(g.ammo)); else out.mode = "bullet"; }
+    return out;
+  }
+  function armFromCharacter(){
+    if (!charGun || !player){ return false; }
+    var def = charGun.mode === "custom" && charGun.ammo ? normalizeProjDef(charGun.ammo) : (charGun.mode === "missile" ? normalizeProjDef(MISSILE_DEF) : (charGun.mode === "bullet" ? BULLET_DEF : null));
+    playerGun = { from: "character", mode: charGun.mode, ammo: charGun.shots, left: charGun.shots, rate: charGun.rate, speed: charGun.speed, def: def, obj: null,
+                  flight: { grav: charGun.pgrav, life: charGun.plife, breaks: charGun.pbreaks, hurts: charGun.phurts } };
+    return true;
+  }
   var grounded = false;
   var facing = 1;
   /* ---- Grabbing, the LBP way ------------------------------------
@@ -6851,6 +7008,7 @@
   function charPoseId(){
     var stateId = "idle";
     if (grabConstraint) stateId = "swing";
+    else if (player && !flying && playerWetness() > 0.35) stateId = (input.left || input.right || input.up || input.down || Math.hypot(player.velocity.x, player.velocity.y) > 0.8) ? "swim" : "float";   // in the water: swimming, or treading it
     else if (player && !grounded && player.velocity.y < -1.2) stateId = "jump";
     else if (player && !grounded && player.velocity.y > 1.2) stateId = "fall";
     else if (sliding) stateId = "slide";
@@ -6928,11 +7086,11 @@
   var SLIDE_MS = 480, SLIDE_DECAY = 0.988;
   // the polygon a drawing makes, cached: a crouch rebuilds the body, and a
   // drawing of a hundred strokes is a hundred capsule unions
-  var charBodyCache = { key: null, poly: [] };
+  var charBodyCache = { key: null, src: null, poly: [] };
   function charBodyPoly(src, artW, artH){
     if (!src || !drawingHasArt(src)) return [];
-    var key = (src._rev || 0) + ":" + src.length + ":" + artW + "x" + artH + ":" + (src === charHit ? "hit" : "art");
-    if (charBodyCache.key !== key){ charBodyCache.key = key; charBodyCache.poly = drawingToPoly(src, artW, artH, 1.0); }
+    var key = (src._rev || 0) + ":" + src.length + ":" + artW + "x" + artH;
+    if (charBodyCache.key !== key || charBodyCache.src !== src){ charBodyCache.key = key; charBodyCache.src = src; charBodyCache.poly = drawingToPoly(src, artW, artH, 1.0); }   // the drawing itself is part of the key: several players, several drawings
     return charBodyCache.poly;
   }
   function buildPlayerBody(sp){
@@ -6948,9 +7106,15 @@
     // the drawn hitbox if there is one; otherwise the drawing itself — a
     // character drawn as a stick is a stick to the world, not the box
     // round it. Carson: "draw a massive diagonal line, the hitbox is huge"
-    var src = drawingHasArt(charHit) ? charHit : (charMode !== "preset" ? pickCharFrame("idle", 0) : null);
-    var poly = charBodyPoly(src, artW, artH);
-    if (poly.length && crouchK !== 1) poly = pgClean(pgScale(poly, 1, crouchK, 0, artH/2), 1.4);   // toward the feet
+    var src = drawingHasArt(charHit) ? charHit : (charMode !== "preset" ? pickCharFrame("idle", 0) : null), poly;
+    if (crouchK !== 1 && drawingHasArt(charHitCrouch)){
+      // a hitbox drawn for the crouch: in the squatter box, sat on the feet line
+      var ch = Math.round(artH * crouchK);
+      poly = pgClean(pgTranslate(charBodyPoly(charHitCrouch, artW, ch), 0, artH/2 - ch/2), 1.4);
+    } else {
+      poly = charBodyPoly(src, artW, artH);
+      if (poly.length && crouchK !== 1) poly = pgClean(pgScale(poly, 1, crouchK, 0, artH/2), 1.4);   // toward the feet
+    }
     if (poly.length){
       // the biggest island only — a body has to be one piece
       var best = 0, bestA = 0;
@@ -7024,6 +7188,7 @@
   }
   function setCharSize(sz){ if (CHAR_SIZES[sz]) setCharScale(CHAR_SIZES[sz].h / CHAR_BASE_H); }
   function setCharHit(strokes){ charHit = normalizeDrawing(strokes, 10, 14); persistCharHit(); respawnSameSpot(); }
+  function setCharHitCrouch(strokes){ charHitCrouch = normalizeDrawing(strokes, 10, 14); persistCharHitCrouch(); respawnSameSpot(); }
 
   function releaseRope(){
     if (grabConstraint){ World.remove(world, grabConstraint); grabConstraint = null; sfx("unrope"); }
@@ -7534,6 +7699,7 @@
   }
   function respawnPlayer(msg){
     if (msg) showToast(msg);
+    if (mode === "play" && charGun) armFromCharacter();   // born armed, every time
     if (me && me.bubble) unbubble();
     if (me) me.out = false;
     hazardSafeUntil = performance.now() + 900;
@@ -7727,6 +7893,16 @@
       return;
     }
     if (!padSeen){ padSeen = true; if (me.slot === 0) showToast("🎮 Controller connected — stick to walk, A jumps, X grabs, Y uses, Start is the menu."); }
+    if (charPick && charPick.P === me){
+      // choosing a character: the stick looks, A picks — nothing else
+      var pl = (gp.axes[0] || 0) < -0.5 || padButton(gp, 14), prr = (gp.axes[0] || 0) > 0.5 || padButton(gp, 15), pa = padButton(gp, 0);
+      if (pl && !padPrev.pickL) moveCharPick(-1);
+      if (prr && !padPrev.pickR) moveCharPick(1);
+      if (pa && !padPrev.jump) confirmCharPick();
+      padPrev.pickL = pl; padPrev.pickR = prr; padPrev.jump = pa;
+      for (var k2 in padHeld) padHeld[k2] = false; syncPadInput();
+      return;
+    }
     var ax = gp.axes[0] || 0, ay = gp.axes[1] || 0, dead = 0.3;
     var was = { left: padHeld.left, right: padHeld.right, up: padHeld.up, down: padHeld.down, sprint: padHeld.sprint, grab: padHeld.grab, fire: padHeld.fire };
     padHeld.left = ax < -dead || padButton(gp, 14);
@@ -7765,6 +7941,7 @@
   window.addEventListener("keydown", function(e){
     if (document.activeElement && document.activeElement.tagName === "INPUT") return;
     if (captureKeyBind(e)) return;           // Settings is waiting for a key to assign
+    if (charPick && !e.repeat && !e.ctrlKey && !e.metaKey){ if (charPickKey(e.code)) e.preventDefault(); return; }
     // While a full-screen surface is up it owns the keyboard — otherwise
     // typing in the character creator walks the player around behind it.
     if (!charEditorOverlay.hidden || !pauseOverlay.hidden){
@@ -8485,8 +8662,33 @@
   function applyWorldSettings(){
     engine.gravity.y = topdownNow() ? 0 : BASE_GRAVITY * worldNum("gravity");   // seen from above there is no down
   }
+  /* ---- Level characters. Carson: "when I'm making a level I should have
+     control over what type of characters people can be" — a hub lets
+     everyone be themselves; a single-player level can say "you must use
+     this character"; a four-player level can offer four of the author's
+     characters, each to one player, or let everyone pick the same one,
+     or pick from twenty. `worldSettings.chars`: `mode` — `any` (their
+     own), `fixed` (everyone is `list[0]`), `choose` (each player picks
+     from `list`; `unique`: a character taken by one player is out for
+     the others); `list` is copies of whole characters, so the level is
+     whole on its own. ---- */
+  function normalizeLevelChars(c){
+    var out = { mode: "any", list: [], unique: false };
+    if (!c || typeof c !== "object") return out;
+    if (c.mode === "fixed" || c.mode === "choose") out.mode = c.mode;
+    out.unique = !!c.unique;
+    (Array.isArray(c.list) ? c.list : []).slice(0, 24).forEach(function(e){
+      if (!e || typeof e !== "object" || !e.data || typeof e.data !== "object") return;
+      out.list.push({ id: typeof e.id === "string" ? e.id : "lc" + Math.random().toString(36).slice(2, 8), name: typeof e.name === "string" ? e.name.slice(0, 40) : "Character", data: JSON.parse(JSON.stringify(e.data)) });
+    });
+    if (!out.list.length && out.mode !== "any") out.mode = "any";
+    return out;
+  }
+  function levelChars(){ return worldSettings.chars || (worldSettings.chars = normalizeLevelChars(null)); }
+  function levelCharsMode(){ var c = levelChars(); return c.list.length ? c.mode : "any"; }
   function packWorldSettings(){
-    var w = {}; for (var k in WORLD_DEFAULTS) w[k] = worldSettings[k]; return w;
+    var w = {}; for (var k in WORLD_DEFAULTS){ var v = worldSettings[k]; w[k] = (v && typeof v === "object") ? JSON.parse(JSON.stringify(v)) : v; }   // a copy of the tune, the background, the characters — a snapshot must not share them
+    return w;
   }
   /* A level's drawn background: `{ id, name, art }` — art a studio
      drawing, a copy of the one in My Backgrounds so the level carries
@@ -8525,6 +8727,7 @@
     worldSettings.fallLine = w.fallLine != null && isFinite(+w.fallLine) ? Math.max(0, Math.min(WORLD_H, +w.fallLine)) : null;
     worldSettings.knockouts = w.knockouts != null && isFinite(+w.knockouts) ? Math.max(1, Math.min(99, +w.knockouts | 0)) : 3;
     worldSettings.charSize = w.charSize != null && isFinite(+w.charSize) ? Math.max(CHAR_SCALE_MIN, Math.min(CHAR_SCALE_MAX, +w.charSize)) : null;
+    worldSettings.chars = normalizeLevelChars(w.chars);
     worldSettings.music = normalizeMusic(w.music);
     musicStop();
     worldSettings.bg = normalizeBg(w.bg);
@@ -10603,7 +10806,7 @@
      shows only a quiet dot; there is nothing to aim, since grabbing is
      done by touching. ------------------------------------------------ */
   function anyOverlayOpen(){
-    return pmOpen || !pauseOverlay.hidden || !charEditorOverlay.hidden ||
+    return pmOpen || !pauseOverlay.hidden || !charEditorOverlay.hidden || !charPickOverlay.hidden ||
            !confirmOverlay.hidden || !loadOverlay.hidden || !nameOverlay.hidden;
   }
   function isMaterialTool(){ return !!matOf(currentTool) && !GADGET_TOOL_KIND[currentTool]; }
@@ -12368,6 +12571,7 @@
       if (worldSettings.fallLine != null) el.appendChild(sliderRow("Fall line", WORLD_H - worldSettings.fallLine, 0, WORLD_H, 20, function(v){ worldSettings.fallLine = WORLD_H - v; }, function(v){ return Math.round(v) + "px up from the bottom"; }));
       var fn = document.createElement("div"); fn.className = "noteText"; fn.textContent = "Falling past the fall line costs a life — a pit, or the edge of an arena. It draws as a red dashed line in Build."; el.appendChild(fn);
     }
+    renderLevelCharsRows(el);
     if (t.topdown){ var tn = document.createElement("div"); tn.className = "noteText"; tn.textContent = "The arrows or the stick walk in every direction; the character looks at the cursor (a pad's right stick). Water is a still pool; creatures chase every way; fans, movers, bolts and the rest work as they do."; el.appendChild(tn); }
     if (t.pvp){ var pn = document.createElement("div"); pn.className = "noteText"; pn.textContent = "More players: plug in a controller and press Start on it, or press U on the keyboard — up to four on one machine. Each player's knockouts and lives count on their own; the winner is named and the round starts over. Every flag is a start: put down checkpoints and each player begins at their own."; el.appendChild(pn); }
     if (t.hub){ var hn = document.createElement("div"); hn.className = "noteText"; hn.textContent = "No lives, no clock. My World is a hub; any level can be one."; el.appendChild(hn); }
@@ -12663,19 +12867,7 @@
       djRow.appendChild(b);
     });
     el.appendChild(djRow);
-    var csRow = document.createElement("div"); csRow.className = "segRow";
-    [[null, "Any size"], [1, "Small"], [2, "Medium"], [3, "Big"]].forEach(function(o){
-      var b = document.createElement("button");
-      b.textContent = o[1];
-      b.className = (worldSettings.charSize == null ? o[0] == null : (o[0] != null && Math.abs(worldSettings.charSize - o[0]) < 0.01)) ? "active" : "";
-      b.title = o[0] == null ? "The character is whatever size the player made it" : "In Play the character is this size, whatever the player made it";
-      b.addEventListener("click", function(){ worldSettings.charSize = o[0]; sfx("click"); renderPersonalMenu(); });
-      csRow.appendChild(b);
-    });
-    el.appendChild(csRow);
-    var csNote = document.createElement("div"); csNote.className = "noteText";
-    csNote.textContent = "The character's size in this level. Small is the old size, Medium twice that (the usual), Big three times. Play sets it; leaving Play puts the player's own size back.";
-    el.appendChild(csNote);
+
     el.appendChild(sliderRow("Grab reach", worldNum("grabReach"), 2, 120, 1, function(v){ worldSettings.grabReach = v; }, function(v){ return Math.round(v) + "px"; }));
     var gNote = document.createElement("div"); gNote.className = "noteText";
     gNote.textContent = "How far from the character's body a grabbable thing can be and still be caught. Small is LittleBigPlanet's touch-it-to-hold-it; bigger is more forgiving.";
@@ -12716,17 +12908,21 @@
   // stroke array, which is exactly what we want in a saved character.
   function currentCharacterData(){
     return JSON.parse(JSON.stringify({
-      mode: charMode, color: charColor, size: charSize, scale: charScale, hit: charHit,
+      mode: charMode, color: charColor, size: charSize, scale: charScale, hit: charHit, hitCrouch: charHitCrouch, gun: charGun,
       frameCounts: charFrameCounts, sprites: charSprites, fps: charFps
     }));
   }
-  function applyCharacterData(d){
+  /* The bound player wears this character. `forLevel`: a level's own
+     character, worn for the level only — nothing written to the device,
+     the size set as the level's (`setCharScale(v, true)`). */
+  function wearCharacterData(d, forLevel){
     if (!d) return;
     charMode = d.mode === "rig" ? "animated" : (d.mode || "preset");   // the rig mode is gone; its saves become animated
     if (d.color) charColor = d.color;
-    if (d.fps) ANIM_STATES.forEach(function(s){ if (typeof d.fps[s.id] === "number") charFps[s.id] = Math.max(1, Math.min(30, d.fps[s.id])); });
-    if (typeof d.scale === "number") setCharScale(d.scale); else if (d.size && CHAR_SIZES[d.size]) setCharSize(d.size);
-    if (d.hit !== undefined) setCharHit(d.hit || []);
+    if (!charFps || typeof charFps !== "object") charFps = {};
+    if (!charFrameCounts || typeof charFrameCounts !== "object") charFrameCounts = {};
+    if (!charSprites || typeof charSprites !== "object") charSprites = {};
+    ANIM_STATES.forEach(function(s){ charFps[s.id] = d.fps && typeof d.fps[s.id] === "number" ? Math.max(1, Math.min(30, d.fps[s.id])) : (s.id === "run" ? 8 : 2); });
     ANIM_STATES.forEach(function(s){
       var n = (d.frameCounts && d.frameCounts[s.id]) || s.frames;
       charFrameCounts[s.id] = Math.max(1, Math.min(CHAR_MAX_FRAMES, n));
@@ -12734,8 +12930,19 @@
       charSprites[s.id] = [];
       for (var i = 0; i < charFrameCounts[s.id]; i++) charSprites[s.id][i] = normalizeDrawing(src[i], 10, 14);
     });
+    charHit = normalizeDrawing(d.hit || [], 10, 14);
+    charHitCrouch = normalizeDrawing(d.hitCrouch || [], 10, 14);
+    charGun = normalizeCharGun(d.gun);
+    var sc = typeof d.scale === "number" ? Math.max(CHAR_SCALE_MIN, Math.min(CHAR_SCALE_MAX, d.scale)) : (d.size && CHAR_SIZES[d.size] ? CHAR_SIZES[d.size].h / CHAR_BASE_H : charScale);
+    if (Math.abs(sc - charScale) > 1e-6){ charScale = sc; if (!forLevel) localStorage.setItem("pg_char_scale", String(sc)); }
+    respawnSameSpot();
+    if (mode === "play" && charGun) armFromCharacter(); else if (playerGun && playerGun.from === "character") disarmPlayer();
+  }
+  function applyCharacterData(d){
+    if (!d) return;
+    wearCharacterData(d, false);
     localStorage.setItem("pg_char_color", charColor);
-    persistCharMode(); persistCharFrameCounts(); persistCharSprites(); persistCharFps();
+    persistCharMode(); persistCharFrameCounts(); persistCharSprites(); persistCharFps(); persistCharHit(); persistCharHitCrouch(); persistCharGun();
   }
   function saveCurrentCharacter(){
     var data = currentCharacterData();
@@ -12790,29 +12997,32 @@
   // -- the subject --
   var ceSubject = null;
   var CHAR_STEP_SIZE = { id:"size", label:"Size", emoji:"📏", size:true }, CHAR_STEP_HIT = { id:"hitbox", label:"Hitbox", emoji:"🧱", mask:true, color:"#4FA9D6" };
+  var CHAR_STEP_HIT_CROUCH = { id:"hitboxCrouch", label:"Crouch hitbox", emoji:"🧎", mask:true, color:"#4FA9D6" };
   function ceCharacterSubject(){
     var sub = {
       kind: "character", title: "✏️ Character Creator",
       // first the size, then the look, then the hitbox — Carson's order
-      states: function(){ return [CHAR_STEP_SIZE].concat(charMode === "animated" ? ANIM_STATES : [ANIM_STATES[0]]).concat([CHAR_STEP_HIT]); },
+      states: function(){ return [CHAR_STEP_SIZE].concat(charMode === "animated" ? ANIM_STATES : [ANIM_STATES[0]]).concat([CHAR_STEP_HIT, CHAR_STEP_HIT_CROUCH]); },
       isSize: function(st){ return st === "size"; },
-      isMask: function(st){ return st === "hitbox"; },
-      maskColor: function(st){ return st === "hitbox" ? CHAR_STEP_HIT.color : null; },
+      isMask: function(st){ return st === "hitbox" || st === "hitboxCrouch"; },
+      maskColor: function(st){ return st === "hitbox" || st === "hitboxCrouch" ? CHAR_STEP_HIT.color : null; },
       frames: function(st){
         if (st === "size") return [blankDrawing()];
         if (st === "hitbox") return [charHit];
+        if (st === "hitboxCrouch") return [charHitCrouch];
         return charSprites[st];
       },
-      setFrame: function(st, d){ if (st === "hitbox") charHit = d; else if (st !== "size") charSprites[st][pmEditFrame] = d; },
+      setFrame: function(st, d){ if (st === "hitbox") charHit = d; else if (st === "hitboxCrouch") charHitCrouch = d; else if (st !== "size") charSprites[st][pmEditFrame] = d; },
       count: function(st){ return sub.frames(st).length; },
-      setCount: function(st, n){ if (st !== "size" && st !== "hitbox") setStateFrameCount(st, n); },
+      setCount: function(st, n){ if (st !== "size" && st !== "hitbox" && st !== "hitboxCrouch") setStateFrameCount(st, n); },
       fps: function(st){ return charFps[st]; },
       setFps: function(st, v){ charFps[st] = v; persistCharFps(); },
-      aspect: function(){ return (pmEditState === "crouch" || pmEditState === "slide") ? CHAR_ASPECT / CROUCH_K : CHAR_ASPECT; },   // the crouched box is squatter
-      persist: function(){ persistCharSprites(); persistCharFrameCounts(); persistCharFps(); persistCharHit(); },
+      aspect: function(){ return (pmEditState === "crouch" || pmEditState === "slide" || pmEditState === "hitboxCrouch") ? CHAR_ASPECT / CROUCH_K : CHAR_ASPECT; },   // the crouched box is squatter
+      persist: function(){ persistCharSprites(); persistCharFrameCounts(); persistCharFps(); persistCharHit(); persistCharHitCrouch(); },
       hint: function(){
         if (pmEditState === "size") return "How big you are, in your level as Play shows it. Slide the height and watch.";
         if (pmEditState === "hitbox") return "Draw your hitbox — the part of you that touches things. Leave it empty and your drawing itself is the hitbox (or the rounded box, with nothing drawn).";
+        if (pmEditState === "hitboxCrouch") return "Your hitbox while crouching, in the squatter box. Leave it empty and the standing one is squashed down.";
         return charMode === "simple" ? "One look for your character." : "A pose per state, as many frames as you like. Ctrl+Z undoes, Ctrl+Y redoes.";
       },
       modes: function(){ return [["simple","Simple"],["animated","Animated"]]; },
@@ -12821,12 +13031,13 @@
       next: function(){
         var ids = sub.states().map(function(st){ return st.id; }), i = ids.indexOf(pmEditState);
         if (pmEditState === "size") return ids[1];
-        if (pmEditState === "hitbox") return null;
+        if (pmEditState === "hitbox") return "hitboxCrouch";
+        if (pmEditState === "hitboxCrouch") return null;
         return "hitbox";
       },
       backdrop: function(c2, w, h){
-        if (pmEditState !== "hitbox") return;
-        var idle = pickCharFrame("idle", 0);
+        if (pmEditState !== "hitbox" && pmEditState !== "hitboxCrouch") return;
+        var idle = pmEditState === "hitboxCrouch" ? (pickCharFrame("crouch", 0) || pickCharFrame("idle", 0)) : pickCharFrame("idle", 0);
         if (idle){ c2.save(); c2.globalAlpha = 0.45; c2.drawImage(drawingCanvas(idle, w, h), 0, 0); c2.restore(); }
       },
       leftPanel: function(el){
@@ -12887,8 +13098,15 @@
         if (drawingHasArt(charHit) && pmEditState !== "size"){ pctx.save(); pctx.globalAlpha = 0.5; pctx.drawImage(drawingCanvas(charHit, pw*2, ph*2), x0, y0, pw, ph); pctx.restore(); }
         pctx.restore();
       },
-      useDrawingAsHitbox: function(){ var idle = pickCharFrame("idle", 0); if (!idle) return false; charHit = idle.map(function(st){ var c = JSON.parse(JSON.stringify(st)); c.c = CHAR_STEP_HIT.color; return c; }); touchDrawing(charHit); return true; },
-      onClose: function(){ persistCharHit(); respawnSameSpot(); }
+      useDrawingAsHitbox: function(){
+        var crouchStep = pmEditState === "hitboxCrouch";
+        var src = crouchStep ? (pickCharFrame("crouch", 0) || pickCharFrame("idle", 0)) : pickCharFrame("idle", 0);
+        if (!src) return false;
+        var copy = src.map(function(st){ var c = JSON.parse(JSON.stringify(st)); c.c = CHAR_STEP_HIT.color; return c; });
+        if (crouchStep){ charHitCrouch = copy; touchDrawing(charHitCrouch); } else { charHit = copy; touchDrawing(charHit); }
+        return true;
+      },
+      onClose: function(){ persistCharHit(); persistCharHitCrouch(); respawnSameSpot(); }
     };
     return sub;
   }
@@ -13687,10 +13905,11 @@
     cePlayLast = performance.now(); requestAnimationFrame(ceTick);
   }
   function openCharEditor(){
+    if (me && me.ownChar){ showToast("You are wearing one of the level's characters — put your own back first (World → Level, or leave Play)."); sfx("deny"); return; }
     if (charMode === "preset"){ charMode = "simple"; persistCharMode(); }
     // a character with nothing drawn yet starts at the first step, the size; otherwise the studio opens where it was
     var fresh = !Object.keys(charSprites).some(function(st){ return (charSprites[st] || []).some(drawingHasArt); });
-    if (fresh || pmEditState === "hitbox"){ pmEditState = "size"; pmEditFrame = 0; }
+    if (fresh || pmEditState === "hitbox" || pmEditState === "hitboxCrouch"){ pmEditState = "size"; pmEditFrame = 0; }
     ceOpenWith(ceCharacterSubject());
   }
   function closeCharEditor(){
@@ -13845,7 +14064,7 @@
       var mn = document.createElement("div"); mn.className = "noteText";
       mn.textContent = "One drawing. Paint the area; the eraser takes it back off.";
       ceLeftEl.appendChild(mn);
-      if (pmEditState === "hitbox" && ceSubject.useDrawingAsHitbox){
+      if ((pmEditState === "hitbox" || pmEditState === "hitboxCrouch") && ceSubject.useDrawingAsHitbox){
         // the exact shape of what was drawn, in one click
         var ub = ceBtn("✨ Use my drawing as the hitbox", "", function(){
           ceBeginChange();
@@ -14027,8 +14246,135 @@
 
   // ---- the Character tab in the personal menu: settings + a door
   //      into the full-screen studio ----
+  /* The launcher a character comes with: none, or bullets, the missile,
+     a ray, or one of My Projectiles — with speed, shots a second, how
+     many shots, and how it flies. Changes are worn and kept at once. */
+  function renderCharGunRows(el){
+    var gh = document.createElement("h3"); gh.textContent = "Launcher"; el.appendChild(gh);
+    var note = document.createElement("div"); note.className = "noteText";
+    note.textContent = charGun ? "This character spawns armed, in every level (a Versus level makes the shots count)." : "Nothing in hand — a launcher on the level can still arm you.";
+    el.appendChild(note);
+    var setGun = function(g){ charGun = normalizeCharGun(g); persistCharGun(); if (mode === "play"){ if (charGun) armFromCharacter(); else if (playerGun && playerGun.from === "character") disarmPlayer(); } renderPersonalMenu(); sfx("tick"); };
+    var row = document.createElement("div"); row.className = "segRow"; row.style.flexWrap = "wrap";
+    var base = function(){ return charGun ? JSON.parse(JSON.stringify(charGun)) : {}; };
+    [["none", "Nothing"], ["bullet", "• Bullets"], ["missile", "🚀 Missile"], ["ray", "⚡ A ray"]].forEach(function(o){
+      var b = document.createElement("button"); b.textContent = o[1];
+      var on = o[0] === "none" ? !charGun : (!!charGun && charGun.mode === o[0]);
+      b.className = on ? "active" : "";
+      b.addEventListener("click", function(){ if (o[0] === "none") setGun(null); else { var g = base(); g.mode = o[0]; setGun(g); } });
+      row.appendChild(b);
+    });
+    (mySkins.projectile || []).forEach(function(pd){
+      var b = document.createElement("button"); b.textContent = "🚀 " + pd.name;
+      b.className = charGun && charGun.mode === "custom" && charGun.ammoName === pd.name ? "active" : "";
+      b.addEventListener("click", function(){ var g = base(); g.mode = "custom"; g.ammo = pd.data; g.ammoName = pd.name; setGun(g); });
+      row.appendChild(b);
+    });
+    el.appendChild(row);
+    if (!charGun) return;
+    var keep = function(){ persistCharGun(); if (mode === "play" && playerGun && playerGun.from === "character"){ var left = playerGun.left; armFromCharacter(); if (charGun.shots > 0) playerGun.left = Math.min(left, charGun.shots); } };
+    el.appendChild(sliderRow("Speed", charGun.speed, 100, 2500, 10, function(v){ charGun.speed = v; keep(); }, function(v){ return Math.round(v) + " px/s"; }));
+    el.appendChild(sliderRow("Shots a second", charGun.rate, 0.5, 20, 0.5, function(v){ charGun.rate = v; keep(); }, function(v){ return (+v).toFixed(1); }));
+    el.appendChild(sliderRow("Shots", charGun.shots, 0, 200, 1, function(v){ charGun.shots = Math.round(v); keep(); }, function(v){ return v <= 0 ? "no end" : Math.round(v) + ""; }));
+    if (charGun.mode !== "ray"){
+      el.appendChild(sliderRow("Gravity on the shot", charGun.pgrav, 0, 1, 0.05, function(v){ charGun.pgrav = v; keep(); }, function(v){ return v <= 0.01 ? "none — straight" : (v >= 0.99 ? "all of it" : Math.round(v * 100) + "%"); }));
+      el.appendChild(sliderRow("A shot lives for", charGun.plife, 0.2, 30, 0.1, function(v){ charGun.plife = v; keep(); }, function(v){ return (+v).toFixed(1) + "s"; }));
+      var fr = document.createElement("div"); fr.className = "segRow";
+      var bb = document.createElement("button"); bb.textContent = charGun.pbreaks ? "💥 Breaks on the first hit" : "🏓 Bounces about"; bb.className = charGun.pbreaks ? "active" : "";
+      bb.addEventListener("click", function(){ charGun.pbreaks = !charGun.pbreaks; keep(); renderPersonalMenu(); sfx("tick"); });
+      var hb = document.createElement("button"); hb.textContent = charGun.phurts ? "☠ Hurts creatures" : "🕊 Harmless to creatures"; hb.className = charGun.phurts ? "active" : "";
+      hb.addEventListener("click", function(){ charGun.phurts = !charGun.phurts; keep(); renderPersonalMenu(); sfx("tick"); });
+      fr.appendChild(bb); fr.appendChild(hb); el.appendChild(fr);
+    }
+  }
+  function renderLevelCharsRows(el){
+    var c = levelChars();
+    var h = document.createElement("h3"); h.textContent = "Characters"; el.appendChild(h);
+    var modeRow = document.createElement("div"); modeRow.className = "segRow"; modeRow.style.flexWrap = "wrap";
+    [["any", "Their own"], ["fixed", "Must use one of mine"], ["choose", "Pick from mine"]].forEach(function(o){
+      var b = document.createElement("button"); b.textContent = o[1];
+      b.className = c.mode === o[0] ? "active" : "";
+      b.title = o[0] === "any" ? "Everyone plays as the character they made" : (o[0] === "fixed" ? "Everyone plays as the first character on the list" : "Each player picks one from the list when the level starts");
+      b.addEventListener("click", function(){ c.mode = o[0]; sfx("click"); renderPersonalMenu(); });
+      modeRow.appendChild(b);
+    });
+    el.appendChild(modeRow);
+    var note = document.createElement("div"); note.className = "noteText";
+    note.textContent = c.mode === "any" ? "A hub, or any level where people should be themselves." :
+      (c.mode === "fixed" ? "The first character on the list is who everyone plays as — a level built round one character." :
+      "Each player chooses when the level starts. " + (c.unique ? "A character taken by one player is out for the others." : "Two players may pick the same character."));
+    el.appendChild(note);
+    if (c.mode === "choose"){
+      var uq = document.createElement("div"); uq.className = "segRow";
+      [[false, "Anyone can pick the same"], [true, "One player each"]].forEach(function(o){
+        var b = document.createElement("button"); b.textContent = o[1]; b.className = c.unique === o[0] ? "active" : "";
+        b.addEventListener("click", function(){ c.unique = o[0]; sfx("click"); renderPersonalMenu(); });
+        uq.appendChild(b);
+      });
+      el.appendChild(uq);
+    }
+    // the level's own characters
+    var lh = document.createElement("div"); lh.className = "noteText"; lh.textContent = c.list.length ? "This level's characters (copies — the level carries them):" : "No characters on the list yet. Add the one you are wearing, or one from My Characters.";
+    el.appendChild(lh);
+    c.list.forEach(function(e, i){
+      var r = document.createElement("div"); r.className = "myCharRow";
+      var th = charThumbCanvas(e.data, 28, 36); th.style.flex = "0 0 auto"; r.appendChild(th);
+      var nm = document.createElement("div"); nm.className = "nm"; nm.textContent = (c.mode === "fixed" && i === 0 ? "★ " : "") + e.name;
+      var wear = document.createElement("button"); wear.className = "btn tiny"; wear.textContent = "Try on";
+      wear.title = "Wear it now, to see it (your own comes back with Play)";
+      wear.addEventListener("click", function(){ if (!me.ownChar) me.ownChar = currentCharacterData(); wearCharacterData(e.data, true); showToast("Wearing '" + e.name + "' — leaving Play puts your own back."); sfx("tick"); });
+      var up = document.createElement("button"); up.className = "btn tiny"; up.textContent = "▲"; up.title = "Move it up the list (the first is the one everyone gets when they must use one)";
+      up.disabled = i === 0;
+      up.addEventListener("click", function(){ c.list.splice(i - 1, 0, c.list.splice(i, 1)[0]); renderPersonalMenu(); sfx("tick"); });
+      var del = document.createElement("button"); del.className = "btn tiny red"; del.textContent = "✕";
+      del.addEventListener("click", function(){ c.list.splice(i, 1); if (!c.list.length) c.mode = "any"; renderPersonalMenu(); sfx("delete"); });
+      r.appendChild(nm); r.appendChild(wear); r.appendChild(up); r.appendChild(del);
+      el.appendChild(r);
+    });
+    if (me && me.ownChar && mode === "build"){
+      var backB = document.createElement("button"); backB.className = "btn small"; backB.textContent = "↩ Back to my own character";
+      backB.addEventListener("click", function(){ var own = me.ownChar; me.ownChar = null; me.levelChar = null; wearCharacterData(own, true); renderPersonalMenu(); sfx("tick"); });
+      el.appendChild(backB);
+    }
+    var addRow = document.createElement("div"); addRow.className = "segRow"; addRow.style.flexWrap = "wrap";
+    var addNow = document.createElement("button"); addNow.textContent = "＋ The one I am wearing";
+    addNow.addEventListener("click", function(){
+      var data = me.ownChar ? JSON.parse(JSON.stringify(me.ownChar)) : currentCharacterData();
+      askName("Name this character for the level", "Character " + (c.list.length + 1), function(name){ c.list.push({ id: "lc" + Date.now(), name: name || "Character", data: data }); if (c.mode === "any") c.mode = "fixed"; renderPersonalMenu(); sfx("place"); });
+    });
+    addRow.appendChild(addNow);
+    myCharacters.forEach(function(mc){
+      var b = document.createElement("button"); b.textContent = "＋ " + mc.name;
+      b.addEventListener("click", function(){ c.list.push({ id: "lc" + Date.now(), name: mc.name, data: JSON.parse(JSON.stringify(mc.data)) }); if (c.mode === "any") c.mode = "fixed"; renderPersonalMenu(); sfx("place"); });
+      addRow.appendChild(b);
+    });
+    el.appendChild(addRow);
+    var an = document.createElement("div"); an.className = "noteText";
+    an.textContent = "Make characters in the creator (Character → Open Character Creator) and save them to My Characters; a character can come armed with a launcher of its own.";
+    el.appendChild(an);
+  }
+  /* a little picture of a character: its idle drawing, or its colour */
+  function charThumbCanvas(d, w, h){
+    var cv = document.createElement("canvas"); cv.width = w * 2; cv.height = h * 2; cv.style.width = w + "px"; cv.style.height = h + "px";
+    var c2 = cv.getContext("2d");
+    var idle = d && d.sprites && Array.isArray(d.sprites.idle) ? d.sprites.idle[0] : null;
+    if (idle && drawingHasArt(idle)){ var dc = drawingCanvas(normalizeDrawing(idle, 10, 14), w * 2, h * 2); c2.drawImage(dc, 0, 0); }
+    else {
+      c2.fillStyle = (d && d.color) || CHAR_COLORS[0];
+      c2.beginPath(); if (c2.roundRect) c2.roundRect(w * 0.2, h * 0.2, w * 1.6, h * 1.6, 10); else c2.rect(w * 0.2, h * 0.2, w * 1.6, h * 1.6); c2.fill();
+      c2.lineWidth = 3; c2.strokeStyle = "#2B1B12"; c2.stroke();
+      c2.fillStyle = "#fff"; [[-0.3, -0.25], [0.3, -0.25]].forEach(function(e){ c2.beginPath(); c2.ellipse(w + e[0] * w, h + e[1] * h, w * 0.18, h * 0.16, 0, 0, Math.PI * 2); c2.fill(); });
+    }
+    return cv;
+  }
   function renderCharacterTab(el){
     var h = document.createElement("h3"); h.textContent = "Character"; el.appendChild(h);
+    if (me && me.ownChar){
+      var wn = document.createElement("div"); wn.className = "noteText";
+      wn.textContent = "You are wearing one of this level's characters. Your own is kept safe — it comes back when you leave Play, or with the button under World → Level.";
+      el.appendChild(wn);
+      return;
+    }
 
     el.appendChild(sliderRow("Size", charScale, CHAR_SCALE_MIN, CHAR_SCALE_MAX, 0.05, function(v){ setCharScale(v); },
       function(v){ return Math.round(CHAR_BASE_H * v) + "px tall"; }));
@@ -14075,6 +14421,7 @@
       : "The creator opens full screen with a proper paintbrush, onion skinning and your saved characters.";
     el.appendChild(note);
 
+    renderCharGunRows(el);
     if (myCharacters.length){
       var mh = document.createElement("h3"); mh.textContent = "My Characters"; el.appendChild(mh);
       myCharacters.forEach(function(c){
@@ -17510,6 +17857,7 @@
     } else if (mode === "play"){
       musicStop();
       if (playScaleHold != null){ var backTo = playScaleHold; playScaleHold = null; setCharScale(backTo, true); forEachPlayer(function(P, i){ if (i) setCharScale(backTo, true); }); }
+      restoreOwnCharacters();
       restoreFull(buildFrozen);
       gatherPlayers();
     }
@@ -17558,6 +17906,7 @@
       if (worldSettings.charSize != null && Math.abs(worldSettings.charSize - charScale) > 1e-6){ if (playScaleHold == null) playScaleHold = charScale; setCharScale(worldSettings.charSize, true); }
       if (worldSettings.charSize != null) forEachPlayer(function(P, i){ if (i) setCharScale(worldSettings.charSize, true); });
       respawnAllPlayers();
+      levelCharactersOnPlay();
       if (worldSettings.music && worldSettings.music.on && musicHas(worldSettings.music)) musicStart("play"); else musicStop();
       if (playFrom){
         // from here, not from the start: dropped in at the spot, on whatever is under it

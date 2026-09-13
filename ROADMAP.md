@@ -484,6 +484,13 @@ picker.
 - Creating a level makes a door appear for it.
 - Before entering, choose level options — **"small, medium or large characters
   only?"** and other pertinent creation settings. All toggleable later.
+  Superseded 2026-09-12 by **level characters** (Carson): a level says who
+  players can be — their own, one character of the author's that everyone
+  must use, or a pick from the author's list (one each, or the same allowed).
+  DONE: World → Level → Characters; the level carries copies; a picker at
+  the start of Play (mouse, keys, or a pad). Also done the same day: a
+  character can come armed with a launcher of its own (Character →
+  Launcher); a hitbox drawn for the crouch; Swim and In-water poses.
 - Customising the door's own appearance comes later.
 
 ### Tutorial mode — DONE 2026-09-12 (as tips)

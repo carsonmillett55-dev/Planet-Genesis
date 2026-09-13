@@ -23,7 +23,7 @@ done on purpose, with the suites re-run, not as a drive-by tidy.
 | `geom.js` | The polygon geometry core. Also inlined verbatim inside the HTML — see the hazard below. |
 | `pc.min.js`, `earcut.min.js`, `matter.min.js` | Vendored libraries, kept for the test harness and for re-inlining. |
 | `mkprev.py` | Builds `preview.html`: swaps the Matter CDN for the local copy, strips web fonts, appends the `window.__pg` test hook. |
-| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` `tversus.js` `ttopdown.js` `tcoaster.js` | Playwright suites, 1350 checks between them. |
+| `regress.js` `tsel.js` `tlayer.js` `tmat.js` `tlight.js` `tctx.js` `tmenu.js` `tbolt.js` `tgadget.js` `tlink.js` `tgrab.js` `tjump.js` `tcam.js` `tmover.js` `tworld.js` `tcreature.js` `twater.js` `tstudio.js` `tskins.js` `tfill.js` `tfan.js` `tstickers.js` `tlogic.js` `tproj.js` `tui.js` `tgame.js` `tplayers.js` `tversus.js` `ttopdown.js` `tcoaster.js` `tchars.js` | Playwright suites, 1388 checks between them. |
 | `tenv.js` | Finds the machine's Chrome and resolves `preview.html`. Every suite goes through it. |
 | `checkgeom.js` | Verifies `geom.js` still matches the copy inlined in the HTML. |
 | `level.json` | Carson's real level. The perf runs measure against this, not a synthetic one. |
@@ -42,7 +42,7 @@ Then:
 
 ```
 python mkprev.py           # regenerate preview.html after ANY edit to the HTML
-npm test                   # all 1350 checks + checkgeom, in order
+npm test                   # all 1388 checks + checkgeom, in order
 npm run perf               # migration and frame time on level.json
 ```
 
@@ -78,6 +78,7 @@ node tplayers.js           # 43 — local players: a second pad joins on Start, 
 node tversus.js            # 34 — Versus: players collide (one on the other's head), the camera frames everyone, a launcher's shot is a knockout credited to the shooter, the HUD chips, the winner named and a new round, lives putting a player out, a hazard for nobody's credit, an adventure's shot only splatting
 node ttopdown.js           # 27 — Top-down: no gravity, a disc of a body, the arrows every way and no jump, looking at the cursor, a shove that slides and stops, water a still pool, a creature chasing down the screen, gravity back in an adventure, saved
 node tcoaster.js           # 34 — the rollercoaster: the track tool draws a line (no object), the coaster waits at the start, F rides, it runs to the end and stops, Space hops off, it glides back; four seats coupled along the rail and the pace; a drawn seat, the box, the level file, Del and undo; two riders in two seats
+node tchars.js             # 38 — characters: the Swim and In-water poses; a hitbox drawn for the crouch; a character that comes armed (fires, and is re-armed on a respawn); a level's own characters — everyone must use one (a joiner too, Build gives your own back, the file carries them), pick from mine one player each (the picker, arrows/Enter, the stick/A, a taken one out), the same one allowed, their own
 node tgame.js              # 87 — the speech bubble, the destroyer, the sound, the gates (AND, OR, XOR, NOT, toggle), save/load; a saved object's gadgets and wires placed, emitted and fired, a drawn creature out of an emitter; the rocket, the speed cap and breaking apart, being squashed
 node checkgeom.js          # geom.js vs the inlined copy
 ```
@@ -2579,6 +2580,83 @@ from either. A pad unplugged clears what it held. A toast the first time
 one is seen. `mkprev.py` rewrites the `getGamepads` line so a suite can
 plant `window.__pgFakePad` — an object shaped like a Gamepad — and the
 shipping file never reads it.
+
+## Characters: poses, the crouch hitbox, a launcher of their own
+
+- **Swimming.** Two more poses in `ANIM_STATES`: `swim` (two frames,
+  🏊) and `float` ("In water", 🫧). `charPoseId` picks them when the
+  character is in the water (`playerWetness() > 0.35`, not flying):
+  `swim` while a direction is held or they are moving, `float` still.
+  Undrawn, they fall back to Idle as every pose does.
+- **A hitbox for the crouch.** `charHitCrouch` (`pg_char_hit_crouch`,
+  `hitCrouch` in the character data), drawn on the studio's **Crouch
+  hitbox** step (`CHAR_STEP_HIT_CROUCH`, after Hitbox, the squatter box
+  — `aspect()` — with the Crouch pose faint behind it, ✨ copies the
+  Crouch pose). `buildPlayerBody` with `crouchK !== 1` and one drawn
+  takes it over the crouched box (`charBodyPoly(charHitCrouch, artW,
+  artH × crouchK)`, moved down to sit on the feet line) instead of
+  squashing the standing one. `charBodyPoly`'s cache is keyed by the
+  drawing object as well as its revision — several players, several
+  drawings.
+- **A launcher of their own.** `charGun` (`pg_char_gun`, `gun` in the
+  data; `normalizeCharGun`): `mode` bullet / missile / ray / custom
+  (`ammo`, the packed projectile definition, `ammoName`), `speed`,
+  `rate`, `shots` (0 no end), and how it flies (`pgrav`, `plife`,
+  `pbreaks`, `phurts`). Character → Launcher (`renderCharGunRows`):
+  Nothing / Bullets / Missile / A ray / each of My Projectiles, then
+  the sliders. `armFromCharacter()` builds a `playerGun` from it
+  (`from: "character"`) on **every spawn** in Play (`respawnPlayer`,
+  before the position) and when a joiner arrives; taking it off
+  disarms a character-armed player, a launcher on the level still arms
+  anyone. Carson: "do they spawn with the ability to shoot?" — yes.
+- `charHitCrouch` and `charGun` ride the player struct (`FIELDS`).
+  `wearCharacterData(d, forLevel)` is the one way a bound player takes
+  on a character (`applyCharacterData` = wear + persist); `forLevel`
+  writes nothing to the device.
+
+## Level characters
+
+Carson: "instead of small, medium or big, let people build their own
+characters and choose … in a hub I probably won't restrict … in a
+single-player level: player must use this custom character … for a
+four-player level let each person choose one of my four … locking
+them, or (smash-bros style) let people choose the same, or pick from
+twenty". `worldSettings.chars = { mode, list, unique }`
+(`normalizeLevelChars`; in `WORLD_DEFAULTS`, so the file and every
+snapshot carry it — `resetWorldSettings` and `packWorldSettings` now
+copy object-valued settings rather than share them):
+
+- `mode` **any** — everyone is their own character; **fixed** —
+  everyone is `list[0]`; **choose** — each player picks from `list`
+  when Play starts (and when they join); `unique` — one player each.
+- `list` — `{ id, name, data }`, whole copies of characters (a
+  character can come armed), so the level is whole on its own. World →
+  Level → Characters (`renderLevelCharsRows`): the mode, the one-each
+  toggle, the list with a thumbnail (`charThumbCanvas`: the Idle
+  drawing or the colour), **Try on** (worn in Build, `me.ownChar`
+  kept; **Back to my own character** appears), ▲ (the first is the
+  fixed one), ✕; **＋ The one I am wearing** (named) and ＋ each of My
+  Characters. The old Any size / Small / Medium / Big row is gone;
+  `charSize` in an older file is still honoured.
+- **In Play** (`levelCharactersOnPlay`, after `respawnAllPlayers`;
+  `levelCharacterFor(P)` for a joiner): `wearLevelCharacter(P, i)` —
+  `P.ownChar = currentCharacterData()` the first time, `P.levelChar =
+  i`, `wearCharacterData(list[i].data, true)`. Leaving Play
+  `restoreOwnCharacters`. Trying one on locks the creator and the
+  Character page (they edit *your* character; the level's copy is
+  worn in your globals, so a persist would overwrite yours).
+- **The picker** (`#charPickOverlay`; `charPick = { P, idx }`,
+  `charPickQueue`, one player at a time — `queueCharPick`,
+  `nextCharPick`): a `typeCard` per character with its thumbnail,
+  "taken" (`charsTaken`, when `unique`) greyed and skipped; the world
+  holds still while it is up (`charPickPausedIt`). The keyboard player
+  clicks, or arrows and Enter (`charPickKey`, first in the keydown
+  handler — the picker owns the keyboard); a pad player's stick looks
+  and A picks (`pollPad`, before anything else, the held keys dropped);
+  the keyboard player two J/L and U. A player who leaves mid-pick is
+  skipped. Hooks: `charData`, `wearChar`, `charGun`, `poseId`,
+  `hitCrouch`, `playerBox`, `levelChars`, `addLevelChar`, `pick`,
+  `wearing`. `tchars.js`.
 
 ## Level types
 
